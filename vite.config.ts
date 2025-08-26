@@ -5,6 +5,43 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
 	plugins: [tailwindcss(), sveltekit(), devtoolsJson()],
+	optimizeDeps: {
+		exclude: [
+			'codemirror',
+			'@codemirror/view',
+			'@codemirror/state',
+			'@codemirror/commands',
+			'@codemirror/search',
+			'@codemirror/autocomplete',
+			'@codemirror/lint',
+			'@codemirror/lang-javascript',
+			'@codemirror/lang-python',
+			'@codemirror/lang-html',
+			'@codemirror/lang-css',
+			'@codemirror/lang-json',
+			'@codemirror/lang-markdown',
+			'@codemirror/theme-one-dark',
+			'@replit/codemirror-lang-svelte'
+		]
+	},
+	ssr: {
+		noExternal: [
+			'codemirror',
+			'@codemirror/view',
+			'@codemirror/state',
+			'@codemirror/commands',
+			'@codemirror/search',
+			'@codemirror/autocomplete',
+			'@codemirror/lint',
+			'@codemirror/lang-javascript',
+			'@codemirror/lang-python',
+			'@codemirror/lang-html',
+			'@codemirror/lang-css',
+			'@codemirror/lang-json',
+			'@codemirror/lang-markdown',
+			'@codemirror/theme-one-dark'
+		]
+	},
 	test: {
 		expect: { requireAssertions: true },
 		projects: [
