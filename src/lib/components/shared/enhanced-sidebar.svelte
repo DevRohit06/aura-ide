@@ -22,7 +22,8 @@
 	import { Badge } from '$lib/components/ui/badge/index.js';
 
 	// File icon utilities
-	import { getFileIcon, getDirectoryIcon, getFileColor } from '$lib/utils/file-icons.js';
+	import { getDirectoryIcon, getFileColor } from '$lib/utils/file-icons.js';
+	import { getFileIcon } from '$lib/components/editor';
 
 	// Icons
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
@@ -509,7 +510,7 @@
 				{:else}
 					{@const hasFileChanges = hasChanges(item.id)}
 					{@const changeType = gitChanges[item.name as keyof typeof gitChanges]}
-
+					{@const FileIcon = getFileIcon(item.name)}
 					<button
 						class="group flex w-full items-center px-2 py-1 text-left transition-colors hover:bg-accent hover:text-accent-foreground"
 						class:bg-accent={selectedItem === item.id}
@@ -519,7 +520,7 @@
 						ondragstart={(e) => handleDragStart(e, item)}
 					>
 						<div class="flex min-w-0 flex-1 items-center">
-							<Icon icon={getFileIcon(item.name)} class="mr-2 h-4 w-4" />
+							<Icon icon={FileIcon} size={14} class="mr-2 shrink-0" style="color: #3b82f6" />
 							<span
 								class="truncate text-sm"
 								class:text-green-400={changeType === 'A'}
