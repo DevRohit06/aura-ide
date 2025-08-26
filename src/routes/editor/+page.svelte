@@ -24,6 +24,7 @@
 	// Icons
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import LayoutIcon from '@lucide/svelte/icons/layout';
+	import ChatSidebar from '@/components/chat/chat-sidebar.svelte';
 
 	// Enhanced sidebar state
 	let useEnhancedSidebar = $state(false);
@@ -67,6 +68,10 @@
 				</div>
 			{/if}
 			<!-- </Sidebar.Inset> -->
+		</Resizable.Pane>
+		<Resizable.Handle />
+		<Resizable.Pane maxSize={40} minSize={20} class="h-full w-fit">
+			<ChatSidebar />
 		</Resizable.Pane>
 	</Sidebar.Provider>
 </Resizable.PaneGroup>

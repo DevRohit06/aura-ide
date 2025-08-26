@@ -83,7 +83,7 @@
 	}
 </script>
 
-<div class="flex h-full w-80 flex-col border-l bg-background">
+<div class="flex h-full w-full flex-col border-l bg-background">
 	<!-- Header -->
 	<div class="flex items-center justify-between border-b p-4">
 		<div class="flex items-center gap-2">
