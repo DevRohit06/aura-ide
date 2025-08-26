@@ -39,7 +39,7 @@
 
 <Resizable.PaneGroup direction="horizontal" class="max-h-dvh overflow-hidden">
 	<Sidebar.Provider>
-		<Resizable.Pane>
+		<Resizable.Pane maxSize={20} minSize={10}>
 			<EnhancedSidebar />
 		</Resizable.Pane>
 		<Resizable.Handle />
