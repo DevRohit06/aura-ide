@@ -3,7 +3,7 @@ import type { EditorSettings } from '@/types/editor-state';
 
 // Default settings
 const defaultSettings: EditorSettings = {
-	theme: 'dark',
+	theme: 'light',
 	fontSize: 14,
 	fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
 	lineHeight: 1.4,

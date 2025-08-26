@@ -22,6 +22,7 @@
 		fileActions,
 		settingsStore
 	} from '$lib/stores/editor.js';
+	import { mode } from 'mode-watcher';
 
 	// State
 	let editorContainer = $state<HTMLDivElement>();
@@ -173,7 +174,7 @@
 		}
 
 		// Add theme
-		const isDark = $settingsStore.theme === 'dark';
+		const isDark = $settingsStore.theme === 'dark' && mode.current === 'dark';
 		extensions.push(createTheme(isDark));
 		if (isDark) {
 			extensions.push(oneDark);
