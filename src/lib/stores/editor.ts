@@ -1,4 +1,5 @@
 // Re-export individual stores
+export { fileContext, fileContextStore } from './file-context.store.js';
 export { activeFileState, fileStatesStore } from './file-states.store.js';
 export { filesStore } from './files.store.js';
 export { layoutStore } from './layout.store.js';
