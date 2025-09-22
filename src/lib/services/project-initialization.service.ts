@@ -14,7 +14,6 @@ import { nanoid } from 'nanoid';
 import { DatabaseService } from './database.service.js';
 import { GitHubApiService } from './github-api.service.js';
 import { R2StorageService } from './r2-storage.service.js';
-import { StackBlitzServiceImpl } from './stackblitz/stackblitz.service.js';
 
 export interface ProjectInitializationOptions {
 	name: string;
@@ -92,13 +91,11 @@ export interface ProjectStatus {
  */
 export class ProjectInitializationService {
 	private r2Service: R2StorageService;
-	private stackblitzService: StackBlitzServiceImpl;
 	private githubService: GitHubApiService;
 	private projectStatuses = new Map<string, ProjectStatus>();
 
 	constructor() {
 		this.r2Service = new R2StorageService();
-		this.stackblitzService = new StackBlitzServiceImpl();
 		this.githubService = new GitHubApiService();
 	}
 
@@ -275,38 +272,51 @@ export class ProjectInitializationService {
 	}
 
 	/**
-	 * Download template files from GitHub using StackBlitz service
+	 * Download template files from GitHub using GitHub API service
 	 */
 	private async downloadTemplateFiles(
 		templateId: string,
 		framework: string
 	): Promise<ProjectFile[]> {
 		try {
-			// First try to get the template details
-			const template = await this.stackblitzService.getTemplate(framework, templateId);
-			if (!template) {
-				throw new Error(`Template not found: ${framework}/${templateId}`);
+			// Get the GitHub template configuration
+			const { getGitHubTemplate } = await import('$lib/config/template.config.js');
+			const templateConfig = getGitHubTemplate(templateId);
+
+			if (!templateConfig) {
+				throw new Error(`Template not found: ${templateId}`);
 			}
 
-			// Download the template files
-			const result = await this.stackblitzService.downloadTemplate({
-				framework,
-				starter: templateId
-			});
+			logger.info(
+				`Downloading template from GitHub: ${templateConfig.owner}/${templateConfig.repo}`
+			);
 
-			if (!result.success || !result.files) {
-				throw new Error(`Failed to download template: ${result.error}`);
+			// Download the template files from GitHub
+			const files = await this.githubService.downloadRepositoryFiles(
+				templateConfig.owner,
+				templateConfig.repo,
+				undefined, // Use default branch
+				templateConfig.path || undefined // Use path filter if specified
+			);
+
+			if (!files || Object.keys(files).length === 0) {
+				throw new Error(`No files found in template: ${templateId}`);
 			}
 
-			// Convert files object to array format
-			return Object.entries(result.files).map(([path, content]) => ({
+			// Convert files object to ProjectFile array format
+			const projectFiles: ProjectFile[] = Object.entries(files).map(([path, content]) => ({
 				path,
 				content,
 				size: content?.length || 0,
 				sha: ''
 			}));
+
+			logger.info(
+				`Successfully downloaded ${projectFiles.length} files from template ${templateId}`
+			);
+			return projectFiles;
 		} catch (error) {
-			logger.error(`Failed to download template ${framework}/${templateId}:`, error);
+			logger.error(`Failed to download template ${templateId}:`, error);
 			throw new Error(
 				`Template download failed: ${error instanceof Error ? error.message : 'Unknown error'}`
 			);
