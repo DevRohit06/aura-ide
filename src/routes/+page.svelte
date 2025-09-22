@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 
-	let mounted = false;
+	let mounted = $state(false);
 
 	onMount(() => {
 		mounted = true;
@@ -25,8 +25,8 @@
 					Your AI-powered cloud IDE to accelerate coding and debugging with intelligent assistance.
 				</p>
 				<div class="cta-group">
-					<a href="/editor" class="btn btn-primary">Try Editor</a>
-					<a href="/auth/signup" class="btn btn-secondary">Get Started Free</a>
+					<a href="/dashboard" class="btn btn-primary">Go to Dashboard</a>
+					<a href="/auth/register" class="btn btn-secondary">Get Started Free</a>
 					<a href="/auth/login" class="btn btn-secondary">Sign In</a>
 				</div>
 			</div>
