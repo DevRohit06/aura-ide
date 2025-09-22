@@ -23,7 +23,6 @@
 	import LoaderIcon from '@lucide/svelte/icons/loader-2';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	// Types
-	import type { Project } from '$lib/types';
 
 	let { data } = $props();
 
@@ -43,7 +42,7 @@
 	let breadcrumbs = $derived(currentFile ? createBreadcrumbs(currentFile.path) : []);
 
 	// Project data
-	let project = $derived(data.project as Project);
+	let project = $derived(data.project);
 	let setupStatus = $derived(data.setupStatus);
 	let isProjectReady = $derived(project?.status === 'ready');
 	let isProjectInitializing = $derived(project?.status === 'initializing');
@@ -60,11 +59,8 @@
 	let filesLoading = $state(false);
 	let filesLoaded = $state(false);
 
-	// Template content variables to avoid string literal issues
-	const svelteAppContent = "// Welcome to Svelte App\nconsole.log('Hello from Aura IDE!');";
-
 	/**
-	 * Load project files from R2 storage into the file store
+	 * Load project files from R2 storage or sandbox into the file store
 	 */
 	async function loadProjectFiles() {
 		if (filesLoading || filesLoaded || !project?.id) return;
@@ -93,408 +89,14 @@
 				filesLoaded = true;
 				console.log(`Loaded ${result.data.files.length} files into file store`);
 			} else {
-				console.warn('No files returned from API, using demo files for:', project.framework);
-
-				// Clear existing files and load demo files
-				filesStore.set(new Map());
-
-				// Fallback to demo files based on project framework
-				const demoFiles = createDemoFilesForFramework(project.framework);
-				demoFiles.forEach((file: any) => {
-					fileActions.addFile(file);
-				});
-
+				console.warn('No files found for project:', project.id);
 				filesLoaded = true;
-				console.log('Loaded', demoFiles.length, 'demo files into file store');
 			}
 		} catch (error) {
 			console.error('Failed to load project files:', error);
-
-			// Clear existing files and load demo files as fallback
-			filesStore.set(new Map());
-
-			// Fallback to demo files on error
-			const demoFiles = createDemoFilesForFramework(project.framework || 'react');
-			demoFiles.forEach((file: any) => {
-				fileActions.addFile(file);
-			});
-
 			filesLoaded = true;
-			console.log('Loaded', demoFiles.length, 'demo files into file store (fallback)');
 		} finally {
 			filesLoading = false;
-		}
-	}
-
-	// Create demo files based on project framework
-	function createDemoFilesForFramework(framework: string) {
-		const baseFiles = [
-			{
-				id: 'package_json',
-				name: 'package.json',
-				path: 'package.json',
-				content: JSON.stringify(
-					{
-						name: project?.name || 'my-project',
-						version: '1.0.0',
-						type: 'module',
-						scripts: {
-							dev:
-								framework === 'react' ? 'vite' : framework === 'svelte' ? 'vite dev' : 'npm start',
-							build: framework === 'react' ? 'vite build' : 'npm run build',
-							preview: 'vite preview'
-						},
-						dependencies: getFrameworkDependencies(framework),
-						devDependencies: getFrameworkDevDependencies(framework)
-					},
-					null,
-					2
-				),
-				parentId: null,
-				type: 'file' as const,
-				createdAt: new Date(),
-				modifiedAt: new Date(),
-				size: 500,
-				permissions: {
-					read: true,
-					write: true,
-					execute: false,
-					delete: true,
-					share: false,
-					owner: 'user',
-					collaborators: []
-				},
-				language: 'json',
-				encoding: 'utf-8' as const,
-				mimeType: 'application/json',
-				isDirty: false,
-				isReadOnly: false,
-				metadata: {
-					extension: 'json',
-					lineCount: 20,
-					characterCount: 500,
-					wordCount: 50,
-					lastCursor: null,
-					bookmarks: [],
-					breakpoints: [],
-					folds: [],
-					searchHistory: []
-				}
-			},
-			{
-				id: 'readme_md',
-				name: 'README.md',
-				path: 'README.md',
-				content: `# ${project?.name || 'My Project'}\n\nA ${framework} project built with Aura IDE.\n\n## Getting Started\n\n\`\`\`bash\nnpm install\nnpm run dev\n\`\`\`\n\n## Features\n\n- Modern ${framework} setup\n- Fast development with Vite\n- TypeScript support\n- Hot module replacement\n\nEnjoy coding! 🚀`,
-				parentId: null,
-				type: 'file' as const,
-				createdAt: new Date(),
-				modifiedAt: new Date(),
-				size: 200,
-				permissions: {
-					read: true,
-					write: true,
-					execute: false,
-					delete: true,
-					share: false,
-					owner: 'user',
-					collaborators: []
-				},
-				language: 'markdown',
-				encoding: 'utf-8' as const,
-				mimeType: 'text/markdown',
-				isDirty: false,
-				isReadOnly: false,
-				metadata: {
-					extension: 'md',
-					lineCount: 15,
-					characterCount: 200,
-					wordCount: 30,
-					lastCursor: null,
-					bookmarks: [],
-					breakpoints: [],
-					folds: [],
-					searchHistory: []
-				}
-			}
-		];
-
-		// Add framework-specific files
-		if (framework === 'react') {
-			baseFiles.push(
-				{
-					id: 'src_app_tsx',
-					name: 'App.tsx',
-					path: 'src/App.tsx',
-					content: `import React from 'react';\nimport './App.css';\n\nfunction App() {\n  return (\n    <div className="App">\n      <header className="App-header">\n        <h1>Welcome to ${project?.name || 'React App'}</h1>\n        <p>Built with Aura IDE</p>\n      </header>\n    </div>\n  );\n}\n\nexport default App;`,
-					parentId: 'src',
-					type: 'file' as const,
-					createdAt: new Date(),
-					modifiedAt: new Date(),
-					size: 300,
-					permissions: {
-						read: true,
-						write: true,
-						execute: false,
-						delete: true,
-						share: false,
-						owner: 'user',
-						collaborators: []
-					},
-					language: 'typescript',
-					encoding: 'utf-8' as const,
-					mimeType: 'text/typescript',
-					isDirty: false,
-					isReadOnly: false,
-					metadata: {
-						extension: 'tsx',
-						lineCount: 15,
-						characterCount: 300,
-						wordCount: 40,
-						lastCursor: null,
-						bookmarks: [],
-						breakpoints: [],
-						folds: [],
-						searchHistory: []
-					}
-				},
-				{
-					id: 'src_main_tsx',
-					name: 'main.tsx',
-					path: 'src/main.tsx',
-					content: `import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport App from './App.tsx';\nimport './index.css';\n\nReactDOM.createRoot(document.getElementById('root')!).render(\n  <React.StrictMode>\n    <App />\n  </React.StrictMode>,\n);`,
-					parentId: 'src',
-					type: 'file' as const,
-					createdAt: new Date(),
-					modifiedAt: new Date(),
-					size: 250,
-					permissions: {
-						read: true,
-						write: true,
-						execute: false,
-						delete: true,
-						share: false,
-						owner: 'user',
-						collaborators: []
-					},
-					language: 'typescript',
-					encoding: 'utf-8' as const,
-					mimeType: 'text/typescript',
-					isDirty: false,
-					isReadOnly: false,
-					metadata: {
-						extension: 'tsx',
-						lineCount: 10,
-						characterCount: 250,
-						wordCount: 30,
-						lastCursor: null,
-						bookmarks: [],
-						breakpoints: [],
-						folds: [],
-						searchHistory: []
-					}
-				}
-			);
-		} else if (framework === 'svelte') {
-			baseFiles.push({
-				id: 'src_app_svelte',
-				name: 'App.svelte',
-				path: 'src/App.svelte',
-				content: svelteAppContent,
-				parentId: 'src',
-				type: 'file' as const,
-				createdAt: new Date(),
-				modifiedAt: new Date(),
-				size: 400,
-				permissions: {
-					read: true,
-					write: true,
-					execute: false,
-					delete: true,
-					share: false,
-					owner: 'user',
-					collaborators: []
-				},
-				language: 'svelte',
-				encoding: 'utf-8' as const,
-				mimeType: 'text/svelte',
-				isDirty: false,
-				isReadOnly: false,
-				metadata: {
-					extension: 'svelte',
-					lineCount: 20,
-					characterCount: 400,
-					wordCount: 50,
-					lastCursor: null,
-					bookmarks: [],
-					breakpoints: [],
-					folds: [],
-					searchHistory: []
-				}
-			});
-		}
-
-		// Add src directory
-		baseFiles.push({
-			id: 'src',
-			name: 'src',
-			path: 'src',
-			content: '',
-			parentId: null,
-			type: 'directory' as const,
-			createdAt: new Date(),
-			modifiedAt: new Date(),
-			permissions: {
-				read: true,
-				write: true,
-				execute: true,
-				delete: true,
-				share: false,
-				owner: 'user',
-				collaborators: []
-			},
-			children: baseFiles.filter((f) => f.parentId === 'src').map((f) => f.id),
-			isExpanded: true,
-			isRoot: false
-		});
-
-		return baseFiles;
-	}
-
-	function getFrameworkDependencies(framework: string) {
-		switch (framework) {
-			case 'react':
-				return { react: '^18.2.0', 'react-dom': '^18.2.0' };
-			case 'svelte':
-				return {};
-			default:
-				return {};
-		}
-	}
-
-	function getFrameworkDevDependencies(framework: string) {
-		switch (framework) {
-			case 'react':
-				return {
-					'@types/react': '^18.2.66',
-					'@types/react-dom': '^18.2.22',
-					'@vitejs/plugin-react': '^4.2.1',
-					typescript: '^5.2.2',
-					vite: '^5.2.0'
-				};
-			case 'svelte':
-				return {
-					'@sveltejs/adapter-auto': '^3.0.0',
-					'@sveltejs/kit': '^2.0.0',
-					'@sveltejs/vite-plugin-svelte': '^3.0.0',
-					svelte: '^4.2.7',
-					typescript: '^5.0.0',
-					vite: '^5.0.3'
-				};
-			default:
-				return { typescript: '^5.2.2', vite: '^5.2.0' };
-		}
-	}
-
-	async function registerDaytonaConnection() {
-		if (!project?.id || daytonaConnectionRegistered) return;
-
-		// Store project ID in a local variable to avoid issues with derived values
-		const projectId = project.id;
-
-		try {
-			const response = await fetch('/api/daytona/register-connection', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ projectId })
-			});
-
-			if (response.ok) {
-				daytonaConnectionRegistered = true;
-				console.log('Daytona connection registered for project:', projectId);
-
-				// Start Daytona bridge
-				await startDaytonaBridge();
-			}
-		} catch (error) {
-			console.error('Failed to register Daytona connection:', error);
-		}
-	}
-
-	async function startDaytonaBridge() {
-		if (!project?.id || !data.user?.id) return;
-
-		try {
-			const response = await fetch('/api/daytona/bridge', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					action: 'start',
-					projectId: project.id,
-					userId: data.user.id
-				})
-			});
-
-			if (response.ok) {
-				daytonaBridgeActive = true;
-				console.log('Daytona bridge started for project:', project.id);
-			} else {
-				console.warn('Failed to start Daytona bridge:', await response.text());
-			}
-		} catch (error) {
-			console.error('Failed to start Daytona bridge:', error);
-		}
-	}
-
-	async function stopDaytonaBridge() {
-		if (!project?.id || !data.user?.id) return;
-
-		try {
-			const response = await fetch('/api/daytona/bridge', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					action: 'stop',
-					projectId: project.id,
-					userId: data.user.id
-				})
-			});
-
-			if (response.ok) {
-				daytonaBridgeActive = false;
-				console.log('Daytona bridge stopped for project:', project.id);
-			}
-		} catch (error) {
-			console.error('Failed to stop Daytona bridge:', error);
-		}
-	}
-
-	async function unregisterDaytonaConnection() {
-		if (!project?.id || !daytonaConnectionRegistered) return;
-
-		// Store project ID in a local variable to avoid issues with derived values during cleanup
-		const projectId = project.id;
-
-		try {
-			// Stop Daytona bridge first
-			await stopDaytonaBridge();
-
-			const response = await fetch('/api/daytona/bridge', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					action: 'stop',
-					projectId,
-					userId: data.user?.id
-				})
-			});
-
-			if (response.ok) {
-				daytonaConnectionRegistered = false;
-				console.log('Daytona connection unregistered for project:', projectId);
-			}
-		} catch (error) {
-			console.error('Failed to unregister Daytona connection:', error);
 		}
 	}
 
@@ -520,9 +122,6 @@
 		if (isProjectReady) {
 			loadProjectFiles();
 		}
-
-		// Register Daytona connection for this project
-		registerDaytonaConnection();
 
 		// Add event listeners for page unload (only in browser)
 		if (browser) {
@@ -569,9 +168,6 @@
 	});
 
 	onDestroy(() => {
-		// Cleanup E2B connection and event listeners
-		unregisterDaytonaConnection();
-
 		if (browser) {
 			window.removeEventListener('beforeunload', handleBeforeUnload);
 			window.removeEventListener('unload', handleBeforeUnload);
@@ -772,7 +368,9 @@
 				minSize={20}
 				class="h-full w-fit"
 			>
-				<ChatSidebar {project} />
+				{#if browser}
+					<ChatSidebar {project} />
+				{/if}
 			</Resizable.Pane>
 		</Sidebar.Provider>
 	</Resizable.PaneGroup>
