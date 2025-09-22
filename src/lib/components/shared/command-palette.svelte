@@ -29,13 +29,7 @@
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import TerminalIcon from '@lucide/svelte/icons/terminal';
 	import RefreshIcon from '@lucide/svelte/icons/refresh-ccw';
-	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
 	import SaveIcon from '@lucide/svelte/icons/save';
-	import FileIcon from '@lucide/svelte/icons/file';
-	import FolderIcon from '@lucide/svelte/icons/folder';
-	import CodeIcon from '@lucide/svelte/icons/code';
-	import FileTextIcon from '@lucide/svelte/icons/file-text';
-	import ImageIcon from '@lucide/svelte/icons/image';
 	import ClockIcon from '@lucide/svelte/icons/clock';
 	import PaletteIcon from '@lucide/svelte/icons/palette';
 	import LayoutIcon from '@lucide/svelte/icons/layout';
@@ -45,6 +39,7 @@
 	import { filesStore, tabActions, fileStateActions, tabsStore } from '$lib/stores/editor.js';
 	import { layoutActions } from '$lib/stores/layout.store.js';
 	import Icon from '@iconify/svelte';
+	import { getFileIcon } from '../editor';
 
 	// Props
 	let {
@@ -56,33 +51,6 @@
 	// State
 	let searchValue = $state('');
 	let selectedIndex = $state(0);
-
-	// Get file icon based on extension
-	function getFileIcon(fileName: string) {
-		const ext = fileName.split('.').pop()?.toLowerCase();
-		switch (ext) {
-			case 'js':
-			case 'ts':
-			case 'jsx':
-			case 'tsx':
-			case 'svelte':
-			case 'vue':
-				return CodeIcon;
-			case 'md':
-			case 'txt':
-			case 'json':
-				return FileTextIcon;
-			case 'png':
-			case 'jpg':
-			case 'jpeg':
-			case 'gif':
-			case 'svg':
-			case 'webp':
-				return ImageIcon;
-			default:
-				return FileIcon;
-		}
-	}
 
 	// Get recent files from tabs store
 	function getRecentFiles() {
@@ -326,92 +294,89 @@
 
 <svelte:window on:keydown={handleKeyDown} />
 
-<Dialog.Root bind:open>
-	<Dialog.Content class="max-w-2xl overflow-hidden p-0">
-		<Command.Root class="rounded-lg border-0 shadow-none">
-			<Command.Input
-				bind:value={searchValue}
-				{placeholder}
-				class="rounded-none border-0 border-b shadow-none focus-visible:ring-0"
-			/>
-			<Command.List class="max-h-96 overflow-y-auto">
-				<Command.Empty>
-					<div class="p-6 text-center">
-						<SearchIcon class="mx-auto mb-4 h-12 w-12 text-muted-foreground/50" />
-						<p class="text-sm text-muted-foreground">No commands or files found.</p>
-						<p class="mt-1 text-xs text-muted-foreground">Try searching with different keywords.</p>
-					</div>
-				</Command.Empty>
+<Command.Dialog bind:open class="">
+	<Command.Root class="rounded-lg border-0 shadow-none">
+		<Command.Input
+			bind:value={searchValue}
+			{placeholder}
+			class="rounded-none border-0 border-b shadow-none focus-visible:ring-0"
+		/>
+		<Command.List class="max-h-96 overflow-y-auto">
+			<Command.Empty>
+				<div class="p-6 text-center">
+					<SearchIcon class="mx-auto mb-4 h-12 w-12 text-muted-foreground/50" />
+					<p class="text-sm text-muted-foreground">No commands or files found.</p>
+					<p class="mt-1 text-xs text-muted-foreground">Try searching with different keywords.</p>
+				</div>
+			</Command.Empty>
 
-				<!-- Recent Files (when no search) -->
-				{#if showRecent && recentFiles.length > 0}
-					<Command.Group heading="Recent Files">
-						{#each recentFiles as item (item?.id)}
-							<Command.Item
-								value="recent-{item?.id}"
-								onSelect={() => {
-									tabActions.openFile(item?.id);
-									open = false;
-								}}
-							>
-								<ClockIcon class="mr-2 h-4 w-4 text-muted-foreground" />
-								<Icon icon={getFileIcon(item?.name)} class="mr-2 h-4 w-4" />
-								<div class="min-w-0 flex-1">
-									<div class="truncate">{item?.name}</div>
-									<div class="truncate text-xs text-muted-foreground">{item.path}</div>
-								</div>
-							</Command.Item>
-						{/each}
-					</Command.Group>
-				{/if}
+			<!-- Recent Files (when no search) -->
+			{#if showRecent && recentFiles.length > 0}
+				<Command.Group heading="Recent Files">
+					{#each recentFiles as item (item?.id)}
+						<Command.Item
+							value="recent-{item?.id}"
+							onSelect={() => {
+								tabActions.openFile(item?.id);
+								open = false;
+							}}
+						>
+							<ClockIcon class="mr-2 h-4 w-4 text-muted-foreground" />
+							<Icon icon={getFileIcon(item?.title)} class="mr-2 h-4 w-4" />
+							<div class="min-w-0 flex-1">
+								<div class="truncate">{item?.title}</div>
+							</div>
+						</Command.Item>
+					{/each}
+				</Command.Group>
+			{/if}
 
-				<!-- File Search Results -->
-				{#if showFiles && filteredFiles.length > 0}
-					<Command.Group heading="Files">
-						{#each filteredFiles as file (file.id)}
-							<Command.Item
-								value="file-{file.id}"
-								onSelect={() => {
-									tabActions.openFile(file.id);
-									open = false;
-								}}
-							>
-								<Icon icon={getFileIcon(file.name)} class="mr-2 h-4 w-4" />
-								<div class="min-w-0 flex-1">
-									<div class="truncate">{file.name}</div>
-									<div class="truncate text-xs text-muted-foreground">{file.path}</div>
-								</div>
-								{#if fileStateActions.isFileDirty(file.id)}
-									<Badge variant="secondary" class="ml-2 text-xs">Modified</Badge>
-								{/if}
-							</Command.Item>
-						{/each}
-					</Command.Group>
-				{/if}
+			<!-- File Search Results -->
+			{#if showFiles && filteredFiles.length > 0}
+				<Command.Group heading="Files">
+					{#each filteredFiles as file (file.id)}
+						<Command.Item
+							value="file-{file.id}"
+							onSelect={() => {
+								tabActions.openFile(file.id);
+								open = false;
+							}}
+						>
+							<Icon icon={getFileIcon(file.name)} class="mr-2 h-4 w-4" />
+							<div class="min-w-0 flex-1">
+								<div class="truncate">{file.name}</div>
+								<div class="truncate text-xs text-muted-foreground">{file.path}</div>
+							</div>
+							{#if fileStateActions.isFileDirty(file.id)}
+								<Badge variant="secondary" class="ml-2 text-xs">Modified</Badge>
+							{/if}
+						</Command.Item>
+					{/each}
+				</Command.Group>
+			{/if}
 
-				<!-- Commands -->
-				{#each filteredCommands as group (group.id)}
-					<Command.Group heading={group.title}>
-						{#each group.items as command (command.id)}
-							<Command.Item value="command-{command.id}" onSelect={() => command.action()}>
-								{#if command.icon}
-									{@const Icon = command.icon}
-									<Icon class="mr-2 h-4 w-4" />
+			<!-- Commands -->
+			{#each filteredCommands as group (group.id)}
+				<Command.Group heading={group.title}>
+					{#each group.items as command (command.id)}
+						<Command.Item value="command-{command.id}" onSelect={() => command.action()}>
+							{#if command.icon}
+								{@const Icon = command.icon}
+								<Icon class="mr-2 h-4 w-4" />
+							{/if}
+							<div class="flex-1">
+								<div>{command.title}</div>
+								{#if command.description}
+									<div class="text-xs text-muted-foreground">{command.description}</div>
 								{/if}
-								<div class="flex-1">
-									<div>{command.title}</div>
-									{#if command.description}
-										<div class="text-xs text-muted-foreground">{command.description}</div>
-									{/if}
-								</div>
-								{#if command.shortcut}
-									<Command.Shortcut>{command.shortcut}</Command.Shortcut>
-								{/if}
-							</Command.Item>
-						{/each}
-					</Command.Group>
-				{/each}
-			</Command.List>
-		</Command.Root>
-	</Dialog.Content>
-</Dialog.Root>
+							</div>
+							{#if command.shortcut}
+								<Command.Shortcut>{command.shortcut}</Command.Shortcut>
+							{/if}
+						</Command.Item>
+					{/each}
+				</Command.Group>
+			{/each}
+		</Command.List>
+	</Command.Root>
+</Command.Dialog>

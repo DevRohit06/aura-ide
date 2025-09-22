@@ -1,5 +1,5 @@
 <script lang="ts" module>
-	import type { FileSystemItem, File, Directory } from '@/types/files';
+	import type { Directory, File, FileSystemItem } from '@/types/files';
 
 	export interface SidebarView {
 		id: string;
@@ -10,68 +10,61 @@
 </script>
 
 <script lang="ts">
-	import * as Collapsible from '$lib/components/ui/collapsible/index.js';
-	import * as ContextMenu from '$lib/components/ui/context-menu/index.js';
-	import * as Command from '$lib/components/ui/command/index.js';
-	import * as Dialog from '$lib/components/ui/dialog/index.js';
-	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
-	import * as Resizable from '$lib/components/ui/resizable/index.js';
-	import { Button, buttonVariants } from '$lib/components/ui/button/index.js';
-	import { Input } from '$lib/components/ui/input/index.js';
-	import { Separator } from '$lib/components/ui/separator/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
-
+	import { Button } from '$lib/components/ui/button/index.js';
+	import * as ContextMenu from '$lib/components/ui/context-menu/index.js';
+	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	// File icon utilities
-	import { getDirectoryIcon, getFileColor } from '$lib/utils/file-icons.js';
 	import { getFileIcon } from '$lib/components/editor';
-
+	import { getDirectoryIcon } from '$lib/utils/file-icons.js';
 	// Icons
-	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
-	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
-	import SearchIcon from '@lucide/svelte/icons/search';
-	import FolderIcon from '@lucide/svelte/icons/folder';
-	import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
-	import FileIcon from '@lucide/svelte/icons/file';
-	import FileTextIcon from '@lucide/svelte/icons/file-text';
-	import ImageIcon from '@lucide/svelte/icons/image';
-	import CodeIcon from '@lucide/svelte/icons/code';
-	import SettingsIcon from '@lucide/svelte/icons/settings';
-	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
 	import BugIcon from '@lucide/svelte/icons/bug';
-	import ExtensionIcon from '@lucide/svelte/icons/package';
-	import FilesIcon from '@lucide/svelte/icons/folder-tree';
-	import TerminalIcon from '@lucide/svelte/icons/terminal';
-	import PlusIcon from '@lucide/svelte/icons/plus';
-	import RefreshIcon from '@lucide/svelte/icons/refresh-ccw';
-	import CollapseIcon from '@lucide/svelte/icons/fold-vertical';
-	import MoreHorizontalIcon from '@lucide/svelte/icons/more-horizontal';
-	import EditIcon from '@lucide/svelte/icons/edit';
-	import TrashIcon from '@lucide/svelte/icons/trash';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import CopyIcon from '@lucide/svelte/icons/copy';
-	import CutIcon from '@lucide/svelte/icons/scissors';
+	import EditIcon from '@lucide/svelte/icons/edit';
+	import CollapseIcon from '@lucide/svelte/icons/fold-vertical';
+	import FilesIcon from '@lucide/svelte/icons/folder-tree';
+	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
+	import ExtensionIcon from '@lucide/svelte/icons/package';
+	import RefreshIcon from '@lucide/svelte/icons/refresh-ccw';
+	import SearchIcon from '@lucide/svelte/icons/search';
+	import SettingsIcon from '@lucide/svelte/icons/settings';
+	import TrashIcon from '@lucide/svelte/icons/trash';
+	// Settings Dialog
 	import PasteIcon from '@lucide/svelte/icons/clipboard';
-	import FolderPlusIcon from '@lucide/svelte/icons/folder-plus';
 	import FilePlusIcon from '@lucide/svelte/icons/file-plus';
-
+	import FolderPlusIcon from '@lucide/svelte/icons/folder-plus';
+	import CutIcon from '@lucide/svelte/icons/scissors';
 	// Stores
-	import { filesStore, tabActions, fileStateActions, tabsStore } from '$lib/stores/editor.js';
-	import { layoutStore, layoutActions } from '$lib/stores/layout.store.js';
 	import { gitChanges } from '$lib/data/dummy-files.js';
 	import { initializeDummyData } from '$lib/data/initialize-dummy-data.js';
+
+	import { filesStore, fileStateActions, tabActions } from '$lib/stores/editor.ts';
+	import type { Project } from '$lib/types';
 	import Icon from '@iconify/svelte';
+	import CommandPalette from './command-palette.svelte';
+	import ComprehensiveSettingsDialog from './comprehensive-settings-dialog.svelte';
 
 	// Props
-	let { class: className = '', defaultView = 'explorer' } = $props();
+	let {
+		class: className = '',
+		defaultView = 'explorer',
+		project = undefined
+	}: {
+		class?: string;
+		defaultView?: string;
+		project?: Project;
+	} = $props();
 
 	// State
 	let currentView = $state(defaultView);
 	let searchQuery = $state('');
-	let showSearch = $state(false);
 	let commandPaletteOpen = $state(false);
+	let settingsOpen = $state(false);
 	let expandedFolders = $state(new Set(['src', 'lib']));
 	let selectedItem: string | null = $state(null);
 	let draggedItem: FileSystemItem | null = $state(null);
-	let contextMenuItem: FileSystemItem | null = $state(null);
 	let clipboard: { item: FileSystemItem; operation: 'cut' | 'copy' } | null = $state(null);
 
 	// Track initialization
@@ -86,9 +79,9 @@
 		{ id: 'extensions', name: 'Extensions', icon: 'package' }
 	];
 
-	// Initialize dummy data
+	// Initialize dummy data only if no real project is provided
 	$effect(() => {
-		if (!initialized && $filesStore.size === 0) {
+		if (!initialized && $filesStore.size === 0 && !project) {
 			initialized = true;
 			initializeDummyData();
 		}
@@ -137,19 +130,34 @@
 	}
 
 	// Event handlers
-	function handleFileClick(fileId: string) {
+	async function handleFileClick(fileId: string) {
 		if (selectedItem === fileId) {
 			// Double click - open file
-			tabActions.openFile(fileId);
+			await openFile(fileId);
 		} else {
 			// Single click - select
 			selectedItem = fileId;
 			// Auto-open after delay
-			setTimeout(() => {
+			setTimeout(async () => {
 				if (selectedItem === fileId) {
-					tabActions.openFile(fileId);
+					await openFile(fileId);
 				}
 			}, 300);
+		}
+	}
+
+	async function openFile(fileId: string) {
+		const file = $filesStore.get(fileId);
+		if (!file || file.type !== 'file') return;
+
+		try {
+			// Load file content (placeholder for future sandbox integration)
+			// For now, just open the file with existing content
+
+			// Open file in tab
+			tabActions.openFile(fileId);
+		} catch (error) {
+			console.error('Failed to open file:', error);
 		}
 	}
 
@@ -160,21 +168,6 @@
 			expandedFolders.add(folderId);
 		}
 		expandedFolders = new Set(expandedFolders);
-	}
-
-	function handleKeyDown(event: KeyboardEvent) {
-		if (event.ctrlKey || event.metaKey) {
-			switch (event.key) {
-				case 'k':
-					event.preventDefault();
-					commandPaletteOpen = true;
-					break;
-				case 'f':
-					event.preventDefault();
-					showSearch = !showSearch;
-					break;
-			}
-		}
 	}
 
 	function handleDragStart(event: DragEvent, item: FileSystemItem) {
@@ -195,24 +188,95 @@
 	}
 
 	// Context menu actions
-	function handleCreateFile(parentId?: string) {
-		console.log('Creating file in:', parentId);
-		// TODO: Implement file creation
+	async function handleCreateFile(parentId?: string) {
+		const fileName = prompt('Enter file name:');
+		if (!fileName) return;
+
+		try {
+			// Get parent path
+			const parent = parentId ? $filesStore.get(parentId) : null;
+			const parentPath = parent?.path || '';
+			const filePath = parentPath ? `${parentPath}/${fileName}` : fileName;
+
+			// File created locally (placeholder for future sandbox integration)
+
+			// Create file in local store
+			const newFile: File = {
+				id: `file-${Date.now()}`,
+				name: fileName,
+				type: 'file',
+				path: filePath,
+				content: '',
+				size: 0,
+				modified: new Date(),
+				parentId: parentId || null
+			};
+
+			fileStateActions.createFile(newFile);
+		} catch (error) {
+			console.error('Failed to create file:', error);
+		}
 	}
 
-	function handleCreateFolder(parentId?: string) {
-		console.log('Creating folder in:', parentId);
-		// TODO: Implement folder creation
+	async function handleCreateFolder(parentId?: string) {
+		const folderName = prompt('Enter folder name:');
+		if (!folderName) return;
+
+		try {
+			// Get parent path
+			const parent = parentId ? $filesStore.get(parentId) : null;
+			const parentPath = parent?.path || '';
+			const folderPath = parentPath ? `${parentPath}/${folderName}` : folderName;
+
+			// Directory created locally (placeholder for future sandbox integration)
+
+			// Create folder in local store
+			const newFolder: Directory = {
+				id: `folder-${Date.now()}`,
+				name: folderName,
+				type: 'directory',
+				path: folderPath,
+				children: [],
+				modified: new Date(),
+				parentId: parentId || null
+			};
+
+			fileStateActions.createDirectory(newFolder);
+		} catch (error) {
+			console.error('Failed to create folder:', error);
+		}
 	}
 
-	function handleRename(item: FileSystemItem) {
-		console.log('Renaming:', item.name);
-		// TODO: Implement rename
+	async function handleRename(item: FileSystemItem) {
+		const newName = prompt('Enter new name:', item.name);
+		if (!newName || newName === item.name) return;
+
+		try {
+			// Calculate new path
+			const pathParts = item.path.split('/');
+			pathParts[pathParts.length - 1] = newName;
+			const newPath = pathParts.join('/');
+
+			// Item renamed locally (placeholder for future sandbox integration)
+
+			// Update local store
+			fileStateActions.renameItem(item.id, newName);
+		} catch (error) {
+			console.error('Failed to rename:', error);
+		}
 	}
 
-	function handleDelete(item: FileSystemItem) {
-		console.log('Deleting:', item.name);
-		// TODO: Implement delete
+	async function handleDelete(item: FileSystemItem) {
+		if (!confirm(`Delete ${item.name}?`)) return;
+
+		try {
+			// Item deleted locally (placeholder for future sandbox integration)
+
+			// Delete from local store
+			fileStateActions.deleteItem(item.id);
+		} catch (error) {
+			console.error('Failed to delete:', error);
+		}
 	}
 
 	function handleCopy(item: FileSystemItem) {
@@ -235,9 +299,7 @@
 
 	// Reactive computed values
 	const fileTree = $derived(buildFileTree($filesStore));
-	const filteredTree = $derived(
-		showSearch ? filterFiles(Array.from($filesStore.values()), searchQuery) : fileTree
-	);
+	const filteredTree = $derived(filterFiles(Array.from($filesStore.values()), searchQuery));
 
 	// Check if file has changes
 	function hasChanges(fileId: string): boolean {
@@ -250,32 +312,25 @@
 	}
 </script>
 
-<svelte:window on:keydown={handleKeyDown} />
-
 <!-- Activity Bar -->
-<div class="flex h-full">
+<div class="flex h-full max-h-dvh">
 	<!-- Side Activity Bar -->
-	<div class="flex w-12 flex-col items-center border-r border-border bg-sidebar-accent">
+	<div class=" flex w-12 flex-col border-r border-border bg-sidebar-accent">
 		{#each sidebarViews as view (view.id)}
 			<Tooltip.Provider>
 				<Tooltip.Root>
-					<Tooltip.Trigger
-						class={buttonVariants({
-							variant: currentView === view.id ? 'secondary' : 'ghost',
-							size: 'icon'
-						})}
-					>
-						<Button variant="secondary" size="icon" onclick={() => (currentView = view.id)}>
+					<Tooltip.Trigger class="">
+						<Button variant="secondary" class="w-full" onclick={() => (currentView = view.id)}>
 							{#if view.icon === 'folder-tree'}
-								<FilesIcon size={20} />
+								<FilesIcon />
 							{:else if view.icon === 'search'}
-								<SearchIcon size={20} />
+								<SearchIcon />
 							{:else if view.icon === 'git-branch'}
-								<GitBranchIcon size={20} />
+								<GitBranchIcon />
 							{:else if view.icon === 'bug'}
-								<BugIcon size={20} />
+								<BugIcon />
 							{:else if view.icon === 'package'}
-								<ExtensionIcon size={20} />
+								<ExtensionIcon />
 							{/if}
 						</Button>
 					</Tooltip.Trigger>
@@ -290,7 +345,12 @@
 			<Tooltip.Provider>
 				<Tooltip.Root>
 					<Tooltip.Trigger>
-						<Button variant="ghost" size="icon" class="h-12 w-12 rounded-none">
+						<Button
+							variant="ghost"
+							size="icon"
+							class="h-12 w-12 rounded-none"
+							onclick={() => (settingsOpen = true)}
+						>
 							<SettingsIcon size={20} />
 						</Button>
 					</Tooltip.Trigger>
@@ -344,7 +404,12 @@
 						<Tooltip.Provider>
 							<Tooltip.Root>
 								<Tooltip.Trigger>
-									<Button variant="ghost" size="sm" class="h-6 w-6 p-0">
+									<Button
+										variant="ghost"
+										size="sm"
+										class="h-6 w-6 p-0"
+										onclick={() => initializeDummyData()}
+									>
 										<RefreshIcon size={14} />
 									</Button>
 								</Tooltip.Trigger>
@@ -363,33 +428,19 @@
 						</Tooltip.Provider>
 					</div>
 				</div>
-
-				<!-- Search Toggle -->
-				<div class="flex gap-2">
-					<Button
-						variant="ghost"
-						size="sm"
-						class="h-6 flex-1 justify-start text-xs"
-						onclick={() => (showSearch = !showSearch)}
-					>
-						<SearchIcon size={12} class="mr-1" />
-						{showSearch ? 'Hide Search' : 'Search Files'}
-					</Button>
-				</div>
-
-				<!-- Search Input -->
-				{#if showSearch}
-					<div class="mt-2">
-						<Input bind:value={searchQuery} placeholder="Search files..." class="h-6 text-xs" />
-					</div>
-				{/if}
 			</div>
 
 			<!-- File Tree -->
 			<div class="flex-1 overflow-y-auto">
-				{#each filteredTree as item (item.id)}
-					{@render FileTreeNode({ item, level: 0, isRoot: true })}
-				{/each}
+				{#if searchQuery.trim()}
+					{#each filteredTree as item (item.id)}
+						{@render FileTreeNode({ item, level: 0, isRoot: true })}
+					{/each}
+				{:else}
+					{#each fileTree as item (item.id)}
+						{@render FileTreeNode({ item, level: 0, isRoot: true })}
+					{/each}
+				{/if}
 			</div>
 		{:else if currentView === 'search'}
 			<div class="p-4">
@@ -413,43 +464,7 @@
 </div>
 
 <!-- Command Palette -->
-<Dialog.Root bind:open={commandPaletteOpen}>
-	<Dialog.Content class="max-w-2xl">
-		<Command.Root>
-			<Command.Input placeholder="Type a command or search..." />
-			<Command.List>
-				<Command.Empty>No results found.</Command.Empty>
-				<Command.Group heading="Quick Actions">
-					<Command.Item onSelect={() => handleCreateFile()}>
-						<FilePlusIcon class="mr-2 h-4 w-4" />
-						New File
-						<Command.Shortcut>Ctrl+N</Command.Shortcut>
-					</Command.Item>
-					<Command.Item onSelect={() => handleCreateFolder()}>
-						<FolderPlusIcon class="mr-2 h-4 w-4" />
-						New Folder
-					</Command.Item>
-					<Command.Item onSelect={() => (showSearch = true)}>
-						<SearchIcon class="mr-2 h-4 w-4" />
-						Search Files
-						<Command.Shortcut>Ctrl+F</Command.Shortcut>
-					</Command.Item>
-				</Command.Group>
-				<Command.Group heading="Files">
-					{#each Array.from($filesStore.values())
-						.filter((f) => f.type === 'file')
-						.slice(0, 10) as file (file.id)}
-						<Command.Item onSelect={() => tabActions.openFile(file.id)}>
-							<Icon icon={getFileIcon(file.name)} class="mr-2 h-4 w-4" />
-							{file.name}
-							<span class="ml-auto text-xs text-muted-foreground">{file.path}</span>
-						</Command.Item>
-					{/each}
-				</Command.Group>
-			</Command.List>
-		</Command.Root>
-	</Dialog.Content>
-</Dialog.Root>
+<CommandPalette bind:open={commandPaletteOpen} />
 
 {#snippet FileTreeNode({
 	item,
@@ -476,7 +491,6 @@
 						style="padding-left: {8 + level * 16}px"
 						onclick={() => {
 							toggleFolder(item.id);
-							selectedItem = item.id;
 						}}
 						draggable="true"
 						ondragstart={(e) => handleDragStart(e, item)}
@@ -503,7 +517,7 @@
 					{#if isExpanded}
 						<div class="children">
 							{#each children as child (child.id)}
-								{@render FileTreeNode({ item: child, level: level + 1 })}
+								{@render FileTreeNode({ item: child, level: level })}
 							{/each}
 						</div>
 					{/if}
@@ -514,7 +528,7 @@
 					<button
 						class="group flex w-full items-center px-2 py-1 text-left transition-colors hover:bg-accent hover:text-accent-foreground"
 						class:bg-accent={selectedItem === item.id}
-						style="padding-left: {8 + level * 16}px"
+						style="padding-left: {8 + (level + 1) * 16}px"
 						onclick={() => handleFileClick(item.id)}
 						draggable="true"
 						ondragstart={(e) => handleDragStart(e, item)}
@@ -580,6 +594,9 @@
 		</ContextMenu.Content>
 	</ContextMenu.Root>
 {/snippet}
+
+<!-- Settings Dialog -->
+<ComprehensiveSettingsDialog bind:open={settingsOpen} />
 
 <style>
 	.children {
