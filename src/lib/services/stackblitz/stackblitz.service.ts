@@ -151,7 +151,14 @@ export class StackBlitzServiceImpl implements StackBlitzService {
 
 						if (fileResponse.ok) {
 							const content = await fileResponse.text();
-							templateFiles[file.path] = content;
+
+							// Strip the template path prefix to get relative file path
+							// e.g., "react-ts/src/App.tsx" becomes "src/App.tsx"
+							const relativePath = file.path.startsWith(templatePath + '/')
+								? file.path.substring(templatePath.length + 1)
+								: file.path;
+
+							templateFiles[relativePath] = content;
 
 							if (file.name === 'package.json') {
 								packageJsonFiles.push(JSON.parse(content));
