@@ -1,0 +1,189 @@
+# Prometheus Alerting Rules for Aura Sandbox Execution System
+# Define alerts for critical system conditions
+
+groups:
+  - name: aura.application
+    rules:
+      # Application availability
+      - alert: AuraApplicationDown
+        expr: up{job="aura-app"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: aura
+        annotations:
+          summary: 'Aura application is down'
+          description: 'Aura application has been down for more than 1 minute'
+
+      # Health check failures
+      - alert: AuraHealthCheckFailed
+        expr: aura_config_valid == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: aura
+        annotations:
+          summary: 'Aura health check failed'
+          description: 'Aura application health check has been failing for more than 2 minutes'
+
+      # High error rate
+      - alert: AuraHighErrorRate
+        expr: rate(aura_errors_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: aura
+        annotations:
+          summary: 'High error rate in Aura application'
+          description: 'Error rate is {{ $value }} errors per second over the last 5 minutes'
+
+      # Memory usage
+      - alert: AuraHighMemoryUsage
+        expr: (aura_memory_heap_used_bytes / aura_memory_heap_total_bytes) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: aura
+        annotations:
+          summary: 'High memory usage in Aura application'
+          description: 'Memory usage is {{ $value }}% of available heap'
+
+      # Critical memory usage
+      - alert: AuraCriticalMemoryUsage
+        expr: (aura_memory_heap_used_bytes / aura_memory_heap_total_bytes) * 100 > 95
+        for: 2m
+        labels:
+          severity: critical
+          service: aura
+        annotations:
+          summary: 'Critical memory usage in Aura application'
+          description: 'Memory usage is {{ $value }}% of available heap'
+
+  - name: aura.services
+    rules:
+      # Service availability
+      - alert: AuraServiceUnavailable
+        expr: aura_service_enabled{service=~"e2b|daytona|r2"} == 1 and aura_service_healthy{service=~"e2b|daytona|r2"} == 0
+        for: 3m
+        labels:
+          severity: warning
+          service: aura
+        annotations:
+          summary: 'Aura service {{ $labels.service }} is unavailable'
+          description: 'Service {{ $labels.service }} has been unavailable for more than 3 minutes'
+
+      # No sandbox providers available
+      - alert: AuraNoSandboxProviders
+        expr: sum(aura_service_enabled{service=~"e2b|daytona"}) == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: aura
+        annotations:
+          summary: 'No sandbox providers available'
+          description: 'Neither E2B nor Daytona sandbox providers are available'
+
+      # R2 storage unavailable
+      - alert: AuraR2StorageUnavailable
+        expr: aura_service_enabled{service="r2"} == 1 and aura_service_healthy{service="r2"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: aura
+        annotations:
+          summary: 'R2 storage is unavailable'
+          description: 'R2 storage service has been unavailable for more than 5 minutes'
+
+  - name: aura.sessions
+    rules:
+      # High session count
+      - alert: AuraHighSessionCount
+        expr: aura_active_sessions > 80
+        for: 10m
+        labels:
+          severity: warning
+          service: aura
+        annotations:
+          summary: 'High number of active sessions'
+          description: 'There are {{ $value }} active sessions, approaching limits'
+
+      # Critical session count
+      - alert: AuraCriticalSessionCount
+        expr: aura_active_sessions > 95
+        for: 5m
+        labels:
+          severity: critical
+          service: aura
+        annotations:
+          summary: 'Critical number of active sessions'
+          description: 'There are {{ $value }} active sessions, at critical levels'
+
+  - name: aura.performance
+    rules:
+      # High response time (if available)
+      - alert: AuraHighResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: aura
+        annotations:
+          summary: 'High response time'
+          description: '95th percentile response time is {{ $value }}s'
+
+      # Request rate spike
+      - alert: AuraRequestRateSpike
+        expr: rate(aura_requests_total[5m]) > rate(aura_requests_total[1h]) * 3
+        for: 2m
+        labels:
+          severity: warning
+          service: aura
+        annotations:
+          summary: 'Request rate spike detected'
+          description: 'Request rate is {{ $value }} requests/sec, 3x higher than hourly average'
+
+  - name: aura.infrastructure
+    rules:
+      # Database connection issues
+      - alert: AuraDatabaseConnectionIssues
+        expr: up{job="mongodb"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: database
+        annotations:
+          summary: 'Database connection issues'
+          description: 'Cannot connect to MongoDB database'
+
+      # Redis connection issues
+      - alert: AuraRedisConnectionIssues
+        expr: up{job="redis"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: 'Redis connection issues'
+          description: 'Cannot connect to Redis cache'
+
+      # Disk space (if node_exporter is available)
+      - alert: AuraLowDiskSpace
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 10
+        for: 5m
+        labels:
+          severity: critical
+          service: system
+        annotations:
+          summary: 'Low disk space'
+          description: 'Disk space is {{ $value }}% full'
+
+      # High CPU usage (if node_exporter is available)
+      - alert: AuraHighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 10m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: 'High CPU usage'
+          description: 'CPU usage is {{ $value }}%'
