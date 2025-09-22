@@ -1,14 +1,24 @@
 <script lang="ts">
-	import { createEventDispatcher } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
-	import { Textarea } from '$lib/components/ui/textarea';
+	import { modelActions, selectedModelStore } from '@/stores/model';
 	import { ArrowUp, Plus } from '@lucide/svelte';
+	import { createEventDispatcher } from 'svelte';
+	import CompactModelSelector from './compact-model-selector.svelte';
+	import FileContextIndicator from './file-context-indicator.svelte';
 
 	const dispatch = createEventDispatcher<{
 		send: { content: string };
 		attach: void;
 		voice: void;
 	}>();
+
+	// Model selection
+	let selectedModel = $state($selectedModelStore);
+
+	function handleModelChange(modelId: string) {
+		modelActions.setModel(modelId);
+		selectedModel = modelId;
+	}
 
 	let input = $state('');
 	let textareaElement = $state<HTMLTextAreaElement>();
@@ -62,10 +72,24 @@
 </script>
 
 <div class="p-4">
+	<!-- File context indicator -->
+	<div class="mb-2 px-1">
+		<FileContextIndicator />
+	</div>
+
 	<!-- Modern input container -->
 	<div
 		class="relative rounded-xl border border-border/50 bg-muted/10 transition-all duration-200 focus-within:border-primary/30 focus-within:bg-background focus-within:shadow-sm"
 	>
+		<!-- Model selector header -->
+		<div class="flex items-center justify-between border-b border-border/30 px-3 py-2">
+			<CompactModelSelector
+				bind:value={selectedModel}
+				onValueChange={handleModelChange}
+				placeholder="Sonnet 4"
+			/>
+		</div>
+
 		<div class="flex items-end gap-2 p-3">
 			<!-- Attachment button -->
 			<Button
@@ -83,7 +107,7 @@
 				<textarea
 					bind:this={textareaElement}
 					bind:value={input}
-					placeholder="Ask anything about your code..."
+					placeholder="How can I help you today?"
 					class="max-h-32 min-h-[24px] w-full resize-none border-0 bg-transparent py-1 text-sm leading-6 placeholder:text-muted-foreground/70 focus:outline-none"
 					rows={1}
 					onkeydown={handleKeyDown}

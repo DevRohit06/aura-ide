@@ -2,6 +2,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import type { Project } from '$lib/types';
 	import { chatStore } from '@/stores/chat.svelte';
+	import { selectedModelStore } from '@/stores/model';
 	import { createEventDispatcher } from 'svelte';
 	import ChatContainer from './chat-container.svelte';
 	import ChatInput from './chat-input.svelte';
@@ -18,9 +19,10 @@
 	}>();
 
 	// Reactive references to store state
-	const sessions = $derived(chatStore.sessions);
 	const activeSession = $derived(chatStore.activeSession);
-	const activeSessionId = $derived(chatStore.activeSessionId);
+
+	// Model selection - use store subscription for Svelte 4 stores
+	let selectedModel = $state($selectedModelStore);
 
 	async function handleSendMessage(event: CustomEvent<{ content: string }>) {
 		const { content } = event.detail;
@@ -31,8 +33,8 @@
 			sessionId = chatStore.createSession();
 		}
 
-		// Send the message
-		await chatStore.sendMessage(sessionId, content);
+		// Send the message with the selected model
+		await chatStore.sendMessage(sessionId, content, { model: selectedModel });
 	}
 
 	function handleAttach() {
