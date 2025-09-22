@@ -237,3 +237,9 @@ export interface ValidationError extends ApiError {
 	field: string;
 	value: any;
 }
+
+// Re-export LLM types
+export * from './llm.types.js';
+
+// Re-export Chat types
+export * from './chat.js';
