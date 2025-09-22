@@ -17,6 +17,7 @@
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import { Separator } from '$lib/components/ui/separator';
 	import { Textarea } from '$lib/components/ui/textarea';
+	import { sandboxFileActions } from '$lib/stores/sandbox.store';
 	import {
 		Code,
 		Download,
@@ -246,6 +247,18 @@
 		}
 	}
 
+	// Load files from sandbox to frontend editor
+	async function loadFilesFromSandbox() {
+		try {
+			await sandboxFileActions.loadFilesFromSandbox(sandbox.id);
+			// Close the dialog after successful loading
+			open = false;
+		} catch (error) {
+			error = error instanceof Error ? error.message : 'Failed to load files to editor';
+			console.error('Error loading files to editor:', error);
+		}
+	}
+
 	// Navigate to directory
 	function navigateToPath(path: string) {
 		currentPath = path;
@@ -379,6 +392,10 @@
 							<Button size="sm" onclick={() => loadFiles(currentPath)}>
 								<RefreshCw class="mr-1 h-3 w-3" />
 								Refresh
+							</Button>
+							<Button size="sm" onclick={() => loadFilesFromSandbox()}>
+								<Download class="mr-1 h-3 w-3" />
+								Load to Editor
 							</Button>
 							<Button size="sm" onclick={() => (showCreateDialog = true)}>
 								<Plus class="mr-1 h-3 w-3" />
