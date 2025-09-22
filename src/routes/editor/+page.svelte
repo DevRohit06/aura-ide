@@ -4,14 +4,10 @@
 	import EnhancedSidebar from '$lib/components/shared/enhanced-sidebar.svelte';
 	import * as Resizable from '$lib/components/ui/resizable/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
-	import { activeFileId, fileActions, filesStore, tabActions } from '$lib/stores/editor.js';
-	import { createBreadcrumbs } from '$lib/utils/file-tree';
+	import { activeFileId, filesStore } from '$lib/stores/editor.js';
 	// Icons
 	import { TerminalManager } from '$lib/components/shared/terminal';
-	import ChatSidebar from '@/components/chat/chat-sidebar.svelte';
-
-	// Enhanced sidebar state
-	let useEnhancedSidebar = $state(false);
+	// import ChatSidebar from '@/components/chat/chat-sidebar.svelte';
 
 	let { data } = $props();
 
@@ -25,51 +21,6 @@
 
 	// Get current file and breadcrumbs
 	let currentFile = $derived($activeFileId ? $filesStore.get($activeFileId) : null);
-	let breadcrumbs = $derived(currentFile ? createBreadcrumbs(currentFile.path) : []);
-
-	// Load files from current session
-	async function loadSessionFiles(sessionId: string) {
-		try {
-			const response = await fetch(`/api/sessions/${sessionId}/files?source=sandbox`, {
-				method: 'GET'
-			});
-
-			if (!response.ok) {
-				console.error('Failed to load session files:', response.statusText);
-				return;
-			}
-
-			const result = await response.json();
-			if (result.success && result.data.files) {
-				// Convert API files to FileSystemItem format
-				const fileItems = result.data.files
-					.filter((file: any) => file.path && !file.path.endsWith('/'))
-					.map((file: any) => ({
-						id: file.path,
-						name: file.path.split('/').pop() || file.path,
-						path: file.path,
-						type: 'file' as const,
-						content: file.content || '',
-						size: file.size || 0,
-						modifiedAt: file.lastModified ? new Date(file.lastModified) : new Date(),
-						isDirty: false
-					}));
-
-				// Load files into the store
-				fileActions.loadFiles(fileItems);
-
-				// Open the first file if no file is currently open
-				if (fileItems.length > 0 && !$activeFileId) {
-					const firstFile =
-						fileItems.find((f) => f.name.includes('index') || f.name.includes('main')) ||
-						fileItems[0];
-					tabActions.openFile(firstFile.id);
-				}
-			}
-		} catch (error) {
-			console.error('Failed to load session files:', error);
-		}
-	}
 </script>
 
 <svelte:head>
@@ -135,7 +86,7 @@
 			minSize={20}
 			class="h-full w-fit"
 		>
-			<ChatSidebar />
+			<!-- <ChatSidebar /> -->
 		</Resizable.Pane>
 	</Sidebar.Provider>
 </Resizable.PaneGroup>
