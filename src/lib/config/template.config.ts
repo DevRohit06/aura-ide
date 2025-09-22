@@ -82,6 +82,51 @@ export const stackblitzTemplates = {
 } as const;
 
 /**
+ * GitHub repository templates mapping
+ * Maps template IDs to GitHub repositories (primarily StackBlitz starters)
+ */
+export const githubTemplates = {
+	// React templates from StackBlitz
+	react: { owner: 'stackblitz', repo: 'starters', path: 'react' },
+	'react-ts': { owner: 'stackblitz', repo: 'starters', path: 'react-ts' },
+
+	// Vue templates from StackBlitz
+	vue: { owner: 'stackblitz', repo: 'starters', path: 'vue' },
+	'vue-ts': { owner: 'stackblitz', repo: 'starters', path: 'vue-ts' },
+
+	// Svelte templates from StackBlitz
+	svelte: { owner: 'stackblitz', repo: 'starters', path: 'svelte' },
+	'svelte-ts': { owner: 'stackblitz', repo: 'starters', path: 'svelte-ts' },
+	sveltekit: { owner: 'stackblitz', repo: 'starters', path: 'sveltekit' },
+
+	// Next.js templates from StackBlitz
+	nextjs: { owner: 'stackblitz', repo: 'starters', path: 'nextjs' },
+	'nextjs-ts': { owner: 'stackblitz', repo: 'starters', path: 'nextjs-ts' },
+
+	// Angular templates from StackBlitz
+	angular: { owner: 'stackblitz', repo: 'starters', path: 'angular' },
+
+	// Node.js templates from StackBlitz
+	node: { owner: 'stackblitz', repo: 'starters', path: 'node' },
+	express: { owner: 'stackblitz', repo: 'starters', path: 'express' },
+
+	// Vanilla templates from StackBlitz
+	vanilla: { owner: 'stackblitz', repo: 'starters', path: 'vanilla' },
+	'vanilla-ts': { owner: 'stackblitz', repo: 'starters', path: 'vanilla-ts' },
+
+	// Other templates from StackBlitz
+	astro: { owner: 'stackblitz', repo: 'starters', path: 'astro' },
+	nuxt: { owner: 'stackblitz', repo: 'starters', path: 'nuxtjs' },
+	vite: { owner: 'stackblitz', repo: 'starters', path: 'vite' },
+	'vite-react': { owner: 'stackblitz', repo: 'starters', path: 'vite-react' },
+	'vite-react-ts': { owner: 'stackblitz', repo: 'starters', path: 'vite-react-ts' },
+	'vite-vue': { owner: 'stackblitz', repo: 'starters', path: 'vite-vue' },
+	'vite-vue-ts': { owner: 'stackblitz', repo: 'starters', path: 'vite-vue-ts' },
+	'vite-svelte': { owner: 'stackblitz', repo: 'starters', path: 'vite-svelte' },
+	'vite-svelte-ts': { owner: 'stackblitz', repo: 'starters', path: 'vite-svelte-ts' }
+} as const;
+
+/**
  * Template categories for organization
  */
 export const templateCategories = {
@@ -132,6 +177,18 @@ export function validateTemplateConfig(config: TemplateConfig): {
  */
 export function getStackBlitzTemplate(framework: string): string {
 	return stackblitzTemplates[framework as keyof typeof stackblitzTemplates] || framework;
+}
+
+/**
+ * Get GitHub template configuration
+ */
+export function getGitHubTemplate(templateId: string): {
+	owner: string;
+	repo: string;
+	path: string;
+} | null {
+	const template = githubTemplates[templateId as keyof typeof githubTemplates];
+	return template || null;
 }
 
 /**
