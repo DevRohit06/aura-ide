@@ -1,0 +1,68 @@
+# Docker Compose for Development
+# Lightweight setup for local development
+
+version: '3.8'
+
+services:
+  # Development application with hot reloading
+  aura-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: aura-dev
+    ports:
+      - '5173:5173'
+      - '9229:9229' # Debug port
+    environment:
+      - NODE_ENV=development
+      - PORT=5173
+      - LOG_LEVEL=debug
+    env_file:
+      - .env.local
+    volumes:
+      - .:/app
+      - /app/node_modules # Prevent overwriting node_modules
+      - ./logs:/app/logs
+    depends_on:
+      - mongodb-dev
+    networks:
+      - aura-dev-network
+    stdin_open: true
+    tty: true
+
+  # MongoDB for development
+  mongodb-dev:
+    image: mongo:7.0
+    container_name: aura-mongodb-dev
+    ports:
+      - '27017:27017'
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: dev
+      MONGO_INITDB_ROOT_PASSWORD: dev
+      MONGO_INITDB_DATABASE: aura_dev
+    volumes:
+      - mongodb_dev_data:/data/db
+    networks:
+      - aura-dev-network
+
+  # Redis for development
+  redis-dev:
+    image: redis:7.2-alpine
+    container_name: aura-redis-dev
+    ports:
+      - '6379:6379'
+    command: redis-server --requirepass dev
+    volumes:
+      - redis_dev_data:/data
+    networks:
+      - aura-dev-network
+
+volumes:
+  mongodb_dev_data:
+    driver: local
+  redis_dev_data:
+    driver: local
+
+networks:
+  aura-dev-network:
+    driver: bridge
