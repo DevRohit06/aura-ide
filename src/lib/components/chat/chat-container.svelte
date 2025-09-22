@@ -8,6 +8,7 @@
 		content: string;
 		role: 'user' | 'assistant';
 		timestamp: Date;
+		isLoading?: boolean;
 	}
 
 	interface Props {

@@ -68,6 +68,15 @@
 	>
 		<div class="flex items-end gap-2 p-3">
 			<!-- Attachment button -->
+			<Button
+				variant="ghost"
+				size="icon"
+				class="h-8 w-8 shrink-0 rounded-lg transition-colors hover:bg-muted/80"
+				onclick={() => dispatch('attach')}
+				title="Attach file"
+			>
+				<Plus />
+			</Button>
 
 			<!-- Input area -->
 			<div class="relative flex min-h-[32px] flex-1 items-center">
@@ -83,40 +92,32 @@
 					oncompositionend={handleCompositionEnd}
 				></textarea>
 			</div>
-		</div>
-	</div>
-	<Button
-		variant="ghost"
-		size="icon"
-		class="h-8 w-8 shrink-0 rounded-lg transition-colors hover:bg-muted/80"
-		onclick={() => dispatch('attach')}
-		title="Attach file"
-	>
-		<Plus />
-	</Button>
-	<!-- Action buttons -->
-	<div class="flex shrink-0 items-center gap-1">
-		<!-- Voice button -->
-		<Button
-			variant="ghost"
-			size="icon"
-			class="h-8 w-8 rounded-lg transition-colors hover:bg-muted/80"
-			onclick={() => dispatch('voice')}
-			title="Voice input"
-		>
-			<span class="text-sm text-muted-foreground">🎤</span>
-		</Button>
 
-		<!-- Send button -->
-		<Button
-			size="icon"
-			class="h-8 w-8 rounded-lg bg-primary text-primary-foreground transition-all duration-200 hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-muted/50 disabled:text-muted-foreground"
-			disabled={!input.trim()}
-			onclick={handleSend}
-			title="Send message"
-		>
-			<ArrowUp />
-		</Button>
+			<!-- Action buttons -->
+			<div class="flex shrink-0 items-center gap-1">
+				<!-- Voice button -->
+				<Button
+					variant="ghost"
+					size="icon"
+					class="h-8 w-8 rounded-lg transition-colors hover:bg-muted/80"
+					onclick={() => dispatch('voice')}
+					title="Voice input"
+				>
+					<span class="text-sm text-muted-foreground">🎤</span>
+				</Button>
+
+				<!-- Send button -->
+				<Button
+					size="icon"
+					class="h-8 w-8 rounded-lg bg-primary text-primary-foreground transition-all duration-200 hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-muted/50 disabled:text-muted-foreground"
+					disabled={!input.trim()}
+					onclick={handleSend}
+					title="Send message"
+				>
+					<ArrowUp />
+				</Button>
+			</div>
+		</div>
 	</div>
 
 	<!-- Subtle tips -->

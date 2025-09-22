@@ -1,85 +1,50 @@
 <script lang="ts">
+	import { Button } from '$lib/components/ui/button';
+	import type { Project } from '$lib/types';
+	import { chatStore } from '@/stores/chat.svelte';
 	import { createEventDispatcher } from 'svelte';
 	import ChatContainer from './chat-container.svelte';
 	import ChatInput from './chat-input.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import { Separator } from '$lib/components/ui/separator';
+
+	// Props
+	interface Props {
+		project?: Project;
+	}
+
+	let { project = undefined }: Props = $props();
 
 	const dispatch = createEventDispatcher<{
 		close: void;
 	}>();
 
-	// Chat state
-	let messages = $state<
-		Array<{
-			id: string;
-			content: string;
-			role: 'user' | 'assistant';
-			timestamp: Date;
-		}>
-	>([]);
-
-	let isLoading = $state(false);
-
-	function generateId(): string {
-		return Date.now().toString(36) + Math.random().toString(36).substr(2);
-	}
-
-	function addMessage(content: string, role: 'user' | 'assistant') {
-		messages = [
-			...messages,
-			{
-				id: generateId(),
-				content,
-				role,
-				timestamp: new Date()
-			}
-		];
-	}
+	// Reactive references to store state
+	const sessions = $derived(chatStore.sessions);
+	const activeSession = $derived(chatStore.activeSession);
+	const activeSessionId = $derived(chatStore.activeSessionId);
 
 	async function handleSendMessage(event: CustomEvent<{ content: string }>) {
 		const { content } = event.detail;
 
-		// Add user message
-		addMessage(content, 'user');
-
-		// Show loading state
-		isLoading = true;
-
-		try {
-			// Simulate API call - replace with actual AI service
-			await new Promise((resolve) => setTimeout(resolve, 1500));
-
-			// Add assistant response (mock response for now)
-			const responses = [
-				"I can help you with that! Could you provide more context about what you're trying to achieve?",
-				"That's a great question. Let me analyze your code and provide some suggestions.",
-				"I see what you're working on. Here are some recommendations to improve your code:",
-				'Based on your code, I notice a few areas where we could optimize performance.',
-				'This looks good! Here are some best practices you might consider:'
-			];
-
-			const randomResponse = responses[Math.floor(Math.random() * responses.length)];
-			addMessage(randomResponse, 'assistant');
-		} catch (error) {
-			addMessage('Sorry, I encountered an error. Please try again.', 'assistant');
-		} finally {
-			isLoading = false;
+		// Ensure we have an active session
+		let sessionId = chatStore.activeSessionId;
+		if (!sessionId) {
+			sessionId = chatStore.createSession();
 		}
+
+		// Send the message
+		await chatStore.sendMessage(sessionId, content);
 	}
 
 	function handleAttach() {
-		// TODO: Implement file attachment
-		console.log('Attach file');
+		console.log('File attachment - TODO: Implement file upload');
 	}
 
 	function handleVoice() {
-		// TODO: Implement voice input
-		console.log('Voice input');
+		console.log('Voice input - TODO: Implement voice recording');
 	}
 
 	function clearChat() {
-		messages = [];
+		chatStore.createSession();
 	}
 </script>
 
@@ -95,8 +60,8 @@
 		</div>
 
 		<div class="flex items-center gap-1">
-			{#if messages.length > 0}
-				<Button variant="ghost" size="icon" class="h-8 w-8" onclick={clearChat} title="Clear chat">
+			{#if activeSession && activeSession.messages.length > 0}
+				<Button variant="ghost" size="icon" class="h-8 w-8" onclick={clearChat} title="New chat">
 					🗑️
 				</Button>
 			{/if}
@@ -113,10 +78,13 @@
 	</div>
 
 	<!-- Chat messages -->
-	<div class="flex-1 overflow-hidden">
-		<ChatContainer {messages} {isLoading} />
+	<div class="flex-1 overflow-y-auto">
+		<ChatContainer
+			messages={activeSession?.messages || []}
+			isLoading={activeSession?.messages.some((m) => m.isLoading) || false}
+		/>
 	</div>
 
 	<!-- Chat input -->
-	<ChatInput onsend={handleSendMessage} onattach={handleAttach} onvoice={handleVoice} />
+	<ChatInput on:send={handleSendMessage} on:attach={handleAttach} on:voice={handleVoice} />
 </div>

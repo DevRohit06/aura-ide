@@ -4,6 +4,7 @@
 		content: string;
 		role: 'user' | 'assistant';
 		timestamp: Date;
+		isLoading?: boolean;
 	}
 
 	interface Props {
@@ -39,9 +40,24 @@
 		</div>
 
 		<div class="prose prose-sm dark:prose-invert max-w-none">
-			<p class="text-sm leading-relaxed whitespace-pre-wrap">
-				{message.content}
-			</p>
+			{#if message.isLoading}
+				<div class="flex items-center gap-2">
+					<div class="flex space-x-1">
+						<div
+							class="h-2 w-2 animate-bounce rounded-full bg-current [animation-delay:-0.3s]"
+						></div>
+						<div
+							class="h-2 w-2 animate-bounce rounded-full bg-current [animation-delay:-0.15s]"
+						></div>
+						<div class="h-2 w-2 animate-bounce rounded-full bg-current"></div>
+					</div>
+					<span class="text-xs text-muted-foreground">Thinking...</span>
+				</div>
+			{:else}
+				<p class="text-sm leading-relaxed whitespace-pre-wrap">
+					{message.content}
+				</p>
+			{/if}
 		</div>
 	</div>
 </div>
