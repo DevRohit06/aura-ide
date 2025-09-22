@@ -204,10 +204,7 @@ export class DaytonaService {
 				try {
 					// Try different methods to upload files
 					if (sandbox.daytonaSandbox.fs && sandbox.daytonaSandbox.fs.uploadFile) {
-						await sandbox.daytonaSandbox.fs.uploadFile(
-							Buffer.from(file.content),
-							file.path
-						);
+						await sandbox.daytonaSandbox.fs.uploadFile(Buffer.from(file.content), file.path);
 						uploadedCount++;
 						logger.debug(`✅ Uploaded: ${file.path}`);
 					} else if (sandbox.daytonaSandbox.writeFile) {
@@ -224,7 +221,9 @@ export class DaytonaService {
 							hasFs: !!sandbox.daytonaSandbox.fs,
 							fsProps: sandbox.daytonaSandbox.fs ? Object.keys(sandbox.daytonaSandbox.fs) : [],
 							hasFiles: !!sandbox.daytonaSandbox.files,
-							filesProps: sandbox.daytonaSandbox.files ? Object.keys(sandbox.daytonaSandbox.files) : [],
+							filesProps: sandbox.daytonaSandbox.files
+								? Object.keys(sandbox.daytonaSandbox.files)
+								: [],
 							hasWriteFile: !!sandbox.daytonaSandbox.writeFile,
 							allMethods: Object.getOwnPropertyNames(sandbox.daytonaSandbox),
 							allProps: Object.keys(sandbox.daytonaSandbox)
@@ -239,7 +238,9 @@ export class DaytonaService {
 			}
 
 			const loadTime = `${Date.now() - startTime}ms`;
-			logger.info(`✅ Uploaded ${uploadedCount}/${files.length} files to Daytona sandbox in ${loadTime}`);
+			logger.info(
+				`✅ Uploaded ${uploadedCount}/${files.length} files to Daytona sandbox in ${loadTime}`
+			);
 
 			if (errors.length > 0) {
 				logger.warn(`File upload errors: ${errors.join(', ')}`);
