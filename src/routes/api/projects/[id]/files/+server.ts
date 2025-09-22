@@ -1,4 +1,4 @@
-import { R2StorageService } from '$lib/services/r2-storage.service.js';
+import { R2StorageService } from '$lib/services/r2-storage.service';
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.js';
 
