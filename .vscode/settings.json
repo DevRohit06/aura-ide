@@ -1,0 +1,30 @@
+{
+	"svelte.enable-ts-plugin": true,
+	"svelte.plugin.svelte.compilerWarnings": {
+		"css-unused-selector": "ignore"
+	},
+	"svelte.plugin.svelte.format.enable": true,
+	"typescript.preferences.includePackageJsonAutoImports": "on",
+	"editor.codeActionsOnSave": {
+		"source.organizeImports": "explicit"
+	},
+	"files.associations": {
+		"*.svelte": "svelte"
+	},
+	"[svelte]": {
+		"editor.defaultFormatter": "svelte.svelte-vscode",
+		"editor.formatOnSave": true
+	},
+	"[typescript]": {
+		"editor.defaultFormatter": "esbenp.prettier-vscode",
+		"editor.formatOnSave": true
+	},
+	"emmet.includeLanguages": {
+		"svelte": "html"
+	},
+	"search.exclude": {
+		"**/node_modules": true,
+		"**/build": true,
+		"**/.svelte-kit": true
+	}
+}
