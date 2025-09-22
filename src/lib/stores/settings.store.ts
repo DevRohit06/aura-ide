@@ -1,9 +1,14 @@
-import { writable, get } from 'svelte/store';
+import { writable, get, derived } from 'svelte/store';
 import type { EditorSettings } from '@/types/editor-state';
+import type { ComprehensiveSettings } from '@/types/settings';
+import {
+	comprehensiveSettingsStore,
+	comprehensiveSettingsActions
+} from './comprehensive-settings.store.js';
 
 // Default settings
 const defaultSettings: EditorSettings = {
-	theme: 'light',
+	theme: 'dark',
 	fontSize: 14,
 	fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
 	lineHeight: 1.4,
@@ -19,143 +24,225 @@ const defaultSettings: EditorSettings = {
 	emacs: false
 };
 
-// Settings store
-export const settingsStore = writable<EditorSettings>(defaultSettings);
+// Settings store derived from comprehensive settings for backward compatibility
+export const settingsStore = derived(comprehensiveSettingsStore, ($comprehensive) => {
+	// Map comprehensive theme to legacy theme format
+	let legacyTheme: 'light' | 'dark' | 'system' = 'system';
+	switch ($comprehensive.appearance.theme) {
+		case 'light':
+			legacyTheme = 'light';
+			break;
+		case 'dark':
+			legacyTheme = 'dark';
+			break;
+		case 'system':
+			legacyTheme = 'system';
+			break;
+		case 'high-contrast':
+			// Map high-contrast to dark for backward compatibility
+			legacyTheme = 'dark';
+			break;
+		default:
+			legacyTheme = 'dark';
+	}
+
+	return {
+		theme: legacyTheme,
+		fontSize: $comprehensive.appearance.fontSize,
+		fontFamily: $comprehensive.appearance.fontFamily,
+		lineHeight: $comprehensive.appearance.lineHeight,
+		tabSize: $comprehensive.editor.tabSize,
+		insertSpaces: $comprehensive.editor.insertSpaces,
+		wordWrap: $comprehensive.editor.wordWrap,
+		lineNumbers: $comprehensive.editor.lineNumbers,
+		miniMap: $comprehensive.editor.miniMap,
+		autoSave: $comprehensive.editor.autoSave,
+		autoSaveDelay: $comprehensive.editor.autoSaveDelay,
+		formatOnSave: $comprehensive.editor.formatOnSave,
+		vim: $comprehensive.keyboard.keyMap === 'vim',
+		emacs: $comprehensive.keyboard.keyMap === 'emacs'
+	};
+});
 
 // Settings actions
 export const settingsActions = {
 	// Update settings
 	updateSettings: (updates: Partial<EditorSettings>) => {
-		settingsStore.update((state) => ({ ...state, ...updates }));
+		// Convert legacy settings to comprehensive settings format
+		const comprehensiveUpdates: Partial<ComprehensiveSettings> = {};
+
+		if (updates.theme !== undefined) {
+			comprehensiveUpdates.appearance = {
+				...get(comprehensiveSettingsStore).appearance,
+				theme: updates.theme
+			};
+		}
+		if (updates.fontSize !== undefined) {
+			comprehensiveUpdates.appearance = {
+				...(comprehensiveUpdates.appearance || get(comprehensiveSettingsStore).appearance),
+				fontSize: updates.fontSize
+			};
+		}
+		if (updates.fontFamily !== undefined) {
+			comprehensiveUpdates.appearance = {
+				...(comprehensiveUpdates.appearance || get(comprehensiveSettingsStore).appearance),
+				fontFamily: updates.fontFamily
+			};
+		}
+		if (updates.lineHeight !== undefined) {
+			comprehensiveUpdates.appearance = {
+				...(comprehensiveUpdates.appearance || get(comprehensiveSettingsStore).appearance),
+				lineHeight: updates.lineHeight
+			};
+		}
+
+		if (
+			updates.tabSize !== undefined ||
+			updates.insertSpaces !== undefined ||
+			updates.wordWrap !== undefined ||
+			updates.lineNumbers !== undefined ||
+			updates.miniMap !== undefined ||
+			updates.autoSave !== undefined ||
+			updates.autoSaveDelay !== undefined ||
+			updates.formatOnSave !== undefined
+		) {
+			comprehensiveUpdates.editor = { ...get(comprehensiveSettingsStore).editor };
+			if (updates.tabSize !== undefined) comprehensiveUpdates.editor.tabSize = updates.tabSize;
+			if (updates.insertSpaces !== undefined)
+				comprehensiveUpdates.editor.insertSpaces = updates.insertSpaces;
+			if (updates.wordWrap !== undefined) comprehensiveUpdates.editor.wordWrap = updates.wordWrap;
+			if (updates.lineNumbers !== undefined)
+				comprehensiveUpdates.editor.lineNumbers = updates.lineNumbers;
+			if (updates.miniMap !== undefined) comprehensiveUpdates.editor.miniMap = updates.miniMap;
+			if (updates.autoSave !== undefined) comprehensiveUpdates.editor.autoSave = updates.autoSave;
+			if (updates.autoSaveDelay !== undefined)
+				comprehensiveUpdates.editor.autoSaveDelay = updates.autoSaveDelay;
+			if (updates.formatOnSave !== undefined)
+				comprehensiveUpdates.editor.formatOnSave = updates.formatOnSave;
+		}
+
+		if (updates.vim !== undefined || updates.emacs !== undefined) {
+			comprehensiveUpdates.keyboard = { ...get(comprehensiveSettingsStore).keyboard };
+			if (updates.vim) {
+				comprehensiveUpdates.keyboard.keyMap = 'vim';
+			} else if (updates.emacs) {
+				comprehensiveUpdates.keyboard.keyMap = 'emacs';
+			} else {
+				comprehensiveUpdates.keyboard.keyMap = 'default';
+			}
+		}
+
+		comprehensiveSettingsActions.updateSettings(comprehensiveUpdates);
 	},
 
 	// Theme settings
 	setTheme: (theme: 'light' | 'dark' | 'auto') => {
-		settingsStore.update((state) => ({ ...state, theme }));
+		comprehensiveSettingsActions.updateSetting('appearance', 'theme', theme);
 	},
 
 	toggleTheme: () => {
-		settingsStore.update((state) => ({
-			...state,
-			theme: state.theme === 'light' ? 'dark' : 'light'
-		}));
+		const current = comprehensiveSettingsActions.getCurrentSettings();
+		const newTheme = current.appearance.theme === 'light' ? 'dark' : 'light';
+		comprehensiveSettingsActions.updateSetting('appearance', 'theme', newTheme);
 	},
 
 	// Font settings
 	setFontSize: (fontSize: number) => {
-		settingsStore.update((state) => ({
-			...state,
-			fontSize: Math.max(8, Math.min(72, fontSize)) // Clamp between 8-72
-		}));
+		const clampedSize = Math.max(8, Math.min(72, fontSize));
+		comprehensiveSettingsActions.updateSetting('appearance', 'fontSize', clampedSize);
 	},
 
 	increaseFontSize: () => {
-		settingsStore.update((state) => ({
-			...state,
-			fontSize: Math.min(72, state.fontSize + 1)
-		}));
+		const current = comprehensiveSettingsActions.getCurrentSettings();
+		const newSize = Math.min(72, current.appearance.fontSize + 1);
+		comprehensiveSettingsActions.updateSetting('appearance', 'fontSize', newSize);
 	},
 
 	decreaseFontSize: () => {
-		settingsStore.update((state) => ({
-			...state,
-			fontSize: Math.max(8, state.fontSize - 1)
-		}));
+		const current = comprehensiveSettingsActions.getCurrentSettings();
+		const newSize = Math.max(8, current.appearance.fontSize - 1);
+		comprehensiveSettingsActions.updateSetting('appearance', 'fontSize', newSize);
 	},
 
 	setFontFamily: (fontFamily: string) => {
-		settingsStore.update((state) => ({ ...state, fontFamily }));
+		comprehensiveSettingsActions.updateSetting('appearance', 'fontFamily', fontFamily);
 	},
 
 	setLineHeight: (lineHeight: number) => {
-		settingsStore.update((state) => ({
-			...state,
-			lineHeight: Math.max(1.0, Math.min(3.0, lineHeight)) // Clamp between 1.0-3.0
-		}));
+		const clampedHeight = Math.max(1.0, Math.min(3.0, lineHeight));
+		comprehensiveSettingsActions.updateSetting('appearance', 'lineHeight', clampedHeight);
 	},
 
 	// Tab settings
 	setTabSize: (tabSize: number) => {
-		settingsStore.update((state) => ({
-			...state,
-			tabSize: Math.max(1, Math.min(8, tabSize)) // Clamp between 1-8
-		}));
+		const clampedSize = Math.max(1, Math.min(8, tabSize));
+		comprehensiveSettingsActions.updateSetting('editor', 'tabSize', clampedSize);
 	},
 
 	toggleInsertSpaces: () => {
-		settingsStore.update((state) => ({
-			...state,
-			insertSpaces: !state.insertSpaces
-		}));
+		const current = comprehensiveSettingsActions.getCurrentSettings();
+		comprehensiveSettingsActions.updateSetting(
+			'editor',
+			'insertSpaces',
+			!current.editor.insertSpaces
+		);
 	},
 
 	// Editor behavior
 	toggleWordWrap: () => {
-		settingsStore.update((state) => ({
-			...state,
-			wordWrap: !state.wordWrap
-		}));
+		const current = comprehensiveSettingsActions.getCurrentSettings();
+		comprehensiveSettingsActions.updateSetting('editor', 'wordWrap', !current.editor.wordWrap);
 	},
 
 	toggleLineNumbers: () => {
-		settingsStore.update((state) => ({
-			...state,
-			lineNumbers: !state.lineNumbers
-		}));
+		const current = comprehensiveSettingsActions.getCurrentSettings();
+		comprehensiveSettingsActions.updateSetting(
+			'editor',
+			'lineNumbers',
+			!current.editor.lineNumbers
+		);
 	},
 
 	toggleMiniMap: () => {
-		settingsStore.update((state) => ({
-			...state,
-			miniMap: !state.miniMap
-		}));
+		const current = comprehensiveSettingsActions.getCurrentSettings();
+		comprehensiveSettingsActions.updateSetting('editor', 'miniMap', !current.editor.miniMap);
 	},
 
 	// Auto-save settings
 	toggleAutoSave: () => {
-		settingsStore.update((state) => ({
-			...state,
-			autoSave: !state.autoSave
-		}));
+		const current = comprehensiveSettingsActions.getCurrentSettings();
+		comprehensiveSettingsActions.updateSetting('editor', 'autoSave', !current.editor.autoSave);
 	},
 
 	setAutoSaveDelay: (delay: number) => {
-		settingsStore.update((state) => ({
-			...state,
-			autoSaveDelay: Math.max(100, Math.min(10000, delay)) // Clamp between 100ms-10s
-		}));
+		const clampedDelay = Math.max(100, Math.min(10000, delay));
+		comprehensiveSettingsActions.updateSetting('editor', 'autoSaveDelay', clampedDelay);
 	},
 
 	toggleFormatOnSave: () => {
-		settingsStore.update((state) => ({
-			...state,
-			formatOnSave: !state.formatOnSave
-		}));
+		const current = comprehensiveSettingsActions.getCurrentSettings();
+		comprehensiveSettingsActions.updateSetting(
+			'editor',
+			'formatOnSave',
+			!current.editor.formatOnSave
+		);
 	},
 
 	// Editor modes
 	toggleVimMode: () => {
-		settingsStore.update((state) => ({
-			...state,
-			vim: !state.vim,
-			emacs: false // Disable emacs when enabling vim
-		}));
+		const current = comprehensiveSettingsActions.getCurrentSettings();
+		const newKeyMap = current.keyboard.keyMap === 'vim' ? 'default' : 'vim';
+		comprehensiveSettingsActions.updateSetting('keyboard', 'keyMap', newKeyMap);
 	},
 
 	toggleEmacsMode: () => {
-		settingsStore.update((state) => ({
-			...state,
-			emacs: !state.emacs,
-			vim: false // Disable vim when enabling emacs
-		}));
+		const current = comprehensiveSettingsActions.getCurrentSettings();
+		const newKeyMap = current.keyboard.keyMap === 'emacs' ? 'default' : 'emacs';
+		comprehensiveSettingsActions.updateSetting('keyboard', 'keyMap', newKeyMap);
 	},
 
 	disableAllModes: () => {
-		settingsStore.update((state) => ({
-			...state,
-			vim: false,
-			emacs: false
-		}));
+		comprehensiveSettingsActions.updateSetting('keyboard', 'keyMap', 'default');
 	},
 
 	// Utility methods
@@ -168,65 +255,81 @@ export const settingsActions = {
 		return state[key];
 	},
 
-	// Preset configurations
+	// Preset configurations - updated to use comprehensive settings
 	setLightThemePreset: () => {
-		settingsStore.update((state) => ({
-			...state,
-			theme: 'light',
-			fontSize: 14,
-			lineHeight: 1.4
-		}));
+		comprehensiveSettingsActions.updateSettings({
+			appearance: {
+				...get(comprehensiveSettingsStore).appearance,
+				theme: 'light',
+				fontSize: 14,
+				lineHeight: 1.4
+			}
+		});
 	},
 
 	setDarkThemePreset: () => {
-		settingsStore.update((state) => ({
-			...state,
-			theme: 'dark',
-			fontSize: 14,
-			lineHeight: 1.4
-		}));
+		comprehensiveSettingsActions.updateSettings({
+			appearance: {
+				...get(comprehensiveSettingsStore).appearance,
+				theme: 'dark',
+				fontSize: 14,
+				lineHeight: 1.4
+			}
+		});
 	},
 
 	setCompactPreset: () => {
-		settingsStore.update((state) => ({
-			...state,
-			fontSize: 12,
-			lineHeight: 1.2,
-			tabSize: 2,
-			miniMap: false
-		}));
+		comprehensiveSettingsActions.updateSettings({
+			appearance: {
+				...get(comprehensiveSettingsStore).appearance,
+				fontSize: 12,
+				lineHeight: 1.2
+			},
+			editor: {
+				...get(comprehensiveSettingsStore).editor,
+				tabSize: 2,
+				miniMap: false
+			}
+		});
 	},
 
 	setAccessiblePreset: () => {
-		settingsStore.update((state) => ({
-			...state,
-			fontSize: 16,
-			lineHeight: 1.6,
-			tabSize: 4,
-			lineNumbers: true,
-			wordWrap: true
-		}));
+		comprehensiveSettingsActions.updateSettings({
+			appearance: {
+				...get(comprehensiveSettingsStore).appearance,
+				fontSize: 16,
+				lineHeight: 1.6
+			},
+			editor: {
+				...get(comprehensiveSettingsStore).editor,
+				tabSize: 4,
+				lineNumbers: true,
+				wordWrap: true
+			}
+		});
 	},
 
 	setPerformancePreset: () => {
-		settingsStore.update((state) => ({
-			...state,
-			miniMap: false,
-			autoSave: false,
-			formatOnSave: false
-		}));
+		comprehensiveSettingsActions.updateSettings({
+			editor: {
+				...get(comprehensiveSettingsStore).editor,
+				miniMap: false,
+				autoSave: false,
+				formatOnSave: false
+			}
+		});
 	},
 
 	// Import/Export settings
 	exportSettings: (): string => {
-		const state = get(settingsStore);
+		const state = settingsActions.getCurrentSettings();
 		return JSON.stringify(state, null, 2);
 	},
 
 	importSettings: (settingsJson: string): boolean => {
 		try {
 			const parsed = JSON.parse(settingsJson);
-			settingsStore.set({ ...defaultSettings, ...parsed });
+			settingsActions.updateSettings({ ...defaultSettings, ...parsed });
 			return true;
 		} catch (error) {
 			console.warn('Failed to import settings:', error);
@@ -249,7 +352,31 @@ export const settingsActions = {
 		if (saved) {
 			try {
 				const parsed = JSON.parse(saved);
-				settingsStore.set({ ...defaultSettings, ...parsed });
+				// Use comprehensive settings actions to restore settings
+				comprehensiveSettingsActions.updateSettings({
+					appearance: {
+						...get(comprehensiveSettingsStore).appearance,
+						theme: parsed.theme || defaultSettings.theme,
+						fontSize: parsed.fontSize || defaultSettings.fontSize,
+						fontFamily: parsed.fontFamily || defaultSettings.fontFamily,
+						lineHeight: parsed.lineHeight || defaultSettings.lineHeight
+					},
+					editor: {
+						...get(comprehensiveSettingsStore).editor,
+						tabSize: parsed.tabSize || defaultSettings.tabSize,
+						insertSpaces: parsed.insertSpaces ?? defaultSettings.insertSpaces,
+						wordWrap: parsed.wordWrap ?? defaultSettings.wordWrap,
+						lineNumbers: parsed.lineNumbers ?? defaultSettings.lineNumbers,
+						miniMap: parsed.miniMap ?? defaultSettings.miniMap,
+						autoSave: parsed.autoSave ?? defaultSettings.autoSave,
+						autoSaveDelay: parsed.autoSaveDelay || defaultSettings.autoSaveDelay,
+						formatOnSave: parsed.formatOnSave ?? defaultSettings.formatOnSave
+					},
+					keyboard: {
+						...get(comprehensiveSettingsStore).keyboard,
+						keyMap: parsed.vim ? 'vim' : parsed.emacs ? 'emacs' : 'default'
+					}
+				});
 			} catch (error) {
 				console.warn('Failed to restore settings:', error);
 			}
@@ -258,7 +385,7 @@ export const settingsActions = {
 
 	// Reset to default
 	reset: () => {
-		settingsStore.set({ ...defaultSettings });
+		settingsActions.updateSettings({ ...defaultSettings });
 	}
 };
 
