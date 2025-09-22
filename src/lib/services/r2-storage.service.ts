@@ -16,6 +16,7 @@ import {
 	S3Client
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { Readable } from 'stream';
 import { promisify } from 'util';
 import { gunzip, gzip } from 'zlib';
 
@@ -178,7 +179,7 @@ export class R2StorageService {
 	 */
 	async downloadFile(key: string, options: R2DownloadOptions = {}): Promise<Buffer | null> {
 		try {
-			// Add version to key if specified
+			// Add version to key if specified (consider if this is the right approach for your use case)
 			const finalKey = options.version ? `${key}@${options.version}` : key;
 
 			const command = new GetObjectCommand({
@@ -193,36 +194,58 @@ export class R2StorageService {
 				return null;
 			}
 
-			// Convert stream to buffer
-			const chunks: Buffer[] = [];
+			// Convert stream to buffer more reliably
+			let content: Buffer;
 
-			if (result.Body) {
-				// Handle the stream properly
-				const stream = result.Body as any;
-				for await (const chunk of stream) {
-					chunks.push(Buffer.from(chunk));
+			if (result.Body instanceof Readable) {
+				// Handle Node.js Readable stream
+				const chunks: Buffer[] = [];
+				for await (const chunk of result.Body) {
+					chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
 				}
+				content = Buffer.concat(chunks);
+			} else if (result.Body instanceof Uint8Array) {
+				// Handle Uint8Array directly
+				content = Buffer.from(result.Body);
+			} else {
+				// Fallback for other types
+				const chunks: Buffer[] = [];
+				const stream = result.Body as AsyncIterable<any>;
+				for await (const chunk of stream) {
+					chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+				}
+				content = Buffer.concat(chunks);
 			}
-
-			let content = Buffer.concat(chunks);
 
 			// Decompress if needed
 			if (options.decompress && result.Metadata?.compression === 'gzip') {
-				content = Buffer.from(await gunzipAsync(content));
+				try {
+					content = await gunzipAsync(content);
+				} catch (decompressError) {
+					console.error(`Failed to decompress file: ${finalKey}`, decompressError);
+					throw new Error(`Decompression failed for ${finalKey}`);
+				}
 			}
 
-			logger.info(`File downloaded from R2: ${finalKey} (${content.length} bytes)`);
-
+			console.log(`File downloaded from R2: ${finalKey} (${content.length} bytes)`);
 			return content;
 		} catch (error: any) {
-			if (error.name === 'NoSuchKey') {
+			// Handle specific AWS S3 errors
+			if (error.name === 'NoSuchKey' || error.Code === 'NoSuchKey') {
 				return null;
 			}
-			logger.error(`Failed to download file from R2: ${key}`, error);
+			if (error.name === 'AccessDenied' || error.Code === 'AccessDenied') {
+				console.error(`Access denied for R2 file: ${key}`);
+				throw new Error(`Access denied: ${key}`);
+			}
+
+			console.error(`Failed to download file from R2: ${key}`, {
+				error: error.message,
+				code: error.Code || error.name
+			});
 			throw error;
 		}
 	}
-
 	/**
 	 * Delete file from R2 storage
 	 */
@@ -486,8 +509,91 @@ export class R2StorageService {
 	}
 
 	/**
-	 * Download project files as a bundle
+	 * Download file from R2 storage
 	 */
+	async downloadFile(key: string, options: R2DownloadOptions = {}): Promise<Buffer | null> {
+		try {
+			// Handle version - only append if it's not "latest" or if you actually use versioned keys
+			let finalKey = key;
+			if (options.version && options.version !== 'latest') {
+				finalKey = `${key}@${options.version}`;
+			}
+			// If version is "latest" or undefined, use the key as-is
+
+			console.log(`Attempting to download from R2: ${finalKey}`);
+
+			const command = new GetObjectCommand({
+				Bucket: this.bucket,
+				Key: finalKey,
+				Range: options.range
+			});
+
+			const result = await this.s3Client.send(command);
+
+			if (!result.Body) {
+				console.log(`No body returned for key: ${finalKey}`);
+				return null;
+			}
+
+			// Convert stream to buffer more reliably
+			let content: Buffer;
+
+			if (result.Body instanceof Readable) {
+				// Handle Node.js Readable stream
+				const chunks: Buffer[] = [];
+				for await (const chunk of result.Body) {
+					chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+				}
+				content = Buffer.concat(chunks);
+			} else if (result.Body instanceof Uint8Array) {
+				// Handle Uint8Array directly
+				content = Buffer.from(result.Body);
+			} else {
+				// Fallback for other types
+				const chunks: Buffer[] = [];
+				const stream = result.Body as AsyncIterable<any>;
+				for await (const chunk of stream) {
+					chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+				}
+				content = Buffer.concat(chunks);
+			}
+
+			// Decompress if needed
+			if (options.decompress && result.Metadata?.compression === 'gzip') {
+				try {
+					content = await gunzipAsync(content);
+				} catch (decompressError) {
+					console.error(`Failed to decompress file: ${finalKey}`, decompressError);
+					throw new Error(`Decompression failed for ${finalKey}`);
+				}
+			}
+
+			console.log(`File downloaded from R2: ${finalKey} (${content.length} bytes)`);
+			return content;
+		} catch (error: any) {
+			console.log(`Download error for key "${key}":`, {
+				errorName: error.name,
+				errorCode: error.Code,
+				message: error.message
+			});
+
+			// Handle specific AWS S3 errors
+			if (error.name === 'NoSuchKey' || error.Code === 'NoSuchKey') {
+				return null;
+			}
+			if (error.name === 'AccessDenied' || error.Code === 'AccessDenied') {
+				console.error(`Access denied for R2 file: ${key}`);
+				throw new Error(`Access denied: ${key}`);
+			}
+
+			console.error(`Failed to download file from R2: ${key}`, {
+				error: error.message,
+				code: error.Code || error.name
+			});
+			throw error;
+		}
+	}
+
 	async downloadProject(
 		projectId: string,
 		version?: string
@@ -500,31 +606,88 @@ export class R2StorageService {
 			});
 
 			if (!metadataContent) {
+				console.log(`No metadata found for project: ${projectId}`);
 				return null;
 			}
 
 			const projectInfo: R2ProjectStorage = JSON.parse(metadataContent.toString());
 			const files: Record<string, Buffer> = {};
 
-			// Download each file
-			await Promise.all(
-				projectInfo.files.map(async (fileInfo) => {
-					const content = await this.downloadFile(fileInfo.key, {
-						version: fileInfo.version,
-						decompress: true
-					});
+			console.log(`Found ${projectInfo.files.length} files in metadata`);
+
+			// Download each file with better error handling
+			const downloadPromises = projectInfo.files.map(async (fileInfo, index) => {
+				try {
+					console.log(`[${index + 1}/${projectInfo.files.length}] Downloading file:`, fileInfo.key);
+
+					// Try different version strategies
+					const downloadStrategies = [
+						// Strategy 1: Don't use version at all
+						{ version: undefined, decompress: true },
+						// Strategy 2: Use version as-is (if it's not "latest")
+						...(fileInfo.version && fileInfo.version !== 'latest'
+							? [{ version: fileInfo.version, decompress: true }]
+							: []),
+						// Strategy 3: Try without decompression
+						{ version: undefined, decompress: false }
+					];
+
+					let content: Buffer | null = null;
+					let usedStrategy = '';
+
+					for (const strategy of downloadStrategies) {
+						try {
+							console.log(`Trying strategy for ${fileInfo.key}:`, strategy);
+							content = await this.downloadFile(fileInfo.key, strategy);
+							if (content) {
+								usedStrategy = JSON.stringify(strategy);
+								break;
+							}
+						} catch (strategyError) {
+							console.log(`Strategy failed for ${fileInfo.key}:`, strategy, strategyError.message);
+						}
+					}
 
 					if (content) {
 						files[fileInfo.path] = content;
+						console.log(
+							`✓ Successfully downloaded: ${fileInfo.path} (${content.length} bytes) using ${usedStrategy}`
+						);
+						return { success: true, path: fileInfo.path, size: content.length };
+					} else {
+						console.warn(`✗ All strategies failed for: ${fileInfo.key}`);
+						return { success: false, path: fileInfo.path, error: 'All download strategies failed' };
 					}
-				})
-			);
+				} catch (error) {
+					console.error(`✗ Error downloading file ${fileInfo.key}:`, error);
+					return { success: false, path: fileInfo.path, error: error.message };
+				}
+			});
 
-			logger.info(`Project downloaded from R2: ${projectId} (${Object.keys(files).length} files)`);
+			// Wait for all downloads and collect results
+			const results = await Promise.all(downloadPromises);
 
-			return files;
+			// Log summary
+			const successful = results.filter((r) => r.success);
+			const failed = results.filter((r) => !r.success);
+
+			console.log(`Download summary: ${successful.length} successful, ${failed.length} failed`);
+
+			if (failed.length > 0) {
+				console.log('Failed downloads:', failed);
+			}
+
+			console.log('Successfully downloaded files:', Object.keys(files));
+
+			if (Object.keys(files).length === 0) {
+				console.warn('No files were successfully downloaded!');
+			}
+
+			console.log(`Project downloaded from R2: ${projectId} (${Object.keys(files).length} files)`);
+
+			return Object.keys(files).length > 0 ? files : null;
 		} catch (error) {
-			logger.error(`Failed to download project from R2: ${projectId}`, error);
+			console.error(`Failed to download project from R2: ${projectId}`, error);
 			throw error;
 		}
 	}
