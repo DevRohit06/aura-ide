@@ -22,27 +22,6 @@
 		tabActions.closeFile(fileId);
 	};
 
-	// Get file type icon class based on extension
-	const getFileTypeClass = (filename: string): string => {
-		const ext = filename.split('.').pop()?.toLowerCase();
-		const typeMap: Record<string, string> = {
-			js: 'text-yellow-500',
-			jsx: 'text-blue-500',
-			ts: 'text-blue-600',
-			tsx: 'text-blue-600',
-			py: 'text-green-500',
-			html: 'text-orange-500',
-			css: 'text-blue-400',
-			scss: 'text-pink-400',
-			sass: 'text-pink-400',
-			json: 'text-yellow-600',
-			md: 'text-purple-500',
-			markdown: 'text-purple-500',
-			svelte: 'text-red-500'
-		};
-		return typeMap[ext || ''] || 'text-gray-400';
-	};
-
 	// Keyboard shortcuts
 	const handleKeydown = (event: KeyboardEvent) => {
 		if (event.ctrlKey || event.metaKey) {
@@ -81,7 +60,7 @@
 
 {#if $openFiles.length > 0}
 	<div class="flex h-10 overflow-x-auto overflow-y-hidden border-b border-border bg-background">
-		<div class="flex min-w-0 items-center">
+		<div class="flex min-w-0 items-center overflow-x-auto overflow-y-hidden">
 			{#each $openFiles as fileId (fileId)}
 				{@const file = $filesStore.get(fileId)}
 				{#if file}
@@ -89,7 +68,7 @@
 					{@const isDirty = fileStateActions.isFileDirty(fileId)}
 
 					<button
-						class="group flex max-w-48 min-w-0 items-center gap-2 border-r border-border bg-transparent px-3 py-2 text-sm transition-colors hover:bg-muted/50
+						class="group flex max-w-48 min-w-fit items-center gap-2 border-r border-border bg-transparent px-3 py-2 text-sm transition-colors hover:bg-muted/50
 							{isActive
 							? 'border-b-2 border-b-primary bg-muted text-foreground'
 							: 'text-muted-foreground hover:text-foreground'}"
