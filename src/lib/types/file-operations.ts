@@ -71,14 +71,15 @@ export interface FileSearchResult {
 	file: File;
 	matches: SearchMatch[];
 	score: number;
+	preview: string;
 }
 
 export interface SearchMatch {
 	line: number;
 	column: number;
+	text: string;
 	length: number;
 	context: string;
-	preview: string;
 }
 
 // File validation

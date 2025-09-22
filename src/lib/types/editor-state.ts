@@ -42,7 +42,7 @@ export interface PanelState {
 }
 
 export interface EditorSettings {
-	theme: 'light' | 'dark' | 'auto';
+	theme: 'light' | 'dark' | 'system';
 	fontSize: number;
 	fontFamily: string;
 	lineHeight: number;

@@ -262,7 +262,7 @@ export interface ProjectSettings {
 	tabSize: number;
 	insertSpaces: boolean;
 	wordWrap: boolean;
-	theme: 'light' | 'dark' | 'auto';
+	theme: 'light' | 'dark' | 'system';
 	fontFamily: string;
 	fontSize: number;
 	lineHeight: number;
