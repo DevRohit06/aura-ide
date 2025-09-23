@@ -169,6 +169,8 @@ export class DatabaseService {
 
 			// Chat message indexes
 			await chatMessagesCollection.createIndex({ threadId: 1 });
+			await chatMessagesCollection.createIndex({ projectId: 1 });
+			await chatMessagesCollection.createIndex({ userId: 1 });
 			await chatMessagesCollection.createIndex({ timestamp: 1 });
 			await chatMessagesCollection.createIndex({ role: 1 });
 			await chatMessagesCollection.createIndex({ parentMessageId: 1 });
@@ -629,8 +631,15 @@ export class DatabaseService {
 			const collection = await this.getChatMessagesCollection();
 			await collection.insertOne(message);
 
-			// Update thread's lastMessageAt
-			await this.updateChatThread(message.threadId, { lastMessageAt: message.timestamp });
+			// Update thread's lastMessageAt and increment message count
+			const threadsCollection = await this.getChatThreadsCollection();
+			await threadsCollection.updateOne(
+				{ id: message.threadId },
+				{
+					$set: { lastMessageAt: message.timestamp, updatedAt: new Date() },
+					$inc: { 'statistics.messageCount': 1 }
+				}
+			);
 
 			return message;
 		} catch (error) {
@@ -674,7 +683,8 @@ export class DatabaseService {
 			const filter: any = {};
 
 			if (query.threadId) filter.threadId = query.threadId;
-			if (query.userId) filter['metadata.userId'] = query.userId;
+			if (query.projectId) filter.projectId = query.projectId;
+			if (query.userId) filter.userId = query.userId;
 			if (query.role) filter.role = query.role;
 			if (query.parentMessageId) filter.parentMessageId = query.parentMessageId;
 			if (query.hasFileContext !== undefined) {
@@ -783,6 +793,28 @@ export class DatabaseService {
 			return result || null;
 		} catch (error) {
 			console.error('Failed to remove message reaction:', error);
+			throw error;
+		}
+	}
+
+	/**
+	 * Get recent messages for a specific project across all threads
+	 */
+	static async getRecentMessagesForProject(
+		projectId: string,
+		userId: string,
+		limit = 50
+	): Promise<ChatMessage[]> {
+		try {
+			return await this.searchChatMessages({
+				projectId,
+				userId,
+				sortBy: 'timestamp',
+				sortOrder: 'desc',
+				limit
+			});
+		} catch (error) {
+			console.error('Failed to get recent messages for project:', error);
 			throw error;
 		}
 	}
