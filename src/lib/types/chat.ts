@@ -6,6 +6,8 @@
 export interface ChatMessage {
 	id: string;
 	threadId: string;
+	projectId?: string; // Project context for filtering messages
+	userId?: string; // User who created the message
 	content: string;
 	contentMarkdown: string; // Stored markdown version
 	role: 'user' | 'assistant' | 'system';
@@ -145,6 +147,7 @@ export interface ThreadSearchQuery {
 
 export interface MessageSearchQuery {
 	threadId?: string;
+	projectId?: string; // Filter messages by project
 	userId?: string;
 	query?: string;
 	role?: ChatMessage['role'];
