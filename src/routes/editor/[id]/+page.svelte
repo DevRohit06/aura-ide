@@ -369,7 +369,7 @@
 				class="h-full w-fit"
 			>
 				{#if browser}
-					<ChatSidebar {project} />
+					<ChatSidebar {project} chatThreads={data.chatThreads} recentMessages={data.recentMessages} />
 				{/if}
 			</Resizable.Pane>
 		</Sidebar.Provider>

@@ -44,8 +44,8 @@ export const load: PageServerLoad = async ({ params, cookies, locals }) => {
 			ownerId: project.ownerId,
 			configuration: project.configuration,
 			metadata: project.metadata,
-			createdAt: project.createdAt?.toISOString(),
-			updatedAt: project.updatedAt?.toISOString()
+			createdAt: project.createdAt,
+			updatedAt: project.updatedAt
 		};
 
 		// Check if project is ready
@@ -76,12 +76,89 @@ export const load: PageServerLoad = async ({ params, cookies, locals }) => {
 			}
 		}
 
+		// Fetch chat threads for this project and user
+		let chatThreads: any[] = [];
+		let recentMessages: any[] = [];
+		try {
+			// Get recent threads for this project
+			const threads = await DatabaseService.searchChatThreads({
+				userId: locals.session.user.id,
+				projectId: id,
+				isArchived: false,
+				sortBy: 'lastMessageAt',
+				sortOrder: 'desc',
+				limit: 20
+			});
+
+			chatThreads = threads.map((thread) => ({
+				id: thread.id,
+				title: thread.title,
+				description: thread.description,
+				isArchived: thread.isArchived,
+				isPinned: thread.isPinned,
+				tags: thread.tags,
+				lastMessageAt: thread.lastMessageAt?.toISOString(),
+				statistics: thread.statistics,
+				createdAt: thread.createdAt?.toISOString(),
+				updatedAt: thread.updatedAt?.toISOString()
+			}));
+
+			// Get recent messages from the most recent thread OR across project if no specific thread
+			if (chatThreads.length > 0) {
+				const mostRecentThread = chatThreads[0];
+				const messages = await DatabaseService.findChatMessagesByThreadId(
+					mostRecentThread.id,
+					50,
+					0
+				);
+				recentMessages = messages.map((message) => ({
+					id: message.id,
+					threadId: message.threadId,
+					projectId: message.projectId,
+					userId: message.userId,
+					content: message.content,
+					contentMarkdown: message.contentMarkdown,
+					role: message.role,
+					timestamp: message.timestamp?.toISOString(),
+					parentMessageId: message.parentMessageId,
+					metadata: message.metadata
+				}));
+			} else {
+				// If no threads exist yet, get recent project messages across all potential threads
+				const messages = await DatabaseService.getRecentMessagesForProject(
+					id,
+					locals.session.user.id,
+					20
+				);
+				recentMessages = messages.map((message) => ({
+					id: message.id,
+					threadId: message.threadId,
+					projectId: message.projectId,
+					userId: message.userId,
+					content: message.content,
+					contentMarkdown: message.contentMarkdown,
+					role: message.role,
+					timestamp: message.timestamp?.toISOString(),
+					parentMessageId: message.parentMessageId,
+					metadata: message.metadata
+				}));
+			}
+		} catch (error) {
+			console.warn('Failed to fetch chat data:', error);
+			// Don't fail the entire page load if chat data fails
+		}
+
+		console.log('chats', chatThreads.length, 'messages', recentMessages.length);
+		console.log('chat threads', chatThreads);
+
 		return {
 			project: serializableProject,
 			setupStatus,
 			layout,
 			verticalLayout,
-			user: locals.session.user
+			user: locals.session.user,
+			chatThreads,
+			recentMessages
 		};
 	} catch (err) {
 		console.error('Error loading project:', err);
