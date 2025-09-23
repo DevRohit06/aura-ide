@@ -2,8 +2,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import type { Project } from '$lib/types';
 	import { chatStore } from '@/stores/chat.svelte';
-	import { selectedModelStore } from '@/stores/model';
 	import { fileContext } from '@/stores/editor';
+	import { selectedModelStore } from '@/stores/model';
 	import { createEventDispatcher, onMount } from 'svelte';
 	import ChatContainer from './chat-container.svelte';
 	import ChatInput from './chat-input.svelte';
@@ -65,7 +65,7 @@
 		if (chatThreads.length > 0) {
 			// Update the store's threads with the loaded data
 			chatStore.threads = chatThreads;
-			
+
 			// Set the most recent thread as active if no active thread
 			if (!chatStore.activeThreadId && chatThreads.length > 0) {
 				chatStore.activeThreadId = chatThreads[0].id;
@@ -74,10 +74,10 @@
 
 		// Initialize with recent messages if available
 		if (recentMessages.length > 0) {
-			threadMessages = recentMessages.map(msg => ({
+			threadMessages = recentMessages.map((msg) => ({
 				id: msg.id,
 				content: msg.content,
-				role: msg.role === 'system' ? 'assistant' : msg.role as 'user' | 'assistant',
+				role: msg.role === 'system' ? 'assistant' : (msg.role as 'user' | 'assistant'),
 				timestamp: new Date(msg.timestamp),
 				isLoading: false,
 				fileContext: msg.fileContext
@@ -91,10 +91,10 @@
 		isLoadingMessages = true;
 		try {
 			const messages = await chatStore.getThreadMessages(threadId);
-			threadMessages = messages.map(msg => ({
+			threadMessages = messages.map((msg) => ({
 				id: msg.id,
 				content: msg.content,
-				role: msg.role === 'system' ? 'assistant' : msg.role as 'user' | 'assistant',
+				role: msg.role === 'system' ? 'assistant' : (msg.role as 'user' | 'assistant'),
 				timestamp: new Date(msg.timestamp),
 				isLoading: false,
 				fileContext: msg.fileContext
@@ -127,24 +127,27 @@
 			}
 
 			// Prepare file context metadata
-			const fileContextMetadata = currentFileContext.isAttached && currentFileContext.file ? {
-				fileContext: {
-					fileName: currentFileContext.file.name,
-					filePath: currentFileContext.file.path,
-					language: currentFileContext.file.language
-				},
-				context: currentFileContext.context
-			} : undefined;
+			const fileContextMetadata =
+				currentFileContext.isAttached && currentFileContext.file
+					? {
+							fileContext: {
+								fileName: currentFileContext.file.name,
+								filePath: currentFileContext.file.path,
+								language: currentFileContext.file.language
+							},
+							context: currentFileContext.context
+						}
+					: undefined;
 
 			// Add user message to thread
 			const messageId = await chatStore.addMessageToThread(
-				threadId, 
-				content, 
+				threadId,
+				content,
 				'user',
 				fileContextMetadata?.fileContext,
 				fileContextMetadata
 			);
-			
+
 			// Add user message to UI immediately
 			const userMessage: UIMessage = {
 				id: messageId,
@@ -186,21 +189,20 @@
 			}
 
 			const responseData = await response.json();
-			
+
 			// Add assistant response to thread
 			await chatStore.addMessageToThread(threadId, responseData.content, 'assistant');
 
 			// Update loading message with response
-			threadMessages = threadMessages.map(msg => 
-				msg.id === loadingMessageId 
+			threadMessages = threadMessages.map((msg) =>
+				msg.id === loadingMessageId
 					? { ...msg, content: responseData.content, isLoading: false }
 					: msg
 			);
-
 		} catch (error) {
 			console.error('Failed to send message:', error);
 			// Remove loading message on error
-			threadMessages = threadMessages.filter(msg => !msg.isLoading);
+			threadMessages = threadMessages.filter((msg) => !msg.isLoading);
 		}
 	}
 
@@ -215,15 +217,18 @@
 	function clearChat() {
 		if (project?.id) {
 			// Create a new thread for this project
-			chatStore.createThread(
-				`Chat ${new Date().toLocaleTimeString()}`,
-				'Chat session created ' + new Date().toLocaleString(),
-				project.id
-			).then(threadId => {
-				threadMessages = [];
-			}).catch(error => {
-				console.error('Failed to create new thread:', error);
-			});
+			chatStore
+				.createThread(
+					`Chat ${new Date().toLocaleTimeString()}`,
+					'Chat session created ' + new Date().toLocaleString(),
+					project.id
+				)
+				.then((threadId) => {
+					threadMessages = [];
+				})
+				.catch((error) => {
+					console.error('Failed to create new thread:', error);
+				});
 		}
 	}
 </script>
@@ -242,7 +247,7 @@
 		<div class="flex items-center gap-1">
 			<!-- File context indicator -->
 			<FileContextIndicator />
-			
+
 			{#if threadMessages.length > 0}
 				<Button variant="ghost" size="icon" class="h-8 w-8" onclick={clearChat} title="New chat">
 					🗑️
