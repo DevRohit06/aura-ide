@@ -38,6 +38,7 @@ class ChatStore {
 	// Enhanced properties for thread-based chat
 	threads = $state<ChatThread[]>([]);
 	activeThreadId = $state<string | null>(null);
+	currentProjectId = $state<string | null>(null);
 
 	constructor() {
 		// Only initialize sessions in browser to avoid SSR issues
@@ -45,6 +46,13 @@ class ChatStore {
 			this.createSession();
 			this.loadUserThreads();
 		}
+	}
+
+	/**
+	 * Set the current project context
+	 */
+	setProjectContext(projectId: string): void {
+		this.currentProjectId = projectId;
 	}
 
 	/**
@@ -442,6 +450,35 @@ class ChatStore {
 	}
 
 	/**
+	 * Fetch messages for current project
+	 */
+	async fetchProjectMessages(limit = 50, offset = 0, threadId?: string): Promise<any[]> {
+		if (!this.currentProjectId) {
+			console.warn('No project context set');
+			return [];
+		}
+
+		try {
+			const params = new URLSearchParams();
+			params.append('limit', limit.toString());
+			params.append('offset', offset.toString());
+			if (threadId) params.append('threadId', threadId);
+
+			const response = await fetch(
+				`/api/projects/${this.currentProjectId}/messages?${params.toString()}`
+			);
+
+			if (!response.ok) {
+				throw new Error('Failed to fetch project messages');
+			}
+
+			const data = await response.json();
+			return data.messages || [];
+		} catch (error) {
+			console.error('Failed to fetch project messages:', error);
+			return [];
+		}
+	} /**
 	 * Convert legacy session to thread format
 	 */
 	convertSessionToThread(sessionId: string): ChatThread | null {
@@ -545,7 +582,8 @@ class ChatStore {
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					title: session.title,
-					description: `Chat session created ${session.created.toLocaleString()}`
+					description: `Chat session created ${session.created.toLocaleString()}`,
+					projectId: this.currentProjectId
 				})
 			});
 
