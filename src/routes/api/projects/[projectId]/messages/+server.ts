@@ -1,7 +1,15 @@
 import { DatabaseService } from '$lib/services/database.service.js';
 import { json } from '@sveltejs/kit';
 
-export const GET = async ({ params, url, locals }: { params: { projectId: string }, url: URL, locals: any }) => {
+export const GET = async ({
+	params,
+	url,
+	locals
+}: {
+	params: { projectId: string };
+	url: URL;
+	locals: any;
+}) => {
 	try {
 		if (!locals.user) {
 			return json({ error: 'Unauthorized' }, { status: 401 });
@@ -31,7 +39,7 @@ export const GET = async ({ params, url, locals }: { params: { projectId: string
 		const messages = await DatabaseService.searchChatMessages(searchQuery);
 
 		// Return serializable format
-		const serializableMessages = messages.map(message => ({
+		const serializableMessages = messages.map((message) => ({
 			id: message.id,
 			threadId: message.threadId,
 			projectId: message.projectId,
