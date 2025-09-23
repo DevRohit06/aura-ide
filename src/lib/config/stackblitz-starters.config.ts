@@ -116,9 +116,14 @@ export function getDefaultStackBlitzStarter(framework: string): StackBlitzStarte
 /**
  * Get starter by name and framework
  */
-export function getStackBlitzStarter(framework: string, starterName: string): StackBlitzStarter | null {
+export function getStackBlitzStarter(
+	framework: string,
+	starterName: string
+): StackBlitzStarter | null {
 	const starters = getStackBlitzStarters(framework);
-	return starters.find(starter => starter.name === starterName || starter.path === starterName) || null;
+	return (
+		starters.find((starter) => starter.name === starterName || starter.path === starterName) || null
+	);
 }
 
 /**

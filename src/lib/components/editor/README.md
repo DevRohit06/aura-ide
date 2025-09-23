@@ -17,10 +17,12 @@ The main editor component with syntax highlighting and markdown preview capabili
 ```
 
 **Props:**
+
 - `showPreview?: boolean` - Show markdown preview for .md files (default: false)
 - `splitView?: boolean` - Enable split view for markdown preview (default: false)
 
 **Features:**
+
 - Syntax highlighting for JavaScript, TypeScript, Svelte, Python, HTML, CSS, JSON, Markdown
 - Real-time markdown preview with split view
 - Auto-save with dirty state tracking
@@ -41,6 +43,7 @@ Tab component for managing multiple open files.
 ```
 
 **Features:**
+
 - Visual indication of dirty (unsaved) files
 - File icons based on extension
 - Close buttons with keyboard support
@@ -52,13 +55,13 @@ The editor uses Svelte stores for state management:
 
 ```typescript
 import {
-  filesStore,
-  tabsStore,
-  activeFileId,
-  fileActions,
-  tabActions,
-  fileStateActions,
-  settingsStore
+	filesStore,
+	tabsStore,
+	activeFileId,
+	fileActions,
+	tabActions,
+	fileStateActions,
+	settingsStore
 } from '$lib/stores/editor.js';
 ```
 
@@ -67,11 +70,11 @@ import {
 ```typescript
 // Add a file
 fileActions.addFile({
-  id: 'unique-id',
-  name: 'filename.md',
-  path: 'path/to/filename.md',
-  type: 'file',
-  content: 'File content'
+	id: 'unique-id',
+	name: 'filename.md',
+	path: 'path/to/filename.md',
+	type: 'file',
+	content: 'File content'
 });
 
 // Open file in tab
@@ -89,9 +92,9 @@ fileStateActions.isFileDirty('file-id');
 ```typescript
 // Update editor settings
 settingsActions.updateSettings({
-  theme: 'dark',
-  fontSize: 16,
-  fontFamily: 'Fira Code, monospace'
+	theme: 'dark',
+	fontSize: 16,
+	fontFamily: 'Fira Code, monospace'
 });
 ```
 
@@ -139,9 +142,9 @@ settingsActions.updateSettings({
   <header class="editor-header">
     <!-- Your header content -->
   </header>
-  
+
   <FileTabs />
-  
+
   <main class="editor-main">
     <CodemirrorEditor showPreview={true} splitView={true} />
   </main>
@@ -153,7 +156,7 @@ settingsActions.updateSettings({
     display: flex;
     flex-direction: column;
   }
-  
+
   .editor-main {
     flex: 1;
     overflow: hidden;
@@ -186,26 +189,27 @@ The editor respects your application's theme system using CSS custom properties:
 ```css
 /* Light theme */
 :root {
-  --background: 0 0% 100%;
-  --foreground: 222.2 84% 4.9%;
-  --muted: 210 40% 96%;
-  --border: 214.3 31.8% 91.4%;
-  --primary: 222.2 47.4% 11.2%;
+	--background: 0 0% 100%;
+	--foreground: 222.2 84% 4.9%;
+	--muted: 210 40% 96%;
+	--border: 214.3 31.8% 91.4%;
+	--primary: 222.2 47.4% 11.2%;
 }
 
 /* Dark theme */
 .dark {
-  --background: 222.2 84% 4.9%;
-  --foreground: 210 40% 98%;
-  --muted: 217.2 32.6% 17.5%;
-  --border: 217.2 32.6% 17.5%;
-  --primary: 210 40% 98%;
+	--background: 222.2 84% 4.9%;
+	--foreground: 210 40% 98%;
+	--muted: 217.2 32.6% 17.5%;
+	--border: 217.2 32.6% 17.5%;
+	--primary: 210 40% 98%;
 }
 ```
 
 ## Dependencies
 
 Required packages (already included):
+
 - `codemirror` - Core editor
 - `@codemirror/state` - Editor state management
 - `@codemirror/view` - Editor view layer

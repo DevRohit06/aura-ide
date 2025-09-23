@@ -3,6 +3,7 @@
 ## Development Setup Guide
 
 ### Prerequisites
+
 - Node.js 18.0 or higher
 - npm or yarn package manager
 - Docker and Docker Compose
@@ -11,6 +12,7 @@
 ### Local Development Environment Setup
 
 #### 1. Clone and Initialize Project
+
 ```bash
 # Create main project directory
 mkdir Aura IDE-cloud-mvp
@@ -25,6 +27,7 @@ mkdir -p {frontend,backend,docs,scripts,docker}
 ```
 
 #### 2. Frontend Setup (SvelteKit)
+
 ```bash
 cd frontend
 
@@ -47,6 +50,7 @@ npx shadcn-svelte@latest add button input dialog textarea card
 ```
 
 #### 3. Backend Setup (Node.js/Express)
+
 ```bash
 cd ../backend
 
@@ -62,6 +66,7 @@ npm install -D @types/jsonwebtoken @types/bcryptjs
 ```
 
 #### 4. Database Setup Scripts
+
 ```bash
 # Create database initialization script
 cat > scripts/init-db.sql << 'EOF'
@@ -148,6 +153,7 @@ EOF
 ```
 
 #### 5. Docker Compose Configuration
+
 ```yaml
 # docker/docker-compose.dev.yml
 version: '3.8'
@@ -161,7 +167,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5432:5432"
+      - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ../scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
@@ -170,7 +176,7 @@ services:
     image: redis:7-alpine
     container_name: Aura IDE_redis
     ports:
-      - "6379:6379"
+      - '6379:6379'
     volumes:
       - redis_data:/data
 
@@ -178,8 +184,8 @@ services:
     image: qdrant/qdrant:v1.7.0
     container_name: Aura IDE_qdrant
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - '6333:6333'
+      - '6334:6334'
     volumes:
       - qdrant_data:/qdrant/storage
     environment:
@@ -195,6 +201,7 @@ volumes:
 ### Environment Configuration
 
 #### Backend Environment Setup
+
 ```bash
 # backend/.env.development
 NODE_ENV=development
@@ -227,6 +234,7 @@ LOG_LEVEL=debug
 ```
 
 #### Frontend Environment Setup
+
 ```bash
 # frontend/.env.development
 VITE_API_BASE_URL=http://localhost:3001
@@ -239,6 +247,7 @@ VITE_ENVIRONMENT=development
 ### 1. SvelteKit Frontend Structure
 
 #### App Structure
+
 ```
 frontend/src/
 ├── app.d.ts
@@ -276,6 +285,7 @@ frontend/src/
 ```
 
 #### Core Editor Component
+
 ```typescript
 <!-- lib/components/Editor.svelte -->
 <script lang="ts">
@@ -411,6 +421,7 @@ frontend/src/
 ### 2. Backend API Implementation
 
 #### Express Server Setup
+
 ```typescript
 // backend/src/index.ts
 import express from 'express';
@@ -436,10 +447,12 @@ const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(helmet());
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-  credentials: true
-}));
+app.use(
+	cors({
+		origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+		credentials: true
+	})
+);
 app.use(compression());
 app.use(morgan('combined'));
 app.use(express.json({ limit: '10mb' }));
@@ -453,18 +466,19 @@ app.use('/api/v1/sandbox', authMiddleware, sandboxRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+	res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // Error handling
 app.use(errorHandler);
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+	console.log(`Server running on port ${PORT}`);
 });
 ```
 
 #### Authentication Service
+
 ```typescript
 // backend/src/services/AuthService.ts
 import bcrypt from 'bcryptjs';
@@ -473,89 +487,82 @@ import { Pool } from 'pg';
 import { User, CreateUserData, LoginData } from '../types/User';
 
 export class AuthService {
-  private db: Pool;
+	private db: Pool;
 
-  constructor(db: Pool) {
-    this.db = db;
-  }
+	constructor(db: Pool) {
+		this.db = db;
+	}
 
-  async register(userData: CreateUserData): Promise<{ user: User; token: string }> {
-    const { email, password, firstName, lastName } = userData;
+	async register(userData: CreateUserData): Promise<{ user: User; token: string }> {
+		const { email, password, firstName, lastName } = userData;
 
-    // Check if user exists
-    const existingUser = await this.db.query(
-      'SELECT id FROM users WHERE email = $1',
-      [email]
-    );
+		// Check if user exists
+		const existingUser = await this.db.query('SELECT id FROM users WHERE email = $1', [email]);
 
-    if (existingUser.rows.length > 0) {
-      throw new Error('User already exists');
-    }
+		if (existingUser.rows.length > 0) {
+			throw new Error('User already exists');
+		}
 
-    // Hash password
-    const saltRounds = 12;
-    const passwordHash = await bcrypt.hash(password, saltRounds);
+		// Hash password
+		const saltRounds = 12;
+		const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    // Create user
-    const result = await this.db.query(
-      `INSERT INTO users (email, password_hash, first_name, last_name)
+		// Create user
+		const result = await this.db.query(
+			`INSERT INTO users (email, password_hash, first_name, last_name)
        VALUES ($1, $2, $3, $4)
        RETURNING id, email, first_name, last_name, subscription_tier, created_at`,
-      [email, passwordHash, firstName, lastName]
-    );
+			[email, passwordHash, firstName, lastName]
+		);
 
-    const user = result.rows[0];
-    const token = this.generateToken(user.id);
+		const user = result.rows[0];
+		const token = this.generateToken(user.id);
 
-    return { user, token };
-  }
+		return { user, token };
+	}
 
-  async login(loginData: LoginData): Promise<{ user: User; token: string }> {
-    const { email, password } = loginData;
+	async login(loginData: LoginData): Promise<{ user: User; token: string }> {
+		const { email, password } = loginData;
 
-    const result = await this.db.query(
-      'SELECT * FROM users WHERE email = $1',
-      [email]
-    );
+		const result = await this.db.query('SELECT * FROM users WHERE email = $1', [email]);
 
-    if (result.rows.length === 0) {
-      throw new Error('Invalid credentials');
-    }
+		if (result.rows.length === 0) {
+			throw new Error('Invalid credentials');
+		}
 
-    const user = result.rows[0];
-    const isValidPassword = await bcrypt.compare(password, user.password_hash);
+		const user = result.rows[0];
+		const isValidPassword = await bcrypt.compare(password, user.password_hash);
 
-    if (!isValidPassword) {
-      throw new Error('Invalid credentials');
-    }
+		if (!isValidPassword) {
+			throw new Error('Invalid credentials');
+		}
 
-    const token = this.generateToken(user.id);
+		const token = this.generateToken(user.id);
 
-    // Remove sensitive data
-    delete user.password_hash;
+		// Remove sensitive data
+		delete user.password_hash;
 
-    return { user, token };
-  }
+		return { user, token };
+	}
 
-  private generateToken(userId: string): string {
-    return jwt.sign(
-      { userId },
-      process.env.JWT_SECRET!,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-    );
-  }
+	private generateToken(userId: string): string {
+		return jwt.sign({ userId }, process.env.JWT_SECRET!, {
+			expiresIn: process.env.JWT_EXPIRES_IN || '7d'
+		});
+	}
 
-  verifyToken(token: string): { userId: string } {
-    try {
-      return jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
-    } catch (error) {
-      throw new Error('Invalid token');
-    }
-  }
+	verifyToken(token: string): { userId: string } {
+		try {
+			return jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
+		} catch (error) {
+			throw new Error('Invalid token');
+		}
+	}
 }
 ```
 
 #### AI Service Integration
+
 ```typescript
 // backend/src/services/AIService.ts
 import axios from 'axios';
@@ -563,278 +570,278 @@ import { QdrantClient } from '@qdrant/js-client-rest';
 import { CodeCompletionRequest, CodeCompletionResponse } from '../types/AI';
 
 export class AIService {
-  private heliconeClient: axios.AxiosInstance;
-  private qdrantClient: QdrantClient;
+	private heliconeClient: axios.AxiosInstance;
+	private qdrantClient: QdrantClient;
 
-  constructor() {
-    this.heliconeClient = axios.create({
-      baseURL: process.env.HELICONE_BASE_URL,
-      headers: {
-        'Authorization': `Bearer ${process.env.HELICONE_API_KEY}`,
-        'Content-Type': 'application/json'
-      }
-    });
+	constructor() {
+		this.heliconeClient = axios.create({
+			baseURL: process.env.HELICONE_BASE_URL,
+			headers: {
+				Authorization: `Bearer ${process.env.HELICONE_API_KEY}`,
+				'Content-Type': 'application/json'
+			}
+		});
 
-    this.qdrantClient = new QdrantClient({
-      url: process.env.QDRANT_URL
-    });
-  }
+		this.qdrantClient = new QdrantClient({
+			url: process.env.QDRANT_URL
+		});
+	}
 
-  async getCodeCompletion(request: CodeCompletionRequest): Promise<CodeCompletionResponse> {
-    const startTime = Date.now();
+	async getCodeCompletion(request: CodeCompletionRequest): Promise<CodeCompletionResponse> {
+		const startTime = Date.now();
 
-    try {
-      // Get relevant context from vector database
-      const context = await this.getRelevantContext(
-        request.projectId,
-        request.code,
-        request.cursorPosition
-      );
+		try {
+			// Get relevant context from vector database
+			const context = await this.getRelevantContext(
+				request.projectId,
+				request.code,
+				request.cursorPosition
+			);
 
-      // Prepare prompt with context
-      const prompt = this.buildCompletionPrompt(request, context);
+			// Prepare prompt with context
+			const prompt = this.buildCompletionPrompt(request, context);
 
-      // Call AI model through Helicone
-      const response = await this.heliconeClient.post('/ai', {
-        model: 'openai/gpt-4-turbo',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are an expert code completion assistant. Provide concise, accurate code suggestions.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        max_tokens: 500,
-        temperature: 0.3
-      });
+			// Call AI model through Helicone
+			const response = await this.heliconeClient.post('/ai', {
+				model: 'openai/gpt-4-turbo',
+				messages: [
+					{
+						role: 'system',
+						content:
+							'You are an expert code completion assistant. Provide concise, accurate code suggestions.'
+					},
+					{
+						role: 'user',
+						content: prompt
+					}
+				],
+				max_tokens: 500,
+				temperature: 0.3
+			});
 
-      const completion = response.data.choices[0].message.content;
-      const latency = Date.now() - startTime;
+			const completion = response.data.choices[0].message.content;
+			const latency = Date.now() - startTime;
 
-      // Parse and format suggestions
-      const suggestions = this.parseCompletionResponse(completion);
+			// Parse and format suggestions
+			const suggestions = this.parseCompletionResponse(completion);
 
-      return {
-        suggestions,
-        contextUsed: context.map(c => c.filename),
-        latency,
-        cost: this.calculateCost(response.data.usage)
-      };
+			return {
+				suggestions,
+				contextUsed: context.map((c) => c.filename),
+				latency,
+				cost: this.calculateCost(response.data.usage)
+			};
+		} catch (error) {
+			console.error('AI completion error:', error);
+			throw new Error('Failed to get AI completion');
+		}
+	}
 
-    } catch (error) {
-      console.error('AI completion error:', error);
-      throw new Error('Failed to get AI completion');
-    }
-  }
+	private async getRelevantContext(
+		projectId: string,
+		code: string,
+		cursorPosition: number
+	): Promise<any[]> {
+		try {
+			// Generate embedding for current code context
+			const embedding = await this.generateEmbedding(code);
 
-  private async getRelevantContext(
-    projectId: string,
-    code: string,
-    cursorPosition: number
-  ): Promise<any[]> {
-    try {
-      // Generate embedding for current code context
-      const embedding = await this.generateEmbedding(code);
+			// Search for similar code in vector database
+			const searchResult = await this.qdrantClient.search('code_embeddings', {
+				vector: embedding,
+				filter: {
+					must: [{ key: 'project_id', match: { value: projectId } }]
+				},
+				limit: 5,
+				with_payload: true
+			});
 
-      // Search for similar code in vector database
-      const searchResult = await this.qdrantClient.search('code_embeddings', {
-        vector: embedding,
-        filter: {
-          must: [
-            { key: 'project_id', match: { value: projectId } }
-          ]
-        },
-        limit: 5,
-        with_payload: true
-      });
+			return searchResult.map((result) => result.payload);
+		} catch (error) {
+			console.error('Context retrieval error:', error);
+			return [];
+		}
+	}
 
-      return searchResult.map(result => result.payload);
-    } catch (error) {
-      console.error('Context retrieval error:', error);
-      return [];
-    }
-  }
+	private buildCompletionPrompt(request: CodeCompletionRequest, context: any[]): string {
+		let prompt = `Language: ${request.language}\n\n`;
 
-  private buildCompletionPrompt(
-    request: CodeCompletionRequest,
-    context: any[]
-  ): string {
-    let prompt = `Language: ${request.language}\n\n`;
+		if (context.length > 0) {
+			prompt += 'Relevant code context:\n';
+			context.forEach((ctx) => {
+				prompt += `File: ${ctx.filename}\n${ctx.code_snippet}\n\n`;
+			});
+		}
 
-    if (context.length > 0) {
-      prompt += 'Relevant code context:\n';
-      context.forEach(ctx => {
-        prompt += `File: ${ctx.filename}\n${ctx.code_snippet}\n\n`;
-      });
-    }
+		prompt += `Current code:\n${request.code}\n\n`;
+		prompt += `Cursor position: ${request.cursorPosition}\n\n`;
+		prompt += 'Please provide code completion suggestions:';
 
-    prompt += `Current code:\n${request.code}\n\n`;
-    prompt += `Cursor position: ${request.cursorPosition}\n\n`;
-    prompt += 'Please provide code completion suggestions:';
+		return prompt;
+	}
 
-    return prompt;
-  }
+	private parseCompletionResponse(completion: string): any[] {
+		// Parse AI response and extract suggestions
+		const suggestions = [];
+		const lines = completion.split('\n');
 
-  private parseCompletionResponse(completion: string): any[] {
-    // Parse AI response and extract suggestions
-    const suggestions = [];
-    const lines = completion.split('\n');
+		lines.forEach((line) => {
+			if (line.trim()) {
+				suggestions.push({
+					text: line.trim(),
+					confidence: 0.8, // Default confidence
+					type: 'completion'
+				});
+			}
+		});
 
-    lines.forEach(line => {
-      if (line.trim()) {
-        suggestions.push({
-          text: line.trim(),
-          confidence: 0.8, // Default confidence
-          type: 'completion'
-        });
-      }
-    });
+		return suggestions.slice(0, 3); // Limit to top 3 suggestions
+	}
 
-    return suggestions.slice(0, 3); // Limit to top 3 suggestions
-  }
+	private async generateEmbedding(text: string): Promise<number[]> {
+		try {
+			const response = await this.heliconeClient.post('/ai', {
+				model: 'openai/text-embedding-ada-002',
+				input: text
+			});
 
-  private async generateEmbedding(text: string): Promise<number[]> {
-    try {
-      const response = await this.heliconeClient.post('/ai', {
-        model: 'openai/text-embedding-ada-002',
-        input: text
-      });
+			return response.data.data[0].embedding;
+		} catch (error) {
+			console.error('Embedding generation error:', error);
+			throw error;
+		}
+	}
 
-      return response.data.data[0].embedding;
-    } catch (error) {
-      console.error('Embedding generation error:', error);
-      throw error;
-    }
-  }
+	private calculateCost(usage: any): number {
+		// Calculate cost based on token usage
+		// OpenAI GPT-4-turbo pricing: $0.01 per 1K prompt tokens, $0.03 per 1K completion tokens
+		const promptCost = (usage.prompt_tokens / 1000) * 0.01;
+		const completionCost = (usage.completion_tokens / 1000) * 0.03;
 
-  private calculateCost(usage: any): number {
-    // Calculate cost based on token usage
-    // OpenAI GPT-4-turbo pricing: $0.01 per 1K prompt tokens, $0.03 per 1K completion tokens
-    const promptCost = (usage.prompt_tokens / 1000) * 0.01;
-    const completionCost = (usage.completion_tokens / 1000) * 0.03;
-
-    return Math.round((promptCost + completionCost) * 100); // Return cost in cents
-  }
+		return Math.round((promptCost + completionCost) * 100); // Return cost in cents
+	}
 }
 ```
 
 #### Sandbox Service Integration
+
 ```typescript
 // backend/src/services/SandboxService.ts
 import { Sandbox } from '@e2b/sdk';
 import { ExecuteCodeRequest, ExecuteCodeResponse } from '../types/Sandbox';
 
 export class SandboxService {
-  private sandboxes: Map<string, Sandbox> = new Map();
+	private sandboxes: Map<string, Sandbox> = new Map();
 
-  async executeCode(request: ExecuteCodeRequest): Promise<ExecuteCodeResponse> {
-    const startTime = Date.now();
+	async executeCode(request: ExecuteCodeRequest): Promise<ExecuteCodeResponse> {
+		const startTime = Date.now();
 
-    try {
-      // Get or create sandbox for user
-      const sandbox = await this.getSandbox(request.language);
+		try {
+			// Get or create sandbox for user
+			const sandbox = await this.getSandbox(request.language);
 
-      // Execute code with timeout
-      const result = await Promise.race([
-        sandbox.runCode(request.language, request.code),
-        this.timeoutPromise(request.timeout || 30000)
-      ]);
+			// Execute code with timeout
+			const result = await Promise.race([
+				sandbox.runCode(request.language, request.code),
+				this.timeoutPromise(request.timeout || 30000)
+			]);
 
-      const executionTime = Date.now() - startTime;
+			const executionTime = Date.now() - startTime;
 
-      return {
-        success: true,
-        stdout: result.stdout || '',
-        stderr: result.stderr || '',
-        exitCode: result.exitCode,
-        executionTime
-      };
+			return {
+				success: true,
+				stdout: result.stdout || '',
+				stderr: result.stderr || '',
+				exitCode: result.exitCode,
+				executionTime
+			};
+		} catch (error) {
+			return {
+				success: false,
+				stdout: '',
+				stderr: error.message,
+				executionTime: Date.now() - startTime,
+				error: error.message
+			};
+		}
+	}
 
-    } catch (error) {
-      return {
-        success: false,
-        stdout: '',
-        stderr: error.message,
-        executionTime: Date.now() - startTime,
-        error: error.message
-      };
-    }
-  }
+	private async getSandbox(language: string): Promise<Sandbox> {
+		const sandboxKey = `sandbox_${language}`;
 
-  private async getSandbox(language: string): Promise<Sandbox> {
-    const sandboxKey = `sandbox_${language}`;
+		if (!this.sandboxes.has(sandboxKey)) {
+			const sandbox = await Sandbox.create({
+				template: this.getTemplateForLanguage(language),
+				timeoutMs: 60000
+			});
 
-    if (!this.sandboxes.has(sandboxKey)) {
-      const sandbox = await Sandbox.create({
-        template: this.getTemplateForLanguage(language),
-        timeoutMs: 60000
-      });
+			this.sandboxes.set(sandboxKey, sandbox);
 
-      this.sandboxes.set(sandboxKey, sandbox);
+			// Clean up sandbox after 5 minutes of inactivity
+			setTimeout(
+				() => {
+					this.cleanupSandbox(sandboxKey);
+				},
+				5 * 60 * 1000
+			);
+		}
 
-      // Clean up sandbox after 5 minutes of inactivity
-      setTimeout(() => {
-        this.cleanupSandbox(sandboxKey);
-      }, 5 * 60 * 1000);
-    }
+		return this.sandboxes.get(sandboxKey)!;
+	}
 
-    return this.sandboxes.get(sandboxKey)!;
-  }
+	private getTemplateForLanguage(language: string): string {
+		const templates = {
+			javascript: 'node',
+			python: 'python',
+			typescript: 'node'
+		};
 
-  private getTemplateForLanguage(language: string): string {
-    const templates = {
-      javascript: 'node',
-      python: 'python',
-      typescript: 'node'
-    };
+		return templates[language] || 'base';
+	}
 
-    return templates[language] || 'base';
-  }
+	private timeoutPromise(ms: number): Promise<never> {
+		return new Promise((_, reject) => {
+			setTimeout(() => reject(new Error('Execution timeout')), ms);
+		});
+	}
 
-  private timeoutPromise(ms: number): Promise<never> {
-    return new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Execution timeout')), ms);
-    });
-  }
-
-  private async cleanupSandbox(sandboxKey: string) {
-    const sandbox = this.sandboxes.get(sandboxKey);
-    if (sandbox) {
-      await sandbox.close();
-      this.sandboxes.delete(sandboxKey);
-    }
-  }
+	private async cleanupSandbox(sandboxKey: string) {
+		const sandbox = this.sandboxes.get(sandboxKey);
+		if (sandbox) {
+			await sandbox.close();
+			this.sandboxes.delete(sandboxKey);
+		}
+	}
 }
 ```
 
 ### 3. Development Scripts
 
 #### Package.json Scripts
+
 ```json
 {
-  "scripts": {
-    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\" \"npm run dev:services\"",
-    "dev:backend": "cd backend && npm run dev",
-    "dev:frontend": "cd frontend && npm run dev",
-    "dev:services": "docker-compose -f docker/docker-compose.dev.yml up -d",
-    "build": "npm run build:backend && npm run build:frontend",
-    "build:backend": "cd backend && npm run build",
-    "build:frontend": "cd frontend && npm run build",
-    "test": "npm run test:backend && npm run test:frontend",
-    "test:backend": "cd backend && npm test",
-    "test:frontend": "cd frontend && npm test",
-    "setup": "npm run setup:deps && npm run setup:db",
-    "setup:deps": "cd backend && npm install && cd ../frontend && npm install",
-    "setup:db": "docker-compose -f docker/docker-compose.dev.yml up -d postgres && sleep 5 && npm run db:migrate",
-    "db:migrate": "cd backend && npm run db:migrate"
-  }
+	"scripts": {
+		"dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\" \"npm run dev:services\"",
+		"dev:backend": "cd backend && npm run dev",
+		"dev:frontend": "cd frontend && npm run dev",
+		"dev:services": "docker-compose -f docker/docker-compose.dev.yml up -d",
+		"build": "npm run build:backend && npm run build:frontend",
+		"build:backend": "cd backend && npm run build",
+		"build:frontend": "cd frontend && npm run build",
+		"test": "npm run test:backend && npm run test:frontend",
+		"test:backend": "cd backend && npm test",
+		"test:frontend": "cd frontend && npm test",
+		"setup": "npm run setup:deps && npm run setup:db",
+		"setup:deps": "cd backend && npm install && cd ../frontend && npm install",
+		"setup:db": "docker-compose -f docker/docker-compose.dev.yml up -d postgres && sleep 5 && npm run db:migrate",
+		"db:migrate": "cd backend && npm run db:migrate"
+	}
 }
 ```
 
 #### Development Helper Scripts
+
 ```bash
 #!/bin/bash
 # scripts/dev-setup.sh
