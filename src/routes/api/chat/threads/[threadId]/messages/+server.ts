@@ -1,5 +1,4 @@
 import { DatabaseService } from '$lib/services/database.service.js';
-import { MarkdownService } from '$lib/services/markdown.service.js';
 import type { ChatMessage } from '$lib/types/chat';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
@@ -33,10 +32,7 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
 			return json({ error: 'Content is required' }, { status: 400 });
 		}
 
-		const { content: plainContent, contentMarkdown } = MarkdownService.enhanceMessageContent(
-			content,
-			role
-		);
+		// Save content as-is, without markdown processing
 		const now = new Date();
 
 		const message: ChatMessage = {
@@ -44,8 +40,8 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
 			threadId: params.threadId,
 			projectId: thread.projectId, // Add project context
 			userId, // Add user context
-			content: plainContent,
-			contentMarkdown,
+			content: content, // Save raw content as-is
+			contentMarkdown: content, // For now, save same content - markdown processing can be done on display
 			role,
 			timestamp: now,
 			fileContext,

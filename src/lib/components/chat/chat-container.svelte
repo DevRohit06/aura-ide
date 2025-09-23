@@ -1,7 +1,8 @@
 <script lang="ts">
+	import { Button } from '$lib/components/ui/button';
+	import { ChevronDown } from '@lucide/svelte';
 	import { onMount } from 'svelte';
 	import Message from './message.svelte';
-	import { Button } from '$lib/components/ui/button';
 
 	interface MessageType {
 		id: string;
@@ -21,6 +22,19 @@
 	let scrollContainer = $state<HTMLDivElement>();
 	let shouldAutoScroll = $state(true);
 	let userScrolled = $state(false);
+	let showScrollButton = $state(false);
+	let newMessagesCount = $state(0);
+	let lastMessageCount = $state(0);
+
+	// Track new messages while user is scrolled up
+	$effect(() => {
+		if (messages.length > lastMessageCount && showScrollButton) {
+			newMessagesCount += messages.length - lastMessageCount;
+		} else if (!showScrollButton) {
+			newMessagesCount = 0;
+		}
+		lastMessageCount = messages.length;
+	});
 
 	function scrollToBottom(smooth = true) {
 		if (!scrollContainer) return;
@@ -36,14 +50,18 @@
 
 		const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
 		const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10; // 10px threshold
+		const isScrolledUp = scrollTop < scrollHeight - clientHeight - 100; // Show button when 100px from bottom
 
 		shouldAutoScroll = isAtBottom;
 		userScrolled = !isAtBottom;
+		showScrollButton = isScrolledUp && messages.length > 0;
 	}
 
 	function scrollToBottomClick() {
 		shouldAutoScroll = true;
 		userScrolled = false;
+		showScrollButton = false;
+		newMessagesCount = 0;
 		scrollToBottom();
 	}
 
@@ -103,10 +121,23 @@
 		</div>
 
 		<!-- Scroll to bottom button -->
-		{#if userScrolled && !shouldAutoScroll}
-			<div class="absolute bottom-4 left-1/2 -translate-x-1/2 transform">
-				<Button size="sm" variant="secondary" class="shadow-lg" onclick={scrollToBottomClick}>
-					↓ New messages
+		{#if showScrollButton}
+			<div class="absolute right-4 bottom-4 z-10">
+				<Button
+					size="icon"
+					variant="secondary"
+					class="relative h-10 w-10 rounded-full border border-border/50 shadow-lg backdrop-blur-sm"
+					onclick={scrollToBottomClick}
+					title="Scroll to bottom"
+				>
+					<ChevronDown size={16} />
+					{#if newMessagesCount > 0}
+						<div
+							class="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground"
+						>
+							{newMessagesCount > 9 ? '9+' : newMessagesCount}
+						</div>
+					{/if}
 				</Button>
 			</div>
 		{/if}

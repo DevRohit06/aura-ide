@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Button } from '$lib/components/ui/button';
 	import { css } from '@codemirror/lang-css';
 	import { html } from '@codemirror/lang-html';
 	import { javascript } from '@codemirror/lang-javascript';
@@ -6,6 +7,7 @@
 	import { markdown } from '@codemirror/lang-markdown';
 	import { python } from '@codemirror/lang-python';
 	import { oneDark } from '@codemirror/theme-one-dark';
+	import { Check, Copy } from '@lucide/svelte';
 	import { EditorView, basicSetup } from 'codemirror';
 	import { mode } from 'mode-watcher';
 	import { onDestroy, onMount } from 'svelte';
@@ -17,6 +19,21 @@
 	}
 
 	let { code, language = 'text' }: Props = $props();
+
+	let copied = $state(false);
+
+	// Copy functionality
+	async function copyCode() {
+		try {
+			await navigator.clipboard.writeText(code);
+			copied = true;
+			setTimeout(() => {
+				copied = false;
+			}, 2000);
+		} catch (err) {
+			console.error('Failed to copy code:', err);
+		}
+	}
 
 	let editorContainer: HTMLElement;
 	let editor: EditorView | null = null;
@@ -93,6 +110,19 @@
 <div class="code-block-container">
 	<div class="code-header">
 		<span class="language-label">{language}</span>
+		<Button
+			variant="ghost"
+			size="icon"
+			class="ml-auto h-6 w-6 text-muted-foreground hover:text-foreground"
+			onclick={copyCode}
+			title={copied ? 'Copied!' : 'Copy code'}
+		>
+			{#if copied}
+				<Check size={14} />
+			{:else}
+				<Copy size={14} />
+			{/if}
+		</Button>
 	</div>
 	<div bind:this={editorContainer} class="code-editor-container"></div>
 </div>
@@ -113,13 +143,9 @@
 		font-size: 0.875em;
 		font-weight: 500;
 		color: hsl(var(--muted-foreground));
-	}
-
-	.language-label {
-		font-family: 'JetBrains Mono', 'Fira Code', monospace;
-		text-transform: uppercase;
-		font-size: 0.75em;
-		letter-spacing: 0.05em;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
 	}
 
 	.code-editor-container {

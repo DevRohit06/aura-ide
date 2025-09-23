@@ -1,5 +1,4 @@
 import { browser } from '$app/environment';
-import { MarkdownService } from '$lib/services/markdown.service.js';
 import type { ChatThread, ChatMessage as DbChatMessage } from '$lib/types/chat';
 import type { ContextVariables } from '$lib/types/llm.types';
 import { LLM_PROVIDERS } from '$lib/types/llm.types';
@@ -88,7 +87,7 @@ class ChatStore {
 
 	/**
 	 * Add a message to a specific session
-	 * Enhanced with markdown support
+	 * Save content as-is without markdown processing
 	 */
 	addMessage(
 		sessionId: string,
@@ -99,15 +98,9 @@ class ChatStore {
 	): string {
 		const messageId = crypto.randomUUID();
 
-		// Process content with markdown enhancement
-		const { content: plainContent, contentMarkdown } = MarkdownService.enhanceMessageContent(
-			content,
-			role
-		);
-
 		const newMessage: ChatMessage = {
 			id: messageId,
-			content: plainContent,
+			content: content, // Save content as-is
 			role,
 			timestamp: new Date(),
 			isLoading,
@@ -120,7 +113,7 @@ class ChatStore {
 
 			// If this is a real message (not loading), persist to database
 			if (!isLoading && browser) {
-				this.persistMessage(sessionId, newMessage, contentMarkdown);
+				this.persistMessage(sessionId, newMessage, content); // Pass original content
 			}
 		}
 
@@ -129,6 +122,7 @@ class ChatStore {
 
 	/**
 	 * Update an existing message (used for streaming)
+	 * Save content as-is without markdown processing
 	 */
 	updateMessage(sessionId: string, messageId: string, content: string, isLoading = false): void {
 		const sessionIndex = this.sessions.findIndex((s) => s.id === sessionId);
@@ -137,13 +131,8 @@ class ChatStore {
 				(m) => m.id === messageId
 			);
 			if (messageIndex !== -1) {
-				// Update with markdown enhancement
-				const { content: plainContent } = MarkdownService.enhanceMessageContent(
-					content,
-					this.sessions[sessionIndex].messages[messageIndex].role
-				);
-
-				this.sessions[sessionIndex].messages[messageIndex].content = plainContent;
+				// Update with raw content
+				this.sessions[sessionIndex].messages[messageIndex].content = content;
 				this.sessions[sessionIndex].messages[messageIndex].isLoading = isLoading;
 			}
 		}
