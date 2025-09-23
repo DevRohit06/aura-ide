@@ -42,6 +42,8 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
 		const message: ChatMessage = {
 			id: crypto.randomUUID(),
 			threadId: params.threadId,
+			projectId: thread.projectId, // Add project context
+			userId, // Add user context
 			content: plainContent,
 			contentMarkdown,
 			role,
