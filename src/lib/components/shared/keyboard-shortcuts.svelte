@@ -1,6 +1,6 @@
 <script lang="ts">
+	import { fileStateActions, tabActions, tabsStore } from '$lib/stores/editor.js';
 	import { layoutActions } from '$lib/stores/layout.store.js';
-	import { tabsStore, tabActions, fileStateActions } from '$lib/stores/editor.js';
 
 	// Props for controlling various dialogs/panels
 	let {
@@ -76,7 +76,7 @@
 		} else if (cmdKey && key === 's') {
 			if (shiftKey) {
 				// Save All
-				onSaveAll();
+				fileStateActions.saveAllFiles();
 			} else {
 				// Save current file
 				if ($tabsStore.activeFileId) {

@@ -18,25 +18,23 @@
 </script>
 
 <script lang="ts">
-	import * as Command from '$lib/components/ui/command/index.js';
-	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
-
+	import * as Command from '$lib/components/ui/command/index.js';
 	// Icons
+	import ClockIcon from '@lucide/svelte/icons/clock';
 	import FilePlusIcon from '@lucide/svelte/icons/file-plus';
 	import FolderPlusIcon from '@lucide/svelte/icons/folder-plus';
+	import LayoutIcon from '@lucide/svelte/icons/layout';
+	import PaletteIcon from '@lucide/svelte/icons/palette';
+	import RefreshIcon from '@lucide/svelte/icons/refresh-ccw';
+	import SaveIcon from '@lucide/svelte/icons/save';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import TerminalIcon from '@lucide/svelte/icons/terminal';
-	import RefreshIcon from '@lucide/svelte/icons/refresh-ccw';
-	import SaveIcon from '@lucide/svelte/icons/save';
-	import ClockIcon from '@lucide/svelte/icons/clock';
-	import PaletteIcon from '@lucide/svelte/icons/palette';
-	import LayoutIcon from '@lucide/svelte/icons/layout';
 	import ZapIcon from '@lucide/svelte/icons/zap';
-
 	// Stores
-	import { filesStore, tabActions, fileStateActions, tabsStore } from '$lib/stores/editor.js';
+	import { filesStore, tabActions, tabsStore } from '$lib/stores/editor.js';
+	import { fileStateActions } from '$lib/stores/file-states.store.js';
 	import { layoutActions } from '$lib/stores/layout.store.js';
 	import Icon from '@iconify/svelte';
 	import { getFileIcon } from '../editor';
@@ -114,10 +112,10 @@
 					shortcut: '⌘S',
 					category: 'file',
 					keywords: ['save', 'file'],
-					action: () => {
+					action: async () => {
 						const activeFileId = $tabsStore.activeFileId;
 						if (activeFileId) {
-							fileStateActions.saveFile(activeFileId);
+							await fileStateActions.saveFile(activeFileId);
 						}
 						open = false;
 					}

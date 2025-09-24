@@ -41,7 +41,7 @@
 	import { initializeDummyData } from '$lib/data/initialize-dummy-data.js';
 
 	import { filesStore, fileStateActions, tabActions } from '$lib/stores/editor.ts';
-	import type { Project } from '$lib/types';
+	import { fileActions } from '$lib/stores/files.store.js';
 	import Icon from '@iconify/svelte';
 	import CommandPalette from './command-palette.svelte';
 	import ComprehensiveSettingsDialog from './comprehensive-settings-dialog.svelte';
@@ -54,7 +54,7 @@
 	}: {
 		class?: string;
 		defaultView?: string;
-		project?: Project;
+		project?: { id: string; sandboxId?: string; sandboxProvider?: string };
 	} = $props();
 
 	// State
@@ -81,25 +81,36 @@
 
 	// Initialize dummy data only if no real project is provided
 	$effect(() => {
-		if (!initialized && $filesStore.size === 0 && !project) {
+		if (!initialized && $filesStore.size === 0) {
 			initialized = true;
-			initializeDummyData();
+			if (!project) {
+				// Load dummy data for development when no project is provided
+				initializeDummyData();
+			}
+			// Files are now loaded server-side for real projects
 		}
 	});
 
 	// Build file tree
 	function buildFileTree(files: Map<string, FileSystemItem>): FileSystemItem[] {
+		console.log('Building file tree from files:', Array.from(files.values()));
 		const rootItems: FileSystemItem[] = [];
 		const itemsArray = Array.from(files.values());
-		const roots = itemsArray.filter((item) => item.parentId === null);
+		// Filter for root level items (no '/' in path or path represents top-level item)
+		const roots = itemsArray.filter(
+			(item) => !item.path.includes('/') || item.path.split('/').length === 1
+		);
 
 		roots.sort((a, b) => {
+			const aName = a.name || a.path?.split('/')[0] || '';
+			const bName = b.name || b.path?.split('/')[0] || '';
+			console.log('Comparing:', aName, 'with', bName);
 			if (a.type !== b.type) {
 				return a.type === 'directory' ? -1 : 1;
 			}
-			return a.name.localeCompare(b.name);
+			return aName.localeCompare(bName);
 		});
-
+		console.log('Root items:', roots);
 		return roots;
 	}
 
@@ -111,7 +122,10 @@
 			if (a.type !== b.type) {
 				return a.type === 'directory' ? -1 : 1;
 			}
-			return a.name.localeCompare(b.name);
+			// Handle cases where name might be undefined
+			const aName = a.name || '';
+			const bName = b.name || '';
+			return aName.localeCompare(bName);
 		});
 
 		return children;
@@ -147,17 +161,124 @@
 	}
 
 	async function openFile(fileId: string) {
+		console.log('Opening file:', fileId);
 		const file = $filesStore.get(fileId);
+		console.log('File details:', file);
 		if (!file || file.type !== 'file') return;
 
 		try {
-			// Load file content (placeholder for future sandbox integration)
-			// For now, just open the file with existing content
+			// Load file content on-demand if not already loaded
+			if (!file.content || file.content === '') {
+				await loadFileContent(fileId);
+			}
 
 			// Open file in tab
 			tabActions.openFile(fileId);
 		} catch (error) {
 			console.error('Failed to open file:', error);
+		}
+	}
+
+	async function saveFileContent(fileId: string) {
+		const file = $filesStore.get(fileId);
+		if (!file || file.type !== 'file' || !file.content) return;
+
+		try {
+			const response = await fetch('/api/files', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					operation: 'write',
+					sandboxId: project?.sandboxId || 'current-sandbox',
+					path: file.path,
+					content: file.content
+				})
+			});
+
+			if (response.ok) {
+				const result = await response.json();
+				if (result.success) {
+					console.log(`Saved file: ${file.name}`);
+					// Mark file as saved (could add a dirty flag to the file type)
+				} else {
+					console.warn('Failed to save file:', result.error);
+				}
+			} else {
+				console.warn('Failed to save file:', response.status);
+			}
+		} catch (error) {
+			console.error('Error saving file:', error);
+		}
+	}
+
+	// Expose save function for external use (e.g., from editor component)
+	export function saveFile(fileId: string) {
+		return saveFileContent(fileId);
+	}
+
+	async function loadFileContent(fileId: string) {
+		const file = $filesStore.get(fileId);
+		if (!file || file.type !== 'file') return;
+
+		try {
+			// Set loading state
+			console.log(`🔄 Starting to load content for file: ${file.name}`);
+			tabActions.openFile(fileId); // Ensure file tab is open
+			fileStateActions.setFileLoading(fileId, true);
+
+			// Load file content from sandbox API with timeout
+			console.log(`📡 Making API call for file: ${file.path}`);
+			const controller = new AbortController();
+			const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+			const response = await fetch('/api/files', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					operation: 'read',
+					sandboxId: project?.sandboxId || 'current-sandbox',
+					projectId: project?.id,
+					path: file.path
+				}),
+				signal: controller.signal
+			});
+
+			clearTimeout(timeoutId);
+
+			console.log(`📥 API response status: ${response.status}`);
+
+			if (response.ok) {
+				const result = await response.json();
+				console.log(`📄 API result:`, result);
+				if (result.success && result.data !== undefined) {
+					// Ensure content is a string
+					const content =
+						typeof result.data.content === 'string'
+							? result.data.content
+							: String(result.data.content);
+					// Update file content in store
+					fileActions.updateFileContent(fileId, content);
+					console.log(`✅ Loaded content for file: ${file.name}, length: ${content.length}`);
+				} else {
+					console.warn('Failed to load file content:', result.error);
+				}
+			} else {
+				console.warn('Failed to load file content:', response.status);
+			}
+		} catch (error) {
+			if (error instanceof Error && error.name === 'AbortError') {
+				console.error('⏰ File content loading timed out:', file.name);
+			} else {
+				console.error('❌ Error loading file content:', error);
+			}
+		} finally {
+			// Clear loading state
+			console.log(`🔄 Clearing loading state for file: ${file.name}`);
+			fileStateActions.setFileLoading(fileId, false);
 		}
 	}
 
@@ -208,11 +329,11 @@
 				path: filePath,
 				content: '',
 				size: 0,
-				modified: new Date(),
+				modifiedAt: new Date(),
 				parentId: parentId || null
 			};
 
-			fileStateActions.createFile(newFile);
+			fileActions.addFile(newFile);
 		} catch (error) {
 			console.error('Failed to create file:', error);
 		}
@@ -237,11 +358,11 @@
 				type: 'directory',
 				path: folderPath,
 				children: [],
-				modified: new Date(),
+				modifiedAt: new Date(),
 				parentId: parentId || null
 			};
 
-			fileStateActions.createDirectory(newFolder);
+			fileActions.addFile(newFolder);
 		} catch (error) {
 			console.error('Failed to create folder:', error);
 		}
@@ -260,7 +381,7 @@
 			// Item renamed locally (placeholder for future sandbox integration)
 
 			// Update local store
-			fileStateActions.renameItem(item.id, newName);
+			fileActions.updateFile(item.id, { name: newName, path: newPath });
 		} catch (error) {
 			console.error('Failed to rename:', error);
 		}
@@ -273,7 +394,7 @@
 			// Item deleted locally (placeholder for future sandbox integration)
 
 			// Delete from local store
-			fileStateActions.deleteItem(item.id);
+			fileActions.removeFile(item.id);
 		} catch (error) {
 			console.error('Failed to delete:', error);
 		}
@@ -315,7 +436,7 @@
 <!-- Activity Bar -->
 <div class="flex h-full max-h-dvh">
 	<!-- Side Activity Bar -->
-	<div class=" flex w-12 flex-col border-r border-border bg-sidebar-accent">
+	<div class="flex w-12 flex-col border-r border-border bg-sidebar-accent">
 		{#each sidebarViews as view (view.id)}
 			<Tooltip.Provider>
 				<Tooltip.Root>
@@ -365,7 +486,7 @@
 		{#if currentView === 'explorer'}
 			<!-- Explorer Header -->
 			<div class="border-b border-border p-2">
-				<div class="mb-2 flex items-center justify-between">
+				<div class=" flex items-center justify-between">
 					<h2 class="text-sm font-semibold tracking-wide text-muted-foreground uppercase">
 						Explorer
 					</h2>
@@ -408,7 +529,16 @@
 										variant="ghost"
 										size="sm"
 										class="h-6 w-6 p-0"
-										onclick={() => initializeDummyData()}
+										onclick={() => {
+											if (project) {
+												// For real projects, refresh would reload from server
+												// For now, just log that refresh is not implemented
+												console.log('Refresh not implemented for real projects');
+											} else {
+												// For dummy data, reload dummy data
+												initializeDummyData();
+											}
+										}}
 									>
 										<RefreshIcon size={14} />
 									</Button>
@@ -433,11 +563,11 @@
 			<!-- File Tree -->
 			<div class="flex-1 overflow-y-auto">
 				{#if searchQuery.trim()}
-					{#each filteredTree as item (item.id)}
+					{#each filteredTree as item (item.path)}
 						{@render FileTreeNode({ item, level: 0, isRoot: true })}
 					{/each}
 				{:else}
-					{#each fileTree as item (item.id)}
+					{#each fileTree as item (item.path)}
 						{@render FileTreeNode({ item, level: 0, isRoot: true })}
 					{/each}
 				{/if}
@@ -480,9 +610,9 @@
 			<div class="group">
 				{#if item.type === 'directory'}
 					{@const children = getChildren(item.id, $filesStore)}
-					{@const isExpanded = expandedFolders.has(item.id)}
+					{@const isExpanded = expandedFolders.has(item.path)}
 					{@const hasChildChanges = children.some(
-						(child) => child.type === 'file' && hasChanges(child.id)
+						(child) => child.type === 'file' && hasChanges(child.path)
 					)}
 
 					<button
@@ -490,7 +620,7 @@
 						class:bg-accent={selectedItem === item.id}
 						style="padding-left: {8 + level * 16}px"
 						onclick={() => {
-							toggleFolder(item.id);
+							toggleFolder(item.path);
 						}}
 						draggable="true"
 						ondragstart={(e) => handleDragStart(e, item)}
@@ -523,18 +653,18 @@
 					{/if}
 				{:else}
 					{@const hasFileChanges = hasChanges(item.id)}
-					{@const changeType = gitChanges[item.name as keyof typeof gitChanges]}
+					{@const changeType = gitChanges.find((change) => change.file === item.name)?.state}
 					{@const FileIcon = getFileIcon(item.name)}
 					<button
 						class="group flex w-full items-center px-2 py-1 text-left transition-colors hover:bg-accent hover:text-accent-foreground"
 						class:bg-accent={selectedItem === item.id}
 						style="padding-left: {8 + (level + 1) * 16}px"
-						onclick={() => handleFileClick(item.id)}
+						onclick={() => handleFileClick(item.path)}
 						draggable="true"
 						ondragstart={(e) => handleDragStart(e, item)}
 					>
 						<div class="flex min-w-0 flex-1 items-center">
-							<Icon icon={FileIcon} size={14} class="mr-2 shrink-0" style="color: #3b82f6" />
+							<Icon icon={FileIcon} class="mr-2 h-3.5 w-3.5 shrink-0" style="color: #3b82f6" />
 							<span
 								class="truncate text-sm"
 								class:text-green-400={changeType === 'A'}
