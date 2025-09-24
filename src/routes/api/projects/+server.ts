@@ -29,11 +29,23 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			return json({ error: 'Unauthorized' }, { status: 401 });
 		}
 
-		const { name, framework, templateId, description, configuration } = await request.json();
+		const { name, framework, templateId, description, configuration, sandboxProvider } =
+			await request.json();
 
 		// Validate required fields
-		if (!name || !framework) {
-			return json({ error: 'Project name and framework are required' }, { status: 400 });
+		if (!name || !framework || !sandboxProvider) {
+			return json(
+				{ error: 'Project name, framework, and sandbox provider are required' },
+				{ status: 400 }
+			);
+		}
+
+		// Validate sandbox provider
+		if (!['daytona', 'e2b'].includes(sandboxProvider)) {
+			return json(
+				{ error: 'Invalid sandbox provider. Must be "daytona" or "e2b"' },
+				{ status: 400 }
+			);
 		}
 
 		// Map framework to proper StackBlitz starter name
@@ -58,13 +70,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			return frameworkMap[framework.toLowerCase()] || 'react-ts'; // Default to react-ts
 		};
 
-		// Use project initialization service for complete setup with Daytona sandbox
+		// Use project initialization service for complete setup with chosen sandbox provider
 		const initializationResult = await projectInitializationService.initializeProject({
 			name: name.trim(),
 			templateId: getTemplateId(framework, templateId),
 			framework,
 			userId: locals.user.id,
 			description: description?.trim() || `${framework} project`,
+			sandboxProvider,
 			configuration: {
 				typescript: configuration?.typescript ?? false,
 				eslint: configuration?.eslint ?? true,
@@ -74,10 +87,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				additionalDependencies: configuration?.additionalDependencies ?? []
 			},
 			sandboxOptions: {
-				createDaytona: true, // Always create Daytona sandbox
-				createE2B: false,
-				daytonaConfig: {},
-				e2bConfig: {}
+				// Provider-specific options can be added here if needed
 			}
 		});
 
@@ -86,8 +96,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				project: initializationResult.project,
 				initialization: {
 					filesCount: initializationResult.files.length,
-					storageUrl: initializationResult.storage.url,
-					sandboxes: initializationResult.sandboxes
+					sandboxResult: initializationResult.sandboxResult
 				}
 			},
 			{ status: 201 }

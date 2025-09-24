@@ -4,7 +4,7 @@
  */
 
 import { DatabaseService } from '$lib/services/database.service';
-import { SandboxService } from '$lib/services/sandbox.service';
+import { SandboxProviderFactory } from '$lib/services/sandbox/provider-factory';
 import { webSocketService } from '$lib/services/websocket.service';
 import { json, type RequestHandler } from '@sveltejs/kit';
 
@@ -122,14 +122,44 @@ async function checkSandboxProvidersHealth(): Promise<ServiceHealth> {
 	const startTime = Date.now();
 
 	try {
-		// Test sandbox providers
-		const providers = await SandboxService.getAvailableProviders();
-		const healthyProviders = providers.filter((p) => p.status === 'healthy');
+		// Get available providers from factory
+		const factory = SandboxProviderFactory.getInstance();
+		const availableProviders = factory.getAvailableProviders();
 
+		const healthResults: Array<{
+			name: string;
+			status: 'healthy' | 'degraded' | 'unhealthy';
+			latency: number;
+			error?: string;
+		}> = [];
+
+		// Test each provider
+		for (const providerName of availableProviders) {
+			try {
+				const provider = factory.createProvider(providerName);
+				const healthResult = await provider.healthCheck();
+
+				healthResults.push({
+					name: providerName,
+					status: healthResult.healthy ? 'healthy' : 'unhealthy',
+					latency: healthResult.latency,
+					error: healthResult.error
+				});
+			} catch (error) {
+				healthResults.push({
+					name: providerName,
+					status: 'unhealthy',
+					latency: 0,
+					error: error instanceof Error ? error.message : 'Health check failed'
+				});
+			}
+		}
+
+		const healthyProviders = healthResults.filter((p) => p.status === 'healthy');
 		const status =
 			healthyProviders.length === 0
 				? 'unhealthy'
-				: healthyProviders.length < providers.length
+				: healthyProviders.length < availableProviders.length
 					? 'degraded'
 					: 'healthy';
 
@@ -138,12 +168,13 @@ async function checkSandboxProvidersHealth(): Promise<ServiceHealth> {
 			response_time: Date.now() - startTime,
 			last_check: new Date().toISOString(),
 			details: {
-				total_providers: providers.length,
+				total_providers: availableProviders.length,
 				healthy_providers: healthyProviders.length,
-				providers: providers.map((p) => ({
+				providers: healthResults.map((p) => ({
 					name: p.name,
 					status: p.status,
-					type: p.type
+					latency: p.latency,
+					error: p.error
 				}))
 			}
 		};
@@ -161,8 +192,26 @@ async function checkFileStorageHealth(): Promise<ServiceHealth> {
 	const startTime = Date.now();
 
 	try {
-		// Test file storage (R2) connectivity
-		// This would include actual R2 health check in production
+		// Test R2 storage connectivity
+		const { r2Config } = await import('$lib/config/r2.config');
+		const { S3Client, ListObjectsV2Command } = await import('@aws-sdk/client-s3');
+
+		const s3Client = new S3Client({
+			region: r2Config.region,
+			endpoint: r2Config.endpoint,
+			credentials: {
+				accessKeyId: r2Config.accessKeyId || '',
+				secretAccessKey: r2Config.secretAccessKey || ''
+			}
+		});
+
+		// Try to list objects in the bucket (this will fail if credentials are invalid)
+		const listCommand = new ListObjectsV2Command({
+			Bucket: r2Config.defaultBucket,
+			MaxKeys: 1
+		});
+
+		await s3Client.send(listCommand);
 
 		return {
 			status: 'healthy',
@@ -170,7 +219,9 @@ async function checkFileStorageHealth(): Promise<ServiceHealth> {
 			last_check: new Date().toISOString(),
 			details: {
 				storage_type: 'cloudflare_r2',
-				available: true
+				bucket: r2Config.defaultBucket,
+				region: r2Config.region,
+				endpoint: r2Config.endpoint
 			}
 		};
 	} catch (error) {
@@ -178,7 +229,7 @@ async function checkFileStorageHealth(): Promise<ServiceHealth> {
 			status: 'unhealthy',
 			response_time: Date.now() - startTime,
 			last_check: new Date().toISOString(),
-			error: error instanceof Error ? error.message : 'File storage check failed'
+			error: error instanceof Error ? error.message : 'R2 storage check failed'
 		};
 	}
 }

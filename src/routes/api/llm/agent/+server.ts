@@ -17,7 +17,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			sessionId,
 			sessionName,
 			sessionPath,
-			stream = false
+			stream = true
 		} = body;
 
 		// Validate required fields

@@ -34,13 +34,16 @@ export const GET: RequestHandler = async ({ params, locals }) => {
 				status: project.status,
 				framework: project.framework,
 				e2bSessionId: project.e2bSessionId,
+				sandboxProvider: project.sandboxProvider,
+				sandboxId: project.sandboxId,
 				createdAt: project.createdAt,
 				updatedAt: project.updatedAt
 			},
 			initialization: {
 				status: project.status,
 				progress: getInitializationProgress(project.status),
-				lastActivity: project.updatedAt
+				lastActivity: project.updatedAt,
+				...(project.metadata?.initializationStatus || {})
 			},
 			storage: {
 				hasFiles: false,
@@ -131,12 +134,15 @@ export const GET: RequestHandler = async ({ params, locals }) => {
 function getInitializationProgress(status: string): number {
 	switch (status) {
 		case 'initializing':
-			return 25;
-		case 'cloning':
-			return 50;
+			return 10;
+		case 'downloading':
+			return 30;
 		case 'uploading':
-			return 75;
+			return 60;
+		case 'creating-sandboxes':
+			return 80;
 		case 'ready':
+		case 'completed':
 		case 'active':
 			return 100;
 		case 'error':
