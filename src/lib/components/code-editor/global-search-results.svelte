@@ -1,14 +1,13 @@
 <script lang="ts">
+	import Badge from '$lib/components/ui/badge/badge.svelte';
+	import Button from '$lib/components/ui/button/button.svelte';
 	import {
-		searchStore,
 		searchActions,
 		searchResults,
+		searchStore,
 		searchSummary
 	} from '$lib/stores/search.store';
 	import { tabActions } from '$lib/stores/tabs.store';
-	import Button from '$lib/components/ui/button/button.svelte';
-	import Badge from '$lib/components/ui/badge/badge.svelte';
-	import Separator from '$lib/components/ui/separator/separator.svelte';
 	import type { FileSearchResult, SearchMatch } from '$lib/types/file-operations';
 
 	// Props

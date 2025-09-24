@@ -41,7 +41,8 @@
 		comprehensiveSettingsStore,
 		currentTheme
 	} from '$lib/stores/comprehensive-settings.store.js';
-	import { fileActions, filesStore, fileStateActions, tabsStore } from '$lib/stores/editor.js';
+	import { fileActions, filesStore, tabsStore } from '$lib/stores/editor.js';
+	import { fileStateActions } from '$lib/stores/file-states.store.js';
 	import type { Project } from '$lib/types';
 	import { mode } from 'mode-watcher';
 
@@ -85,7 +86,16 @@
 		extensions.push(indentationCompartment.of(getIndentationExtension(editorSettings)));
 		extensions.push(autocompletionCompartment.of(getAutocompletionExtension(editorSettings)));
 		extensions.push(searchCompartment.of(getSearchExtension(editorSettings)));
-		extensions.push(keymapCompartment.of(getKeymapExtension(settings)));
+		extensions.push(
+			keymapCompartment.of(
+				getKeymapExtension(settings, {
+					handleSave,
+					toggleSearchPanel: () => {
+						showSearchPanel = !showSearchPanel;
+					}
+				})
+			)
+		);
 		extensions.push(scrollCompartment.of(getScrollExtension(editorSettings)));
 
 		// Add language support with compartment
@@ -141,39 +151,6 @@
 						console.log('Format on save triggered');
 					}
 
-					// Trim trailing whitespace if enabled
-					if (editorSettings.trimTrailingWhitespace && update.docChanged) {
-						// Get the current document
-						const doc = update.state.doc;
-						let newText = '';
-						let hasChanges = false;
-
-						// Process each line
-						const lines = doc.toString().split('\n');
-						for (let i = 0; i < lines.length; i++) {
-							const trimmed = lines[i].trimEnd();
-							if (trimmed !== lines[i]) {
-								hasChanges = true;
-							}
-							newText += trimmed;
-							if (i < lines.length - 1) {
-								newText += '\n';
-							}
-						}
-
-						// Apply changes if whitespace was trimmed
-						if (hasChanges) {
-							const transaction = update.state.update({
-								changes: {
-									from: 0,
-									to: doc.length,
-									insert: newText
-								}
-							});
-							editorView?.dispatch(transaction);
-						}
-					}
-
 					// Format on paste if enabled
 					if (
 						editorSettings.formatOnPaste &&
@@ -183,11 +160,15 @@
 						console.log('Format on paste triggered');
 					}
 
-					// Save cursor position
-					const cursor = update.state.selection.main.head;
-					fileStateActions.updateFileState(currentFileId, {
-						cursorPosition: cursor
-					});
+					// Save cursor position (only when selection changes, not content)
+					if (update.selectionChanged && !update.docChanged) {
+						const cursor = update.state.selection.main.head;
+						const line = update.state.doc.lineAt(cursor).number;
+						const column = cursor - update.state.doc.lineAt(cursor).from + 1;
+						fileStateActions.updateFileState(currentFileId, {
+							cursorPosition: { line, column, timestamp: new Date() }
+						});
+					}
 				}
 			})
 		);
@@ -195,13 +176,61 @@
 		return extensions;
 	}
 
-	// Handle save
-	function handleSave() {
-		if (currentFileId && fileStateActions.isFileDirty(currentFileId)) {
-			fileStateActions.setFileDirty(currentFileId, false);
-			return true;
-		}
-		return false;
+	// Handle save - simplified and more reliable
+	function handleSave(): boolean {
+		// Call the async save function but don't await (for compatibility with keymap)
+		(async () => {
+			if (!currentFileId) {
+				console.log('No file to save');
+				return false;
+			}
+
+			if (!fileStateActions.isFileDirty(currentFileId)) {
+				console.log('File is not dirty, no need to save');
+				return true;
+			}
+
+			// Format on save if enabled (before saving)
+			const settings = $comprehensiveSettingsStore;
+			if (settings?.editor?.formatOnSave && editorView) {
+				// Get current content and apply formatting
+				const doc = editorView.state.doc;
+				// For now, just trim whitespace - proper formatting would need language-specific logic
+				const newContent = doc.toString().trim();
+
+				if (newContent !== doc.toString()) {
+					// Save cursor position
+					const selection = editorView.state.selection.main;
+
+					// Apply the trimmed content
+					const transaction = editorView.state.update({
+						changes: {
+							from: 0,
+							to: doc.length,
+							insert: newContent
+						},
+						selection: { anchor: selection.anchor, head: selection.head }
+					});
+					editorView.dispatch(transaction);
+				}
+			}
+
+			// Perform the save operation using the unified save function
+			try {
+				const success = await fileStateActions.saveFile(currentFileId);
+				if (success) {
+					console.log('File saved successfully');
+				} else {
+					console.error('Failed to save file');
+				}
+				return success;
+			} catch (error) {
+				console.error('Failed to save file:', error);
+				return false;
+			}
+		})();
+
+		return true; // Return true to prevent browser default save dialog
 	}
 
 	// Create editor state
@@ -229,7 +258,7 @@
 		}
 
 		currentFileId = activeFileId;
-		const content = file.content || '';
+		const content = typeof file.content === 'string' ? file.content : '';
 		const filename = file.name;
 
 		// Create new editor
@@ -241,11 +270,37 @@
 
 		// Restore cursor position
 		const fileState = fileStateActions.getFileState(activeFileId);
-		if (fileState?.cursorPosition && typeof fileState.cursorPosition === 'number') {
+		if (fileState?.cursorPosition) {
 			requestAnimationFrame(() => {
 				if (editorView && currentFileId === activeFileId) {
+					let cursorPos = 0;
+
+					if (typeof fileState.cursorPosition === 'number') {
+						// Legacy format: direct cursor position
+						cursorPos = fileState.cursorPosition;
+					} else if (
+						typeof fileState.cursorPosition === 'object' &&
+						'line' in fileState.cursorPosition
+					) {
+						// New format: line/column
+						try {
+							const line = Math.max(1, fileState.cursorPosition.line);
+							const column = Math.max(1, fileState.cursorPosition.column);
+
+							// Get the line at the specified line number
+							const doc = editorView.state.doc;
+							if (line <= doc.lines) {
+								const lineObj = doc.line(line);
+								cursorPos = lineObj.from + Math.min(column - 1, lineObj.length);
+							}
+						} catch (error) {
+							console.warn('Failed to restore cursor position:', error);
+							cursorPos = 0;
+						}
+					}
+
 					editorView.dispatch({
-						selection: { anchor: fileState.cursorPosition as number }
+						selection: { anchor: cursorPos, head: cursorPos }
 					});
 				}
 			});
@@ -265,23 +320,49 @@
 	onMount(() => {
 		mounted = true;
 		initializeEditor();
+
+		// Global keyboard shortcut handler as fallback
+		const handleKeyDown = (event: KeyboardEvent) => {
+			if ((event.ctrlKey || event.metaKey) && event.key === 's') {
+				event.preventDefault();
+				event.stopPropagation();
+				handleSave();
+			}
+		};
+
+		window.addEventListener('keydown', handleKeyDown, true);
+
+		// Return cleanup function
+		return () => {
+			window.removeEventListener('keydown', handleKeyDown, true);
+		};
 	});
 
 	onDestroy(() => {
 		cleanup();
 	});
 
-	// React to file changes
+	// React to file content changes
 	$effect(() => {
 		const activeFileId = $tabsStore.activeFileId;
+		const file = activeFileId ? $filesStore.get(activeFileId) : null;
 
-		if (!mounted || !activeFileId) {
-			cleanup();
-			return;
-		}
+		if (mounted && editorView && currentFileId === activeFileId && file) {
+			const currentContent = editorView.state.doc.toString();
+			const newContent = typeof file.content === 'string' ? file.content : '';
 
-		if (currentFileId !== activeFileId) {
-			initializeEditor();
+			// Only update if content has actually changed and is not empty
+			if (newContent && newContent !== currentContent) {
+				console.log(`📝 Updating editor content for ${file.name}, length: ${newContent.length}`);
+				const transaction = editorView.state.update({
+					changes: {
+						from: 0,
+						to: currentContent.length,
+						insert: newContent
+					}
+				});
+				editorView.dispatch(transaction);
+			}
 		}
 	});
 
@@ -333,7 +414,14 @@
 				indentationCompartment.reconfigure(getIndentationExtension(editorSettings)),
 				autocompletionCompartment.reconfigure(getAutocompletionExtension(editorSettings)),
 				searchCompartment.reconfigure(getSearchExtension(editorSettings)),
-				keymapCompartment.reconfigure(getKeymapExtension(settings)),
+				keymapCompartment.reconfigure(
+					getKeymapExtension(settings, {
+						handleSave,
+						toggleSearchPanel: () => {
+							showSearchPanel = !showSearchPanel;
+						}
+					})
+				),
 				scrollCompartment.reconfigure(getScrollExtension(editorSettings))
 			];
 

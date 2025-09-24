@@ -1,21 +1,21 @@
+import { autocompletion, closeBrackets, completionKeymap } from '@codemirror/autocomplete';
+import { defaultKeymap, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { bracketMatching, foldGutter, foldKeymap, indentUnit } from '@codemirror/language';
+import { highlightSelectionMatches, search } from '@codemirror/search';
 import { type Extension, Compartment } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
 import {
-	lineNumbers,
-	highlightActiveLineGutter,
+	crosshairCursor,
 	drawSelection,
 	dropCursor,
-	rectangularSelection,
-	crosshairCursor,
-	scrollPastEnd,
+	EditorView,
 	gutter,
-	GutterMarker
+	GutterMarker,
+	highlightActiveLineGutter,
+	keymap,
+	lineNumbers,
+	rectangularSelection,
+	scrollPastEnd
 } from '@codemirror/view';
-import { foldGutter, bracketMatching, indentUnit, foldKeymap } from '@codemirror/language';
-import { search, highlightSelectionMatches } from '@codemirror/search';
-import { autocompletion, completionKeymap, closeBrackets } from '@codemirror/autocomplete';
-import { keymap } from '@codemirror/view';
-import { defaultKeymap, historyKeymap, indentWithTab } from '@codemirror/commands';
 
 // Compartments for dynamic reconfiguration
 export const themeCompartment = new Compartment();
@@ -144,55 +144,72 @@ export function getSearchExtension(editorSettings: any): Extension[] {
 	return extensions;
 }
 
-export function getKeymapExtension(settings: any): Extension[] {
+export function getKeymapExtension(
+	settings: any,
+	handlers?: {
+		handleSave?: () => boolean;
+		toggleSearchPanel?: () => void;
+	}
+): Extension[] {
 	const editorSettings = settings.editor;
 	const keymapExtensions = [];
 
-	// Custom keybindings first (higher priority)
-	keymapExtensions.push({ key: 'Ctrl-s', run: (view: EditorView) => handleSave() });
-	keymapExtensions.push({ key: 'Cmd-s', run: (view: EditorView) => handleSave() });
+	// Custom keybindings first (higher priority) - these override browser defaults
+	if (handlers?.handleSave) {
+		keymapExtensions.push({
+			key: 'Ctrl-s',
+			preventDefault: true,
+			run: (view: EditorView) => {
+				handlers.handleSave?.();
+				return true; // Always return true to prevent default browser behavior
+			}
+		});
+		keymapExtensions.push({
+			key: 'Cmd-s',
+			preventDefault: true,
+			run: (view: EditorView) => {
+				handlers.handleSave?.();
+				return true; // Always return true to prevent default browser behavior
+			}
+		});
+	}
 
 	// Search shortcuts
-	keymapExtensions.push({
-		key: 'Ctrl-f',
-		run: (view: EditorView) => {
-			showSearchPanel = true;
-			return true;
-		}
-	});
-	keymapExtensions.push({
-		key: 'Cmd-f',
-		run: (view: EditorView) => {
-			showSearchPanel = true;
-			return true;
-		}
-	});
-
-	keymapExtensions.push({
-		key: 'Ctrl-h',
-		run: (view: EditorView) => {
-			showSearchPanel = true;
-			return true;
-		}
-	});
-	keymapExtensions.push({
-		key: 'Cmd-h',
-		run: (view: EditorView) => {
-			showSearchPanel = true;
-			return true;
-		}
-	});
-
-	keymapExtensions.push({
-		key: 'Escape',
-		run: (view: EditorView) => {
-			if (showSearchPanel) {
-				showSearchPanel = false;
+	if (handlers?.toggleSearchPanel) {
+		keymapExtensions.push({
+			key: 'Ctrl-f',
+			preventDefault: true,
+			run: (view: EditorView) => {
+				handlers.toggleSearchPanel?.();
 				return true;
 			}
-			return false;
-		}
-	});
+		});
+		keymapExtensions.push({
+			key: 'Cmd-f',
+			preventDefault: true,
+			run: (view: EditorView) => {
+				handlers.toggleSearchPanel?.();
+				return true;
+			}
+		});
+
+		keymapExtensions.push({
+			key: 'Ctrl-h',
+			preventDefault: true,
+			run: (view: EditorView) => {
+				handlers.toggleSearchPanel?.();
+				return true;
+			}
+		});
+		keymapExtensions.push({
+			key: 'Cmd-h',
+			preventDefault: true,
+			run: (view: EditorView) => {
+				handlers.toggleSearchPanel?.();
+				return true;
+			}
+		});
+	}
 
 	// Add default keybindings based on keymap setting
 	if (settings.keyboard.keyMap === 'vim') {
@@ -235,16 +252,4 @@ export function getScrollExtension(editorSettings: any): Extension[] {
 	}
 
 	return extensions;
-}
-
-// Helper function for save handling (will be passed from main component)
-let handleSave: () => boolean;
-let showSearchPanel: boolean;
-
-export function setSaveHandler(handler: () => boolean) {
-	handleSave = handler;
-}
-
-export function setSearchPanelState(state: boolean) {
-	showSearchPanel = state;
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 // Mock browser environment
 Object.defineProperty(globalThis, 'localStorage', {
@@ -49,8 +49,8 @@ describe('Search Functionality Basic Tests', () => {
 		];
 
 		requiredActions.forEach((action) => {
-			expect(searchActions[action]).toBeDefined();
-			expect(typeof searchActions[action]).toBe('function');
+			expect((searchActions as any)[action]).toBeDefined();
+			expect(typeof (searchActions as any)[action]).toBe('function');
 		});
 	});
 
