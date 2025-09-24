@@ -142,20 +142,43 @@
 
 		isLoading.set(true);
 		try {
-			const response = await fetch(`/api/r2/files/list`, {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify({
-					userId,
-					projectId: project.id
-				})
-			});
+			// Determine which API to call based on sandbox provider
+			let response;
+			if (project.sandboxProvider === 'daytona' && project.sandboxId) {
+				// For Daytona projects, use the general files API with sandboxId
+				response = await fetch(`/api/files`, {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json'
+					},
+					body: JSON.stringify({
+						operation: 'list',
+						sandboxId: project.sandboxId,
+						path: ''
+					})
+				});
+			} else {
+				// For E2B projects, use R2 API
+				response = await fetch(`/api/r2/files/list`, {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json'
+					},
+					body: JSON.stringify({
+						userId,
+						projectId: project.id
+					})
+				});
+			}
 
 			if (response.ok) {
 				const data = await response.json();
-				files.set(data.files || []);
+				// Handle different response formats
+				if (project.sandboxProvider === 'daytona') {
+					files.set(data.data?.sandbox || []);
+				} else {
+					files.set(data.files || []);
+				}
 				lastSyncTime.set(new Date());
 			} else {
 				throw new Error(`Failed to load files: ${response.statusText}`);
