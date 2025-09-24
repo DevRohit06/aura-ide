@@ -1,6 +1,6 @@
-import { writable, derived } from 'svelte/store';
-import type { FileSystemItem, File } from '$lib/types/files';
-import type { SearchMatch, FileSearchResult, FileSearchOptions } from '$lib/types/file-operations';
+import type { FileSearchOptions, FileSearchResult, SearchMatch } from '$lib/types/file-operations';
+import type { FileSystemItem, File as ProjectFile } from '$lib/types/files';
+import { derived, writable } from 'svelte/store';
 import { filesStore } from './files.store';
 
 // Search state interface
@@ -130,7 +130,7 @@ class SearchUtils {
 		return matches;
 	}
 
-	static searchInFile(file: File, options: FileSearchOptions): FileSearchResult | null {
+	static searchInFile(file: ProjectFile, options: FileSearchOptions): FileSearchResult | null {
 		const matches: SearchMatch[] = [];
 		let score = 0;
 
@@ -329,10 +329,12 @@ export const searchActions = {
 				query: currentState!.query,
 				includeContent: currentState!.includeContent,
 				caseSensitive: currentState!.caseSensitive,
+				regex: false,
 				wholeWord: currentState!.wholeWord,
 				useRegex: currentState!.useRegex,
 				fileTypes: [],
-				excludePatterns: []
+				excludePatterns: [],
+				maxResults: 100
 			};
 
 			const results: FileSearchResult[] = [];
@@ -340,7 +342,7 @@ export const searchActions = {
 			// Search through all files
 			for (const [id, item] of allFiles!) {
 				if (item.type === 'file') {
-					const file = item as File;
+					const file = item as ProjectFile;
 					const result = SearchUtils.searchInFile(file, searchOptions);
 					if (result) {
 						results.push(result);

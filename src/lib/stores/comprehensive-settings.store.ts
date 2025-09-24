@@ -1,30 +1,20 @@
-import { writable, derived, get } from 'svelte/store';
-import { setMode } from 'mode-watcher';
 import type {
 	ComprehensiveSettings,
 	SettingsCategory,
+	SettingsChangeEvent,
 	SettingSetting,
-	SettingValue,
-	SettingValidationResult,
-	SettingValidationError,
-	SettingValidationWarning,
 	SettingsExport,
 	SettingsImportResult,
-	SettingsChangeEvent,
 	SettingsPreset,
-	AppearanceSettings,
-	EditorSettings,
-	KeyboardSettings,
-	AISettings,
-	TerminalSettings,
-	FileSettings,
-	PerformanceSettings,
-	PrivacySettings,
-	AdvancedSettings
+	SettingValidationError,
+	SettingValidationResult,
+	SettingValue
 } from '$lib/types/settings';
-import { settingsValidation } from '$lib/utils/settings-validation';
+import { initializeCSSVariables, updateCSSVariables } from '$lib/utils/css-variables';
 import { defaultSettingsSync } from '$lib/utils/settings-sync';
-import { updateCSSVariables, initializeCSSVariables } from '$lib/utils/css-variables';
+import { settingsValidation } from '$lib/utils/settings-validation';
+import { setMode } from 'mode-watcher';
+import { derived, get, writable } from 'svelte/store';
 
 // Default settings
 const defaultSettings: ComprehensiveSettings = {
@@ -58,7 +48,7 @@ const defaultSettings: ComprehensiveSettings = {
 		autoSaveDelay: 1000,
 		formatOnSave: true,
 		formatOnPaste: false,
-		trimTrailingWhitespace: true,
+		trimTrailingWhitespace: false,
 		insertFinalNewline: true,
 
 		// Indentation
@@ -727,6 +717,19 @@ export const comprehensiveSettingsActions = {
 				}
 			},
 			tags: ['performance', 'fast']
+		},
+		{
+			id: 'dracula',
+			name: 'Dracula Theme',
+			description: 'Dark theme with Dracula color scheme',
+			settings: {
+				appearance: {
+					...defaultSettings.appearance,
+					theme: 'dark',
+					colorScheme: 'dracula'
+				}
+			},
+			tags: ['theme', 'dark', 'dracula']
 		}
 	],
 

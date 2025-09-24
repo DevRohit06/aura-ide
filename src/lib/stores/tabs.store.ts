@@ -1,6 +1,6 @@
-import { writable, derived, get } from 'svelte/store';
-import { filesStore } from './files.store.js';
 import type { File } from '@/types/files';
+import { derived, get, writable } from 'svelte/store';
+import { filesStore } from './files.store.js';
 
 // Tab state interface
 interface TabState {
@@ -163,43 +163,9 @@ export const tabActions = {
 		return state.openFiles.length;
 	},
 
-	// Persistence
-	persistTabs: () => {
-		if (typeof window === 'undefined') return;
-
-		const state = get(tabsStore);
-		localStorage.setItem('aura-tabs', JSON.stringify(state));
-	},
-
-	restoreTabs: () => {
-		if (typeof window === 'undefined') return;
-
-		const saved = localStorage.getItem('aura-tabs');
-		if (saved) {
-			try {
-				const parsed = JSON.parse(saved);
-				tabsStore.set(parsed);
-			} catch (error) {
-				console.warn('Failed to restore tabs:', error);
-			}
-		}
-	},
-
 	// Reset to default
 	reset: () => {
 		tabsStore.set(defaultTabState);
+		console.log('🔄 Reset tabs store');
 	}
 };
-
-// Auto-persist tabs
-if (typeof window !== 'undefined') {
-	tabsStore.subscribe(() => {
-		clearTimeout((globalThis as any).tabsPersistTimeout);
-		(globalThis as any).tabsPersistTimeout = setTimeout(() => {
-			tabActions.persistTabs();
-		}, 300);
-	});
-
-	// Restore tabs on load
-	tabActions.restoreTabs();
-}

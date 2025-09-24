@@ -1,9 +1,8 @@
-import { writable, derived } from 'svelte/store';
-import { mode, setMode } from 'mode-watcher';
-import { settingsStore } from './settings.store.js';
+import { setMode } from 'mode-watcher';
+import { derived } from 'svelte/store';
 import {
-	comprehensiveSettingsStore,
-	comprehensiveSettingsActions
+	comprehensiveSettingsActions,
+	comprehensiveSettingsStore
 } from './comprehensive-settings.store.js';
 
 // Theme types - support light, dark, and system
@@ -31,9 +30,13 @@ export const themeStore = derived(comprehensiveSettingsStore, ($settings) => ({
 // Available theme options
 export const themeOptions = {
 	modes: [
-		{ value: 'light', label: 'Light', description: 'Light theme with OneDark' },
-		{ value: 'dark', label: 'Dark', description: 'Dark theme with OneDark' },
+		{ value: 'light', label: 'Light', description: 'Light theme' },
+		{ value: 'dark', label: 'Dark', description: 'Dark theme' },
 		{ value: 'system', label: 'System', description: 'Follow system preference' }
+	] as const,
+	colorSchemes: [
+		{ value: 'onedark', label: 'OneDark', description: 'Classic OneDark colors' },
+		{ value: 'dracula', label: 'Dracula', description: 'Dracula theme colors' }
 	] as const
 };
 
@@ -70,9 +73,12 @@ export const themeActions = {
 	saveTheme: () => {
 		if (typeof window === 'undefined') return;
 
-		themeStore.subscribe((theme) => {
-			localStorage.setItem('aura-theme', JSON.stringify(theme));
-		});
+		const currentSettings = comprehensiveSettingsActions.getCurrentSettings();
+		const themeData = {
+			mode: currentSettings.appearance.theme,
+			colorScheme: currentSettings.appearance.colorScheme
+		};
+		localStorage.setItem('aura-theme', JSON.stringify(themeData));
 	},
 
 	loadTheme: () => {
@@ -82,8 +88,13 @@ export const themeActions = {
 		if (savedTheme) {
 			try {
 				const theme = JSON.parse(savedTheme);
-				// Update through comprehensive settings instead of direct store.set
+				// Update through comprehensive settings
 				comprehensiveSettingsActions.updateSetting('appearance', 'theme', theme.mode);
+				comprehensiveSettingsActions.updateSetting(
+					'appearance',
+					'colorScheme',
+					theme.colorScheme || 'onedark'
+				);
 				themeActions.setThemeMode(theme.mode);
 			} catch (error) {
 				console.warn('Failed to load saved theme:', error);
@@ -91,9 +102,20 @@ export const themeActions = {
 		}
 	},
 
+	// Color scheme actions
+	setColorScheme: (colorScheme: string) => {
+		comprehensiveSettingsActions.updateSetting('appearance', 'colorScheme', colorScheme);
+	},
+
+	applyDraculaPreset: () => {
+		themeActions.setThemeMode('dark');
+		themeActions.setColorScheme('dracula');
+	},
+
 	// Reset to defaults
 	resetTheme: () => {
 		comprehensiveSettingsActions.updateSetting('appearance', 'theme', 'dark');
+		comprehensiveSettingsActions.updateSetting('appearance', 'colorScheme', 'onedark');
 		themeActions.setThemeMode('dark');
 	}
 };

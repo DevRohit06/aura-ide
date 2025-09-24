@@ -1,6 +1,6 @@
 import type { Directory, File, FileSystemItem } from '$lib/types/files';
 import { toast } from 'svelte-sonner';
-import { get, writable } from 'svelte/store';
+import { derived, get, writable } from 'svelte/store';
 import { fileActions, filesStore } from './files.store';
 
 // Sandbox file operations state

@@ -166,7 +166,7 @@ function extractProjectName(filePath: string): string {
  * Get selected code from file (for now, return a snippet)
  */
 function getSelectedCode(file: File): string {
-	if (!file.content) return '';
+	if (!file.content || typeof file.content !== 'string') return '';
 
 	// For now, return first few lines as context
 	// In a real implementation, this would get actual selected text from editor

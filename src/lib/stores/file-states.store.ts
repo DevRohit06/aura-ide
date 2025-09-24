@@ -1,7 +1,9 @@
-import { writable, derived, get } from 'svelte/store';
-import { activeFileId } from './tabs.store.js';
+import { fileOperationsAPI } from '@/services/file-operations-api.service';
 import type { FileEditorState } from '@/types/editor-state';
 import type { CursorPosition, SelectionRange } from '@/types/files';
+import { derived, get, writable } from 'svelte/store';
+import { filesStore } from './files.store.js';
+import { activeFileId } from './tabs.store.js';
 
 // Default file editor state
 const defaultFileEditorState: FileEditorState = {
@@ -9,6 +11,7 @@ const defaultFileEditorState: FileEditorState = {
 	cursorPosition: { line: 1, column: 1, timestamp: new Date() },
 	selection: [],
 	isDirty: false,
+	isLoading: false,
 	undoHistory: [],
 	redoHistory: [],
 	lastSaved: new Date()
@@ -66,7 +69,14 @@ export const fileStateActions = {
 	getCursorPosition: (fileId: string): CursorPosition | null => {
 		const states = get(fileStatesStore);
 		const state = states.get(fileId);
-		return state?.cursorPosition || null;
+		const cursor = state?.cursorPosition;
+
+		// Handle legacy number format or missing cursor position
+		if (!cursor || typeof cursor === 'number') {
+			return null;
+		}
+
+		return cursor;
 	},
 
 	// Selection management
@@ -107,6 +117,17 @@ export const fileStateActions = {
 		const states = get(fileStatesStore);
 		const state = states.get(fileId);
 		return state?.isDirty || false;
+	},
+
+	// Loading state management
+	setFileLoading: (fileId: string, isLoading: boolean) => {
+		fileStateActions.updateFileState(fileId, { isLoading });
+	},
+
+	isFileLoading: (fileId: string): boolean => {
+		const states = get(fileStatesStore);
+		const state = states.get(fileId);
+		return state?.isLoading || false;
 	},
 
 	// Undo/Redo history management
@@ -226,6 +247,82 @@ export const fileStateActions = {
 		return dirtyFiles;
 	},
 
+	// Save file (mark as not dirty and update last saved time)
+	async saveFile(fileId: string, projectId?: string): Promise<boolean> {
+		try {
+			// Get current project ID if not provided
+			if (!projectId) {
+				const { projectActions } = await import('./current-project.store.js');
+				projectId = projectActions.getCurrentProject() || undefined;
+			}
+
+			console.log('💾 Saving file with project ID:', projectId);
+
+			// Get file from store
+			const files = get(filesStore);
+			const file = files.get(fileId);
+
+			if (!file) {
+				console.error('❌ File not found in store:', fileId);
+				return false;
+			}
+
+			if (file.type !== 'file') {
+				console.error('❌ Cannot save directory:', file.path);
+				return false;
+			}
+
+			if (!file.permissions.write) {
+				console.error('❌ File is read-only:', file.path);
+				return false;
+			}
+
+			// Call the API directly
+			const result = await fileOperationsAPI.saveFile({
+				path: file.path,
+				content: file.content || '',
+				projectId,
+				metadata: {
+					modifiedAt: new Date().toISOString(),
+					size: (file.content || '').length
+				}
+			});
+
+			if (result.success) {
+				// Update local state to mark as saved
+				fileStateActions.setFileDirty(fileId, false);
+				fileStateActions.updateFileState(fileId, {
+					lastSaved: new Date()
+				});
+				console.log('✅ File saved successfully');
+				return true;
+			} else {
+				console.error('❌ Failed to save file:', result.error);
+				return false;
+			}
+		} catch (error) {
+			console.error('Failed to save file:', error);
+			return false;
+		}
+	},
+
+	// Save all dirty files
+	async saveAllFiles(projectId?: string): Promise<boolean> {
+		try {
+			// Get current project ID if not provided
+			if (!projectId) {
+				const { projectActions } = await import('./current-project.store.js');
+				projectId = projectActions.getCurrentProject() || undefined;
+			}
+
+			const { enhancedFileActions } = await import('./enhanced-file-operations.store.js');
+			return await enhancedFileActions.saveAllFiles(projectId);
+		} catch (error) {
+			console.error('Failed to save all files:', error);
+			return false;
+		}
+	},
+
 	// Bulk operations
 	markAllFilesSaved: () => {
 		fileStatesStore.update((states) => {
@@ -243,47 +340,37 @@ export const fileStateActions = {
 
 	clearAllFileStates: () => {
 		fileStatesStore.set(new Map());
-	},
-
-	// Persistence
-	persistFileStates: () => {
-		if (typeof window === 'undefined') return;
-
-		const states = get(fileStatesStore);
-		const serializedStates = Array.from(states.entries());
-		localStorage.setItem('aura-file-states', JSON.stringify(serializedStates));
-	},
-
-	restoreFileStates: () => {
-		if (typeof window === 'undefined') return;
-
-		const saved = localStorage.getItem('aura-file-states');
-		if (saved) {
-			try {
-				const parsed = JSON.parse(saved) as [string, FileEditorState][];
-				const statesMap = new Map(parsed);
-				fileStatesStore.set(statesMap);
-			} catch (error) {
-				console.warn('Failed to restore file states:', error);
-			}
-		}
+		console.log('🧹 Cleared all file states');
 	},
 
 	// Reset
 	reset: () => {
 		fileStatesStore.set(new Map());
+		console.log('🔄 Reset file states store');
 	}
 };
 
-// Auto-persist file states
-if (typeof window !== 'undefined') {
-	fileStatesStore.subscribe(() => {
-		clearTimeout((globalThis as any).fileStatesPersistTimeout);
-		(globalThis as any).fileStatesPersistTimeout = setTimeout(() => {
-			fileStateActions.persistFileStates();
-		}, 1000);
-	});
+// Export derived stores for convenience
+export const activeCursorPosition = derived(
+	[fileStatesStore, activeFileId],
+	([$states, $activeFileId]) => {
+		if (!$activeFileId) return null;
+		const state = $states.get($activeFileId);
+		return state?.cursorPosition || null;
+	}
+);
 
-	// Restore file states on load
-	fileStateActions.restoreFileStates();
-}
+export const activeScrollPosition = derived(
+	[fileStatesStore, activeFileId],
+	([$states, $activeFileId]) => {
+		if (!$activeFileId) return 0;
+		const state = $states.get($activeFileId);
+		return state?.scrollPosition || 0;
+	}
+);
+
+export const isDirtyFile = derived([fileStatesStore, activeFileId], ([$states, $activeFileId]) => {
+	if (!$activeFileId) return false;
+	const state = $states.get($activeFileId);
+	return state?.isDirty || false;
+});

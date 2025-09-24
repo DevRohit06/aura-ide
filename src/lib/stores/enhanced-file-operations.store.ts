@@ -1,16 +1,21 @@
-import { writable, derived, get } from 'svelte/store';
-import { toast } from 'svelte-sonner';
-import type { FileSystemItem, File, Directory } from '$lib/types/files';
+import { fileOperationsAPI } from '$lib/services/file-operations-api.service';
 import type {
 	CreateFileData,
 	DeleteFileData,
-	RenameFileData,
+	FileValidationResult,
 	MoveFileData,
-	FileValidationResult
+	RenameFileData
 } from '$lib/types/file-operations';
-import { filesStore, fileActions } from './files.store';
+import type { Directory, File, FileSystemItem } from '$lib/types/files';
+import { toast } from 'svelte-sonner';
+import { derived, get, writable } from 'svelte/store';
 import { fileStateActions } from './file-states.store';
+import { fileActions, filesStore } from './files.store';
+import { currentSandboxId } from './sandbox.store';
 import { tabActions } from './tabs.store';
+// Dynamic imports for SSR compatibility
+// import { r2StorageService } from '$lib/services/r2-storage.service'; // Import dynamically to avoid SSR issues
+// import { SandboxManager } from '$lib/services/sandbox/sandbox-manager'; // Import dynamically to avoid SSR issues
 
 // Enhanced file operations state
 interface FileOperationsState {
@@ -773,23 +778,33 @@ export const enhancedFileActions = {
 		}
 	},
 
-	// Save single file with proper state management
-	async saveFile(fileId: string): Promise<boolean> {
+	// Save single file using the new API
+	async saveFile(fileId: string, projectId?: string): Promise<boolean> {
 		try {
+			console.log('🔄 Starting file save operation for fileId:', fileId, 'projectId:', projectId);
+
 			const files = get(filesStore);
 			const file = files.get(fileId) as File;
 
 			if (!file) {
+				console.error('❌ File not found in store:', fileId);
 				throw new Error('File not found');
 			}
 
 			if (file.type !== 'file') {
+				console.error('❌ Cannot save directory:', file);
 				throw new Error('Cannot save a directory');
 			}
 
 			if (file.isReadOnly) {
+				console.error('❌ File is read-only:', file.path);
 				throw new Error('File is read-only');
 			}
+
+			console.log('📁 File to save:', {
+				path: file.path,
+				contentLength: file.content?.length || 0
+			});
 
 			enhancedFileActions.setOperationState({
 				isLoading: true,
@@ -800,14 +815,51 @@ export const enhancedFileActions = {
 
 			enhancedFileActions.setOperationState({ operationProgress: 30 });
 
-			// Update file properties
+			// Get current sandbox ID
+			const sandboxId = get(currentSandboxId);
+			console.log('🏗️ Using sandboxId:', sandboxId);
+
+			// Use the new file operations API (only on client side)
+			if (typeof window !== 'undefined') {
+				console.log('🌐 Making API call to save file...');
+
+				const savePayload = {
+					path: file.path,
+					content: file.content || '',
+					projectId,
+					sandboxId: sandboxId || undefined,
+					metadata: {
+						modifiedAt: new Date().toISOString(),
+						size: (file.content || '').length
+					}
+				};
+
+				console.log('📤 API payload:', {
+					...savePayload,
+					content: `[${savePayload.content.length} chars]` // Don't log full content
+				});
+
+				const result = await fileOperationsAPI.saveFile(savePayload);
+
+				console.log('📥 API response:', result);
+
+				enhancedFileActions.setOperationState({ operationProgress: 80 });
+
+				if (!result.success) {
+					console.error('❌ API call failed:', result);
+					throw new Error(result.error || 'Failed to save file via API');
+				}
+
+				console.log('✅ API call successful - file saved via API');
+			} else {
+				console.log('🖥️ Running on server side, skipping API call');
+			}
+
+			// Update local file state
 			const now = new Date();
 			fileActions.updateFile(fileId, {
-				modifiedAt: now,
-				isDirty: false
+				modifiedAt: now
 			});
-
-			enhancedFileActions.setOperationState({ operationProgress: 60 });
 
 			// Update file state
 			fileStateActions.setFileDirty(fileId, false);
@@ -853,7 +905,7 @@ export const enhancedFileActions = {
 	},
 
 	// Save all dirty files
-	async saveAllFiles(): Promise<boolean> {
+	async saveAllFiles(projectId?: string): Promise<boolean> {
 		try {
 			const dirtyFiles = fileStateActions.getDirtyFiles();
 
@@ -875,7 +927,7 @@ export const enhancedFileActions = {
 
 			for (const fileId of dirtyFiles) {
 				try {
-					await enhancedFileActions.saveFile(fileId);
+					await enhancedFileActions.saveFile(fileId, projectId);
 					savedCount++;
 				} catch (error) {
 					const files = get(filesStore);
