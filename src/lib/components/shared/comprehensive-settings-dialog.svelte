@@ -53,6 +53,7 @@
 	const colorSchemes = [
 		{ value: 'onedark', label: 'One Dark' },
 		{ value: 'dracula', label: 'Dracula' },
+		{ value: 'barf', label: 'Barf' },
 		{ value: 'tomorrow', label: 'Tomorrow' }
 	];
 

@@ -6,7 +6,7 @@
 	import { highlightActiveLine } from '@codemirror/view';
 	import { EditorView } from 'codemirror';
 	import { onDestroy, onMount } from 'svelte';
-	import { dracula, tomorrow } from 'thememirror';
+	import { dracula, tomorrow, barf } from 'thememirror';
 	import ContextMenu from './context-menu.svelte';
 	import SearchPanel from './search-panel.svelte';
 	// Extracted utilities
@@ -119,6 +119,12 @@
 		if (isDark) {
 			if (settings.appearance.colorScheme === 'onedark') {
 				themeExts.push(oneDark);
+			} else if (settings.appearance.colorScheme === 'barf') {
+				themeExts.push(barf);
+			} else if (settings.appearance.colorScheme === 'dracula') {
+				themeExts.push(dracula);
+			} else if (settings.appearance.colorScheme === 'tomorrow') {
+				themeExts.push(tomorrow);
 			} else {
 				themeExts.push(dracula);
 			}
@@ -395,6 +401,10 @@
 			if (isDark) {
 				if (settings.appearance.colorScheme === 'onedark') {
 					themeExts.push(oneDark);
+				} else if (settings.appearance.colorScheme === 'barf') {
+					themeExts.push(barf);
+				} else if (settings.appearance.colorScheme === 'tomorrow') {
+					themeExts.push(tomorrow);
 				} else {
 					themeExts.push(dracula);
 				}
