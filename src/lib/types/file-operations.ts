@@ -1,5 +1,5 @@
 import type { EditorState } from './editor-state';
-import type { FileMetadata, FileSystemItem } from './files';
+import type { File, FileMetadata, FileSystemItem } from './files';
 
 // File operation types
 export type FileOperation =
@@ -62,6 +62,8 @@ export interface FileSearchOptions {
 	includeContent: boolean;
 	caseSensitive: boolean;
 	regex: boolean;
+	wholeWord: boolean;
+	useRegex: boolean;
 	fileTypes: string[];
 	excludePatterns: string[];
 	maxResults: number;

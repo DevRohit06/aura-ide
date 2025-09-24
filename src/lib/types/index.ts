@@ -95,7 +95,9 @@ export interface Project {
 	framework: Framework;
 	configuration: ProjectConfiguration;
 	status: 'initializing' | 'ready' | 'error';
-	e2bSessionId?: string;
+	sandboxProvider?: 'daytona' | 'e2b';
+	sandboxId?: string; // For Daytona: persistent sandbox ID, for E2B: session ID
+	e2bSessionId?: string; // Legacy field, kept for compatibility
 	createdAt: Date;
 	updatedAt: Date;
 	metadata?: Record<string, any>;

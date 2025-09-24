@@ -15,6 +15,7 @@ export interface FileEditorState {
 	cursorPosition: CursorPosition | number;
 	selection: SelectionRange[];
 	isDirty: boolean;
+	isLoading: boolean;
 	undoHistory: string[];
 	redoHistory: string[];
 	lastSaved: Date;
