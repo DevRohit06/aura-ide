@@ -65,6 +65,13 @@ export function applyCSSVariables(settings: ComprehensiveSettings): void {
 	root.className = root.className.replace(/theme-\w+/g, '').trim();
 	root.classList.add(themeClass);
 
+	// Apply color scheme class
+	const colorSchemeClass = `theme-${settings.appearance.colorScheme}`;
+	root.className = root.className.replace(/theme-(onedark|dracula)/g, '').trim();
+	if (settings.appearance.colorScheme && settings.appearance.colorScheme !== 'onedark') {
+		root.classList.add(colorSchemeClass);
+	}
+
 	// Apply compact mode
 	if (settings.appearance.compactMode) {
 		root.classList.add('compact-mode');

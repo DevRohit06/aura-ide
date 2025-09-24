@@ -1,12 +1,12 @@
-import { describe, it, expect } from 'vitest';
-import {
-	validateSetting,
-	validateAllSettings,
-	sanitizeSettings,
-	getValidationSummary,
-	settingsValidation
-} from '../settings-validation';
 import type { ComprehensiveSettings } from '$lib/types/settings';
+import { describe, expect, it } from 'vitest';
+import {
+	getValidationSummary,
+	sanitizeSettings,
+	settingsValidation,
+	validateAllSettings,
+	validateSetting
+} from '../settings-validation';
 
 // Mock settings for testing
 const mockValidSettings: ComprehensiveSettings = {
@@ -36,7 +36,7 @@ const mockValidSettings: ComprehensiveSettings = {
 		autoSaveDelay: 1000,
 		formatOnSave: true,
 		formatOnPaste: false,
-		trimTrailingWhitespace: true,
+		trimTrailingWhitespace: false,
 		insertFinalNewline: true,
 		tabSize: 2,
 		insertSpaces: true,

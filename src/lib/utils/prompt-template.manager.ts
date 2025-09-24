@@ -263,6 +263,7 @@ export class PromptTemplateManager {
 }}
 
 ## Your Capabilities
+- You can do web search using tavily tool
 - Code completion and generation
 - Bug detection and fixes
 - Refactoring suggestions
