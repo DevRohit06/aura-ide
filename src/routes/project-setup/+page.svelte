@@ -26,6 +26,7 @@
 	let projectName = $state('');
 	let projectDescription = $state('');
 	let framework = $state('');
+	let sandboxProvider = $state('daytona'); // Default to Daytona
 	let packageManager = $state('npm');
 	let typescript = $state(true);
 	let eslint = $state(true);
@@ -36,6 +37,14 @@
 	let frameworks = $state<any[]>([]);
 	let loading = $state(false);
 	let creating = $state(false);
+	let projectId = $state<string | null>(null);
+	let statusPolling = $state<NodeJS.Timeout | null>(null);
+	let currentStatus = $state<{
+		phase: string;
+		progress: number;
+		message: string;
+		details?: any;
+	} | null>(null);
 
 	// Package manager display names
 	const packageManagerOptions = [
@@ -50,6 +59,22 @@
 			value: 'bun',
 			label: 'Bun',
 			description: 'Incredibly fast JavaScript runtime and package manager'
+		}
+	];
+
+	// Sandbox provider options
+	const sandboxProviderOptions = [
+		{
+			value: 'daytona',
+			label: 'Daytona',
+			description: 'Persistent sandbox with git operations and direct terminal access',
+			features: ['Persistent', 'Git Integration', 'SSH Access', 'VS Code Support']
+		},
+		{
+			value: 'e2b',
+			label: 'E2B',
+			description: 'Cloud-based sandbox with R2 storage integration',
+			features: ['Cloud Storage', 'Fast Startup', 'Session-based', 'API-driven']
 		}
 	];
 
@@ -82,6 +107,8 @@
 			case 2:
 				return framework.length > 0;
 			case 3:
+				return sandboxProvider.length > 0;
+			case 4:
 				return true; // Configuration is optional
 			default:
 				return false;
@@ -133,7 +160,7 @@
 	}
 
 	function nextStep() {
-		if (currentStep < 3 && isStepValid()) {
+		if (currentStep < 4 && isStepValid()) {
 			currentStep++;
 		}
 	}
@@ -158,6 +185,13 @@
 		}
 
 		creating = true;
+		projectId = null;
+		currentStatus = {
+			phase: 'initializing',
+			progress: 0,
+			message: getStatusMessage('initializing', sandboxProvider),
+			details: {}
+		};
 
 		try {
 			const response = await fetch('/api/projects', {
@@ -169,6 +203,7 @@
 					name: projectName.trim(),
 					description: projectDescription.trim() || undefined,
 					framework,
+					sandboxProvider,
 					configuration: {
 						typescript,
 						eslint,
@@ -186,19 +221,171 @@
 			const result = await response.json();
 
 			if (response.ok) {
-				// Project created successfully
-				toast.success('Project created successfully!');
-				goto(`/editor/${result.project.id}`);
+				projectId = result.project.id;
+				// Start polling for status
+				startStatusPolling();
 			} else {
 				toast.error(result.message || 'Failed to create project');
+				creating = false;
 			}
 		} catch (error) {
 			console.error('Error creating project:', error);
 			toast.error('Network error. Please try again.');
-		} finally {
 			creating = false;
 		}
 	}
+
+	function startStatusPolling() {
+		if (!projectId) return;
+
+		// Poll every 2 seconds
+		statusPolling = setInterval(async () => {
+			try {
+				const response = await fetch(`/api/projects/${projectId}/status`);
+				if (response.ok) {
+					const statusData = await response.json();
+
+					if (statusData.success && statusData.data) {
+						const initStatus = statusData.data.initialization;
+						currentStatus = {
+							phase: initStatus.status,
+							progress: initStatus.progress || 0,
+							message: getStatusMessage(initStatus.status, sandboxProvider),
+							details: initStatus
+						};
+
+						// Check if project is ready
+						if (initStatus.status === 'ready' || initStatus.status === 'completed') {
+							stopStatusPolling();
+							toast.success('Project created successfully!');
+							// Redirect after a short delay to show completion
+							setTimeout(() => {
+								goto(`/editor/${projectId}`);
+							}, 2000);
+						} else if (initStatus.status === 'error') {
+							stopStatusPolling();
+							toast.error('Project creation failed');
+							creating = false;
+						}
+					}
+				}
+			} catch (error) {
+				console.error('Failed to poll project status:', error);
+			}
+		}, 2000);
+	}
+
+	function stopStatusPolling() {
+		if (statusPolling) {
+			clearInterval(statusPolling);
+			statusPolling = null;
+		}
+	}
+
+	function getStatusMessage(status: string, provider: string): string {
+		const messages = {
+			initializing: 'Initializing project...',
+			downloading: 'Downloading template files...',
+			uploading:
+				provider === 'e2b'
+					? 'Uploading files to cloud storage...'
+					: 'Setting up sandbox environment...',
+			'creating-sandboxes':
+				provider === 'daytona'
+					? 'Creating Daytona workspace and cloning project...'
+					: 'Creating sandbox environment...',
+			ready: 'Project ready!',
+			completed: 'Project completed!',
+			error: 'Project creation failed'
+		};
+		return messages[status as keyof typeof messages] || 'Working...';
+	}
+
+	// Get carousel phases based on provider
+	function getCarouselPhases(provider: string) {
+		const basePhases = [
+			{
+				id: 'initializing',
+				title: 'Initializing',
+				description: 'Setting up your project configuration',
+				icon: Settings,
+				color: 'text-blue-500'
+			},
+			{
+				id: 'downloading',
+				title: 'Downloading',
+				description: 'Fetching template files and dependencies',
+				icon: ArrowLeft, // We'll use this as download icon
+				color: 'text-yellow-500'
+			}
+		];
+
+		const providerPhases =
+			provider === 'e2b'
+				? [
+						{
+							id: 'uploading',
+							title: 'Uploading',
+							description: 'Storing files in secure cloud storage',
+							icon: Rocket,
+							color: 'text-purple-500'
+						}
+					]
+				: [
+						{
+							id: 'uploading',
+							title: 'Configuring',
+							description: 'Setting up sandbox environment',
+							icon: Rocket,
+							color: 'text-purple-500'
+						}
+					];
+
+		const finalPhases = [
+			{
+				id: 'creating-sandboxes',
+				title: provider === 'daytona' ? 'Daytona Workspace' : 'E2B Sandbox',
+				description:
+					provider === 'daytona'
+						? 'Creating persistent workspace with git integration'
+						: 'Initializing cloud-powered sandbox',
+				icon: CheckCircle,
+				color: 'text-green-500'
+			},
+			{
+				id: 'ready',
+				title: 'Ready',
+				description: 'Your development environment is ready!',
+				icon: CheckCircle,
+				color: 'text-green-500'
+			}
+		];
+
+		return [...basePhases, ...providerPhases, ...finalPhases];
+	}
+
+	// Get current phase index for carousel
+	const currentPhaseIndex = $derived(() => {
+		if (!currentStatus) return 0;
+		const phases = getCarouselPhases(sandboxProvider);
+		const currentIndex = phases.findIndex((phase) => phase.id === currentStatus!.phase);
+		return currentIndex >= 0 ? currentIndex : 0;
+	});
+
+	// Get visible phases for carousel (current + next few)
+	const visiblePhases = $derived(() => {
+		const phases = getCarouselPhases(sandboxProvider);
+		const currentIdx = currentPhaseIndex();
+		const startIdx = Math.max(0, currentIdx - 1);
+		const endIdx = Math.min(phases.length, currentIdx + 3);
+		return phases.slice(startIdx, endIdx) as Array<{
+			id: string;
+			title: string;
+			description: string;
+			icon: any;
+			color: string;
+		}>;
+	});
 
 	function getStepStatus(step: number) {
 		if (step < currentStep) return 'completed';
@@ -207,13 +394,14 @@
 	}
 
 	function getProgressValue() {
-		return ((currentStep - 1) / 2) * 100;
+		return ((currentStep - 1) / 3) * 100;
 	}
 
 	const steps = [
 		{ number: 1, title: 'Project Details', description: 'Basic information about your project' },
 		{ number: 2, title: 'Framework', description: 'Choose your JavaScript framework' },
-		{ number: 3, title: 'Configuration', description: 'Customize your project setup' }
+		{ number: 3, title: 'Sandbox Provider', description: 'Choose your development environment' },
+		{ number: 4, title: 'Configuration', description: 'Customize your project setup' }
 	];
 </script>
 
@@ -379,6 +567,55 @@
 					</CardContent>
 				</Card>
 			{:else if currentStep === 3}
+				<!-- Step 3: Sandbox Provider Selection -->
+				<Card>
+					<CardHeader>
+						<CardTitle class="flex items-center">
+							<Settings class="mr-2 h-5 w-5" />
+							Choose Sandbox Provider
+						</CardTitle>
+						<CardDescription>
+							Select the development environment that best fits your workflow
+						</CardDescription>
+					</CardHeader>
+					<CardContent>
+						<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+							{#each sandboxProviderOptions as provider (provider.value)}
+								<Card
+									class="group cursor-pointer border-2 transition-all hover:border-primary hover:shadow-lg {sandboxProvider ===
+									provider.value
+										? 'border-primary bg-primary/5'
+										: ''}"
+									onclick={() => (sandboxProvider = provider.value)}
+								>
+									<CardContent class="p-6">
+										<div class="mb-3 flex items-center justify-between">
+											<h3 class="text-lg font-semibold group-hover:text-primary">
+												{provider.label}
+											</h3>
+											{#if sandboxProvider === provider.value}
+												<CheckCircle class="h-5 w-5 text-primary" />
+											{/if}
+										</div>
+										<p class="mb-3 text-sm text-muted-foreground">
+											{provider.description}
+										</p>
+										<div class="flex flex-wrap gap-1">
+											{#each provider.features as feature}
+												<Badge variant="secondary" class="text-xs">{feature}</Badge>
+											{/each}
+										</div>
+									</CardContent>
+								</Card>
+							{/each}
+						</div>
+						<Button onclick={nextStep} disabled={!isStepValid()} class="mt-6 w-full" size="lg">
+							Continue
+							<ArrowLeft class="ml-2 h-4 w-4 rotate-180" />
+						</Button>
+					</CardContent>
+				</Card>
+			{:else if currentStep === 4}
 				<!-- Step 3: Configuration -->
 				<Card>
 					<CardHeader>
@@ -499,4 +736,168 @@
 			{/if}
 		</div>
 	</div>
+
+	<!-- Project Creation Status Modal -->
+	{#if creating && currentStatus}
+		<div
+			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+		>
+			<div class="w-full max-w-2xl space-y-8 rounded-lg bg-background p-8 shadow-2xl">
+				<!-- Header -->
+				<div class="space-y-2 text-center">
+					<h3 class="text-xl font-semibold">Creating Your Project</h3>
+					<p class="text-muted-foreground">
+						{sandboxProvider === 'daytona'
+							? 'Setting up your Daytona workspace'
+							: 'Initializing your E2B sandbox'}
+					</p>
+				</div>
+
+				<!-- Progress Carousel -->
+				<div class="space-y-6">
+					<!-- Phase Indicators -->
+					<div class="flex justify-center space-x-2">
+						{#each getCarouselPhases(sandboxProvider) as phase, index}
+							{@const isActive = index === currentPhaseIndex()}
+							{@const isCompleted = index < currentPhaseIndex()}
+							{@const isUpcoming = index > currentPhaseIndex()}
+							<div class="flex items-center">
+								<div
+									class={`flex h-3 w-3 items-center justify-center rounded-full transition-all duration-500 ${
+										isCompleted
+											? 'scale-110 bg-green-500'
+											: isActive
+												? 'scale-125 animate-pulse bg-primary'
+												: 'scale-100 bg-muted'
+									}`}
+								>
+									{#if isCompleted}
+										<div class="h-1.5 w-1.5 rounded-full bg-white"></div>
+									{/if}
+								</div>
+								{#if index < getCarouselPhases(sandboxProvider).length - 1}
+									<div
+										class={`h-0.5 w-8 transition-colors duration-500 ${
+											isCompleted ? 'bg-green-500' : 'bg-muted'
+										}`}
+									></div>
+								{/if}
+							</div>
+						{/each}
+					</div>
+
+					<!-- Current Phase Display -->
+					<div class="min-h-[120px] space-y-4 text-center">
+						{#each visiblePhases as phase, index}
+							{@const isCurrent = phase.id === currentStatus.phase}
+							{@const offset = index - 1}
+							<!-- Center current phase -->
+							<div
+								class="absolute inset-0 flex transform items-center justify-center transition-all duration-700 ease-in-out"
+								class:translate-x-0={offset === 0}
+								class:translate-x-[-100%]={offset === -1}
+								class:translate-x-[100%]={offset === 1}
+								class:opacity-100={offset === 0}
+								class:opacity-60={offset === -1 || offset === 1}
+								class:opacity-30={offset === -2 || offset === 2}
+								class:scale-100={offset === 0}
+								class:scale-90={offset !== 0}
+							>
+								<div class="space-y-3 text-center">
+									<div
+										class={`mx-auto flex h-16 w-16 items-center justify-center rounded-full transition-all duration-500 ${
+											isCurrent ? 'scale-110 bg-primary/10 shadow-lg' : 'bg-muted/50'
+										}`}
+									>
+										<phase.icon
+											class={`h-8 w-8 transition-all duration-500 ${
+												isCurrent ? `${phase.color} animate-pulse` : 'text-muted-foreground'
+											}`}
+										/>
+									</div>
+									<div class="space-y-1">
+										<h4
+											class={`text-lg font-semibold transition-colors duration-500 ${
+												isCurrent ? 'text-foreground' : 'text-muted-foreground'
+											}`}
+										>
+											{phase.title}
+										</h4>
+										<p
+											class={`text-sm transition-colors duration-500 ${
+												isCurrent ? 'text-muted-foreground' : 'text-muted-foreground/70'
+											}`}
+										>
+											{phase.description}
+										</p>
+									</div>
+								</div>
+							</div>
+						{/each}
+					</div>
+
+					<!-- Progress Bar -->
+					<div class="space-y-2">
+						<Progress value={currentStatus.progress} class="h-3" />
+						<div class="flex justify-between text-sm text-muted-foreground">
+							<span class="capitalize">{currentStatus.phase.replace('-', ' ')}</span>
+							<span>{Math.round(currentStatus.progress)}%</span>
+						</div>
+					</div>
+				</div>
+
+				<!-- Status Details -->
+				{#if currentStatus.details}
+					<div class="space-y-2 rounded-lg bg-muted/50 p-4 text-sm">
+						{#if currentStatus.details.filesDownloaded !== undefined}
+							<div class="flex justify-between">
+								<span>Files processed:</span>
+								<span class="font-medium">{currentStatus.details.filesDownloaded}</span>
+							</div>
+						{/if}
+						{#if currentStatus.details.uploadProgress !== undefined}
+							<div class="flex justify-between">
+								<span>Upload progress:</span>
+								<span class="font-medium">{currentStatus.details.uploadProgress}%</span>
+							</div>
+						{/if}
+						{#if currentStatus.details.sandboxStatus}
+							<div class="space-y-1">
+								<span class="font-medium">Environment status:</span>
+								{#each Object.entries(currentStatus.details.sandboxStatus) as [provider, status]}
+									<div class="flex justify-between text-xs">
+										<span class="capitalize">{provider}:</span>
+										<Badge variant={status === 'ready' ? 'default' : 'secondary'} class="text-xs">
+											{status}
+										</Badge>
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/if}
+
+				<!-- Provider-specific footer message -->
+				<div class="border-t pt-4 text-center text-sm text-muted-foreground">
+					{#if sandboxProvider === 'daytona'}
+						{#if currentStatus.phase === 'creating-sandboxes'}
+							Setting up your persistent Daytona workspace with full git integration and terminal
+							access...
+						{:else if currentStatus.phase === 'ready'}
+							🎉 Your Daytona workspace is ready! Start coding with full development environment
+							access.
+						{/if}
+					{:else if sandboxProvider === 'e2b'}
+						{#if currentStatus.phase === 'uploading'}
+							Securely uploading your project to cloud storage for fast sandbox initialization...
+						{:else if currentStatus.phase === 'creating-sandboxes'}
+							Initializing your E2B sandbox with cloud-powered performance...
+						{:else if currentStatus.phase === 'ready'}
+							🚀 Your E2B sandbox is ready! Experience lightning-fast cloud development.
+						{/if}
+					{/if}
+				</div>
+			</div>
+		</div>
+	{/if}
 </div>
