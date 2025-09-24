@@ -7,7 +7,7 @@ import { env } from '$env/dynamic/private';
 
 // Daytona Configuration
 export const daytonaConfig = {
-	apiUrl: env.DAYTONA_API_URL || 'https://api.daytona.io/v1',
+	apiUrl: env.DAYTONA_API_URL || 'https://app.daytona.io/api',
 	apiKey: env.DAYTONA_API_KEY || '',
 	teamId: env.DAYTONA_TEAM_ID,
 	region: env.DAYTONA_REGION || 'us-east-1',
