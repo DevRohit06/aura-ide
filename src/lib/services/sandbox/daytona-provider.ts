@@ -1,15 +1,15 @@
 /**
  * Daytona Sandbox Provider Implementation
- * Provides integration with Daytona workspace management platform
+ * Provides integration with Daytona workspace management platform using the official SDK
  */
 
 import type { SandboxProvider, SandboxStatus } from '$lib/types/sandbox.js';
+import { Daytona, Sandbox as DaytonaSandbox } from '@daytonaio/sdk';
 import { daytonaConfig } from '../../config/sandbox.config.js';
 import type {
 	ExecutionResult,
 	FileSystemEntry,
 	ISandboxProvider,
-	SandboxConfig,
 	SandboxCreateOptions,
 	SandboxEnvironment,
 	SandboxFile,
@@ -18,71 +18,8 @@ import type {
 	SandboxUpdateOptions
 } from './sandbox-provider.interface.js';
 
-interface DaytonaWorkspace {
-	id: string;
-	name: string;
-	projectId: string;
-	gitpodUrl?: string;
-	state: 'running' | 'stopped' | 'paused' | 'failed';
-	ide: {
-		name: string;
-		url: string;
-	};
-	workspace: {
-		id: string;
-		name: string;
-		class: string;
-		context: {
-			repository: {
-				owner: string;
-				name: string;
-				ref: string;
-				revision: string;
-			};
-		};
-	};
-	machine: {
-		machineType: {
-			name: string;
-			displayName: string;
-			options: {
-				class1: string;
-				class2: string;
-				class3: string;
-			};
-		};
-	};
-	creationTime: string;
-	startedTime?: string;
-	stoppedTime?: string;
-}
-
-interface DaytonaProject {
-	name: string;
-	repository: {
-		url: string;
-		branch?: string;
-	};
-	workspaceTemplate?: string;
-	envVars?: Record<string, string>;
-}
-
-interface DaytonaCommand {
-	command: string;
-	args?: string[];
-	workingDir?: string;
-	env?: Record<string, string>;
-}
-
-interface DaytonaFileOperation {
-	operation: 'create' | 'update' | 'delete' | 'move';
-	path: string;
-	content?: string;
-	destination?: string;
-}
-
 /**
- * Daytona Provider Implementation
+ * Daytona Provider Implementation using the official SDK
  */
 export class DaytonaProvider implements ISandboxProvider {
 	readonly name: SandboxProvider = 'daytona';
@@ -106,28 +43,24 @@ export class DaytonaProvider implements ISandboxProvider {
 		]
 	};
 
-	private baseUrl: string;
-	private apiKey: string;
-	private teamId?: string;
+	private daytona: Daytona;
 	private initialized = false;
 	private eventListeners: Map<keyof SandboxProviderEvents, Function[]> = new Map();
 
 	constructor(config: typeof daytonaConfig) {
-		this.baseUrl = config.apiUrl;
-		this.apiKey = config.apiKey;
-		this.teamId = config.teamId;
+		this.daytona = new Daytona({
+			apiKey: config.apiKey,
+			apiUrl: config.apiUrl,
+			target: config.region
+		});
 	}
 
 	async initialize(): Promise<void> {
 		if (this.initialized) return;
 
 		try {
-			// Verify API connection
-			const health = await this.healthCheck();
-			if (!health.healthy) {
-				throw new Error(`Daytona API health check failed: ${health.error}`);
-			}
-
+			// Test the connection by trying to list sandboxes
+			await this.daytona.list();
 			this.initialized = true;
 		} catch (error) {
 			throw new Error(`Failed to initialize Daytona provider: ${error}`);
@@ -137,31 +70,12 @@ export class DaytonaProvider implements ISandboxProvider {
 	async createSandbox(config: SandboxCreateOptions): Promise<SandboxEnvironment> {
 		await this.ensureInitialized();
 
-		const projectConfig: DaytonaProject = {
-			name: config.name || `project-${Date.now()}`,
-			repository: {
-				url: config.template || 'https://github.com/gitpod-io/template-typescript-node',
-				branch: 'main'
-			},
-			workspaceTemplate: config.runtime || 'universal',
-			envVars: config.environment
-		};
-
 		try {
-			const response = await this.apiCall('POST', '/workspaces', {
-				project: projectConfig,
-				machineType: this.mapResourcestoMachineType(config.resources),
-				metadata: {
-					...config.metadata,
-					projectId: config.projectId,
-					userId: config.userId,
-					createdBy: 'aura-ide'
-				}
+			const sandbox = await this.daytona.create({
+				language: config.runtime || 'universal'
 			});
 
-			const workspace: DaytonaWorkspace = response.data;
-			const environment = this.mapWorkspaceToEnvironment(workspace);
-
+			const environment = this.mapSandboxToEnvironment(sandbox);
 			this.emit('sandbox:created', environment);
 			return environment;
 		} catch (error) {
@@ -173,9 +87,10 @@ export class DaytonaProvider implements ISandboxProvider {
 		await this.ensureInitialized();
 
 		try {
-			const response = await this.apiCall('GET', `/workspaces/${sandboxId}`);
-			const workspace: DaytonaWorkspace = response.data;
-			return this.mapWorkspaceToEnvironment(workspace);
+			// The SDK doesn't have a direct get method, so we list and find
+			const sandboxes = await this.daytona.list();
+			const sandbox = sandboxes.find((s) => s.id === sandboxId);
+			return sandbox ? this.mapSandboxToEnvironment(sandbox) : null;
 		} catch (error: any) {
 			if (error.status === 404) return null;
 			throw new Error(`Failed to get Daytona workspace: ${error}`);
@@ -191,100 +106,23 @@ export class DaytonaProvider implements ISandboxProvider {
 		await this.ensureInitialized();
 
 		try {
-			const queryParams = new URLSearchParams();
-			if (filters?.userId) queryParams.set('userId', filters.userId);
-			if (filters?.projectId) queryParams.set('projectId', filters.projectId);
-			if (filters?.status) queryParams.set('state', this.mapStatusToState(filters.status));
-
-			const response = await this.apiCall('GET', `/workspaces?${queryParams}`);
-			const workspaces: DaytonaWorkspace[] = response.data;
-
-			return workspaces.map((workspace) => this.mapWorkspaceToEnvironment(workspace));
+			const sandboxes = await this.daytona.list();
+			return sandboxes.map((sandbox) => this.mapSandboxToEnvironment(sandbox));
 		} catch (error) {
 			throw new Error(`Failed to list Daytona workspaces: ${error}`);
 		}
-	}
-
-	async updateSandbox(
-		sandboxId: string,
-		options: SandboxUpdateOptions
-	): Promise<SandboxEnvironment> {
-		await this.ensureInitialized();
-
-		try {
-			const updateData: any = {};
-
-			if (options.resources) {
-				updateData.machineType = this.mapResourcestoMachineType(options.resources);
-			}
-
-			if (options.environment) {
-				updateData.envVars = options.environment;
-			}
-
-			if (options.metadata) {
-				updateData.metadata = options.metadata;
-			}
-
-			const response = await this.apiCall('PATCH', `/workspaces/${sandboxId}`, updateData);
-			const workspace: DaytonaWorkspace = response.data;
-			return this.mapWorkspaceToEnvironment(workspace);
-		} catch (error) {
-			throw new Error(`Failed to update Daytona workspace: ${error}`);
-		}
-	}
-
-	async startSandbox(sandboxId: string): Promise<SandboxEnvironment> {
-		await this.ensureInitialized();
-
-		try {
-			const response = await this.apiCall('POST', `/workspaces/${sandboxId}/start`);
-			const workspace: DaytonaWorkspace = response.data;
-			const environment = this.mapWorkspaceToEnvironment(workspace);
-
-			this.emit('sandbox:started', environment);
-			return environment;
-		} catch (error: any) {
-			this.emit(
-				'sandbox:error',
-				sandboxId,
-				error instanceof Error ? error : new Error(String(error))
-			);
-			throw new Error(`Failed to start Daytona workspace: ${error}`);
-		}
-	}
-
-	async stopSandbox(sandboxId: string): Promise<SandboxEnvironment> {
-		await this.ensureInitialized();
-
-		try {
-			const response = await this.apiCall('POST', `/workspaces/${sandboxId}/stop`);
-			const workspace: DaytonaWorkspace = response.data;
-			const environment = this.mapWorkspaceToEnvironment(workspace);
-
-			this.emit('sandbox:stopped', environment);
-			return environment;
-		} catch (error: any) {
-			this.emit(
-				'sandbox:error',
-				sandboxId,
-				error instanceof Error ? error : new Error(String(error))
-			);
-			throw new Error(`Failed to stop Daytona workspace: ${error}`);
-		}
-	}
-
-	async restartSandbox(sandboxId: string): Promise<SandboxEnvironment> {
-		await this.stopSandbox(sandboxId);
-		await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait for stop
-		return await this.startSandbox(sandboxId);
 	}
 
 	async deleteSandbox(sandboxId: string): Promise<boolean> {
 		await this.ensureInitialized();
 
 		try {
-			await this.apiCall('DELETE', `/workspaces/${sandboxId}`);
+			// Get the sandbox instance first
+			const sandboxes = await this.daytona.list();
+			const sandbox = sandboxes.find((s) => s.id === sandboxId);
+			if (!sandbox) return false;
+
+			await this.daytona.delete(sandbox);
 			this.emit('sandbox:deleted', sandboxId);
 			return true;
 		} catch (error: any) {
@@ -294,129 +132,6 @@ export class DaytonaProvider implements ISandboxProvider {
 				error instanceof Error ? error : new Error(String(error))
 			);
 			throw new Error(`Failed to delete Daytona workspace: ${error}`);
-		}
-	}
-
-	async getMetrics(sandboxId: string): Promise<SandboxMetrics | null> {
-		await this.ensureInitialized();
-
-		try {
-			const response = await this.apiCall('GET', `/workspaces/${sandboxId}/metrics`);
-			const metrics = response.data;
-
-			const sandboxMetrics: SandboxMetrics = {
-				cpu: {
-					usage: metrics.cpu?.usage || 0,
-					limit: metrics.cpu?.limit || 1
-				},
-				memory: {
-					usage: metrics.memory?.usage || 0,
-					limit: metrics.memory?.limit || 1024,
-					percentage: ((metrics.memory?.usage || 0) / (metrics.memory?.limit || 1024)) * 100
-				},
-				storage: {
-					usage: metrics.storage?.usage || 0,
-					limit: metrics.storage?.limit || 10240,
-					percentage: ((metrics.storage?.usage || 0) / (metrics.storage?.limit || 10240)) * 100
-				},
-				network: {
-					bytesIn: metrics.network?.bytesIn || 0,
-					bytesOut: metrics.network?.bytesOut || 0,
-					connectionsActive: metrics.network?.connections || 0
-				},
-				uptime: metrics.uptime || 0,
-				lastUpdated: new Date()
-			};
-
-			this.emit('sandbox:metrics', sandboxId, sandboxMetrics);
-			return sandboxMetrics;
-		} catch (error: any) {
-			if (error.status === 404) return null;
-			throw new Error(`Failed to get Daytona workspace metrics: ${error}`);
-		}
-	}
-
-	async executeCommand(
-		sandboxId: string,
-		command: string,
-		options?: {
-			workingDir?: string;
-			timeout?: number;
-			environment?: Record<string, string>;
-		}
-	): Promise<ExecutionResult> {
-		await this.ensureInitialized();
-
-		const startTime = Date.now();
-
-		try {
-			const commandData: DaytonaCommand = {
-				command,
-				workingDir: options?.workingDir || '/workspace',
-				env: options?.environment
-			};
-
-			const response = await this.apiCall('POST', `/workspaces/${sandboxId}/exec`, {
-				...commandData,
-				timeout: options?.timeout || 30000
-			});
-
-			const result = response.data;
-			const duration = Date.now() - startTime;
-
-			return {
-				success: result.exitCode === 0,
-				output: result.stdout || '',
-				error: result.stderr || undefined,
-				exitCode: result.exitCode || 0,
-				duration,
-				timestamp: new Date()
-			};
-		} catch (error: any) {
-			const duration = Date.now() - startTime;
-			return {
-				success: false,
-				output: '',
-				error: error.message || String(error),
-				exitCode: 1,
-				duration,
-				timestamp: new Date()
-			};
-		}
-	}
-
-	async listFiles(
-		sandboxId: string,
-		path = '/workspace',
-		options?: {
-			recursive?: boolean;
-			includeHidden?: boolean;
-			maxDepth?: number;
-		}
-	): Promise<FileSystemEntry[]> {
-		await this.ensureInitialized();
-
-		try {
-			const queryParams = new URLSearchParams();
-			queryParams.set('path', path);
-			if (options?.recursive) queryParams.set('recursive', 'true');
-			if (options?.includeHidden) queryParams.set('includeHidden', 'true');
-			if (options?.maxDepth) queryParams.set('maxDepth', options.maxDepth.toString());
-
-			const response = await this.apiCall('GET', `/workspaces/${sandboxId}/files?${queryParams}`);
-			const files = response.data;
-
-			return files.map(
-				(file: any): FileSystemEntry => ({
-					path: file.path,
-					type: file.type === 'directory' ? 'directory' : 'file',
-					size: file.size,
-					modified: file.modified ? new Date(file.modified) : undefined,
-					permissions: file.permissions
-				})
-			);
-		} catch (error) {
-			throw new Error(`Failed to list files in Daytona workspace: ${error}`);
 		}
 	}
 
@@ -431,23 +146,23 @@ export class DaytonaProvider implements ISandboxProvider {
 		await this.ensureInitialized();
 
 		try {
-			const queryParams = new URLSearchParams();
-			queryParams.set('path', filePath);
-			if (options?.encoding) queryParams.set('encoding', options.encoding);
-			if (options?.maxSize) queryParams.set('maxSize', options.maxSize.toString());
+			const sandbox = await this.getSandbox(sandboxId);
+			if (!sandbox) return null;
 
-			const response = await this.apiCall(
-				'GET',
-				`/workspaces/${sandboxId}/files/content?${queryParams}`
-			);
-			const fileData = response.data;
+			// Get the Daytona sandbox instance
+			const sandboxes = await this.daytona.list();
+			const daytonaSandbox = sandboxes.find((s) => s.id === sandboxId);
+			if (!daytonaSandbox) return null;
+
+			// Use the SDK's filesystem API
+			const buffer = await daytonaSandbox.fs.downloadFile(filePath);
+			const content = buffer.toString(options?.encoding === 'binary' ? 'binary' : 'utf-8');
 
 			return {
 				path: filePath,
-				content: fileData.content,
+				content,
 				encoding: options?.encoding || 'utf-8',
-				size: fileData.size,
-				modified: fileData.modified ? new Date(fileData.modified) : undefined
+				size: buffer.length
 			};
 		} catch (error: any) {
 			if (error.status === 404) return null;
@@ -468,21 +183,266 @@ export class DaytonaProvider implements ISandboxProvider {
 		await this.ensureInitialized();
 
 		try {
-			const fileData = {
-				path: filePath,
-				content: content.toString(),
-				encoding: options?.encoding || 'utf-8',
-				createDirs: options?.createDirs || true,
-				backup: options?.backup || false
-			};
+			// Get the Daytona sandbox instance
+			const sandboxes = await this.daytona.list();
+			const daytonaSandbox = sandboxes.find((s) => s.id === sandboxId);
+			if (!daytonaSandbox) return false;
 
-			await this.apiCall('PUT', `/workspaces/${sandboxId}/files/content`, fileData);
+			const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf-8');
+			await daytonaSandbox.fs.uploadFile(buffer, filePath);
 
 			this.emit('file:changed', sandboxId, filePath, 'modified');
 			return true;
 		} catch (error) {
 			throw new Error(`Failed to write file to Daytona workspace: ${error}`);
 		}
+	}
+
+	async listFiles(
+		sandboxId: string,
+		path = '/workspace',
+		options?: {
+			recursive?: boolean;
+			includeHidden?: boolean;
+			maxDepth?: number;
+		}
+	): Promise<FileSystemEntry[]> {
+		await this.ensureInitialized();
+
+		try {
+			// Get the Daytona sandbox instance
+			const sandboxes = await this.daytona.list();
+			const daytonaSandbox = sandboxes.find((s) => s.id === sandboxId);
+			if (!daytonaSandbox) return [];
+
+			const files = await daytonaSandbox.fs.listFiles(path);
+			return files.map((file) => ({
+				path: file.name, // FileInfo has 'name', not 'path'
+				type: file.isDir ? 'directory' : 'file', // FileInfo has 'isDir', not 'type'
+				size: file.size,
+				modified: file.modTime ? new Date(file.modTime) : undefined,
+				permissions: file.permissions
+			}));
+		} catch (error) {
+			throw new Error(`Failed to list files in Daytona workspace: ${error}`);
+		}
+	}
+
+	async executeCommand(
+		sandboxId: string,
+		command: string,
+		options?: {
+			workingDir?: string;
+			timeout?: number;
+			environment?: Record<string, string>;
+		}
+	): Promise<ExecutionResult> {
+		await this.ensureInitialized();
+
+		try {
+			// Get the Daytona sandbox instance
+			const sandboxes = await this.daytona.list();
+			const daytonaSandbox = sandboxes.find((s) => s.id === sandboxId);
+			if (!daytonaSandbox) {
+				return {
+					success: false,
+					output: '',
+					error: 'Sandbox not found',
+					exitCode: 1,
+					duration: 0,
+					timestamp: new Date()
+				};
+			}
+
+			const result = await daytonaSandbox.process.executeCommand(command, options?.workingDir);
+
+			return {
+				success: result.exitCode === 0,
+				output: result.result || '',
+				error: undefined, // ExecuteResponse doesn't have stderr
+				exitCode: result.exitCode || 0,
+				duration: 0, // SDK doesn't provide duration
+				timestamp: new Date()
+			};
+		} catch (error: any) {
+			return {
+				success: false,
+				output: '',
+				error: error.message || String(error),
+				exitCode: 1,
+				duration: 0,
+				timestamp: new Date()
+			};
+		}
+	}
+
+	async getProviderInfo(): Promise<{
+		version: string;
+		status: 'healthy' | 'degraded' | 'unavailable';
+		limits: {
+			maxSandboxes: number;
+			maxConcurrentSessions: number;
+			maxFileSize: number;
+			maxExecutionTime: number;
+		};
+		usage: {
+			activeSandboxes: number;
+			totalSandboxes: number;
+			resourceUsage: {
+				cpu: number;
+				memory: number;
+				storage: number;
+			};
+		};
+	}> {
+		await this.ensureInitialized();
+
+		try {
+			const sandboxes = await this.daytona.list();
+			return {
+				version: '0.103.0', // SDK version
+				status: 'healthy',
+				limits: {
+					maxSandboxes: daytonaConfig.limits.maxConcurrentWorkspaces,
+					maxConcurrentSessions: daytonaConfig.limits.maxConcurrentSessions,
+					maxFileSize: daytonaConfig.limits.maxFileSize,
+					maxExecutionTime: daytonaConfig.limits.maxExecutionTime
+				},
+				usage: {
+					activeSandboxes: sandboxes.length,
+					totalSandboxes: sandboxes.length,
+					resourceUsage: {
+						cpu: 0, // Not available from SDK
+						memory: 0,
+						storage: 0
+					}
+				}
+			};
+		} catch (error) {
+			return {
+				version: 'unknown',
+				status: 'unavailable',
+				limits: {
+					maxSandboxes: 0,
+					maxConcurrentSessions: 0,
+					maxFileSize: 0,
+					maxExecutionTime: 0
+				},
+				usage: {
+					activeSandboxes: 0,
+					totalSandboxes: 0,
+					resourceUsage: {
+						cpu: 0,
+						memory: 0,
+						storage: 0
+					}
+				}
+			};
+		}
+	}
+
+	async cleanup(): Promise<void> {
+		// Clean up any active connections or resources
+		this.eventListeners.clear();
+		this.initialized = false;
+	}
+
+	// Event management methods
+	on<K extends keyof SandboxProviderEvents>(event: K, listener: SandboxProviderEvents[K]): void {
+		if (!this.eventListeners.has(event)) {
+			this.eventListeners.set(event, []);
+		}
+		this.eventListeners.get(event)!.push(listener);
+	}
+
+	off<K extends keyof SandboxProviderEvents>(event: K, listener: SandboxProviderEvents[K]): void {
+		const listeners = this.eventListeners.get(event) || [];
+		const index = listeners.indexOf(listener);
+		if (index > -1) {
+			listeners.splice(index, 1);
+		}
+	}
+
+	// Private helper methods
+	private async ensureInitialized(): Promise<void> {
+		if (!this.initialized) {
+			await this.initialize();
+		}
+	}
+
+	private mapSandboxToEnvironment(sandbox: DaytonaSandbox): SandboxEnvironment {
+		return {
+			id: sandbox.id,
+			name: sandbox.id, // SDK doesn't provide name
+			provider: 'daytona',
+			status: this.mapSandboxStateToStatus(sandbox.state),
+			template: undefined,
+			runtime: undefined,
+			resources: {
+				cpu: sandbox.cpu || 1,
+				memory: sandbox.memory || 1024,
+				storage: sandbox.disk || 10240,
+				bandwidth: 100
+			},
+			network: {
+				ports: [],
+				publicUrl: undefined,
+				sshUrl: undefined
+			},
+			metadata: {},
+			createdAt: sandbox.createdAt ? new Date(sandbox.createdAt) : new Date(),
+			lastActivity: new Date(),
+			expiresAt: undefined
+		};
+	}
+
+	private mapSandboxStateToStatus(state: any): SandboxStatus {
+		switch (state) {
+			case 'started':
+				return 'running';
+			case 'stopped':
+				return 'stopped';
+			default:
+				return 'initializing';
+		}
+	}
+
+	private emit<K extends keyof SandboxProviderEvents>(
+		event: K,
+		...args: Parameters<SandboxProviderEvents[K]>
+	): void {
+		const listeners = this.eventListeners.get(event) || [];
+		listeners.forEach((listener) => {
+			try {
+				listener(...args);
+			} catch (error) {
+				console.error(`Error in ${event} event listener:`, error);
+			}
+		});
+	}
+
+	// Stub implementations for methods not yet implemented
+	async updateSandbox(
+		sandboxId: string,
+		updates: SandboxUpdateOptions
+	): Promise<SandboxEnvironment> {
+		throw new Error('updateSandbox not implemented');
+	}
+
+	async startSandbox(sandboxId: string): Promise<SandboxEnvironment> {
+		throw new Error('startSandbox not implemented');
+	}
+
+	async stopSandbox(sandboxId: string): Promise<SandboxEnvironment> {
+		throw new Error('stopSandbox not implemented');
+	}
+
+	async restartSandbox(sandboxId: string): Promise<SandboxEnvironment> {
+		throw new Error('restartSandbox not implemented');
+	}
+
+	async getMetrics(sandboxId: string): Promise<SandboxMetrics | null> {
+		return null; // Not implemented
 	}
 
 	async deleteFile(
@@ -496,14 +456,12 @@ export class DaytonaProvider implements ISandboxProvider {
 		await this.ensureInitialized();
 
 		try {
-			const queryParams = new URLSearchParams();
-			queryParams.set('path', filePath);
-			if (options?.recursive) queryParams.set('recursive', 'true');
-			if (options?.force) queryParams.set('force', 'true');
+			// Get the Daytona sandbox instance
+			const sandboxes = await this.daytona.list();
+			const daytonaSandbox = sandboxes.find((s) => s.id === sandboxId);
+			if (!daytonaSandbox) return false;
 
-			await this.apiCall('DELETE', `/workspaces/${sandboxId}/files?${queryParams}`);
-
-			this.emit('file:changed', sandboxId, filePath, 'deleted');
+			await daytonaSandbox.fs.deleteFile(filePath, options?.recursive);
 			return true;
 		} catch (error) {
 			throw new Error(`Failed to delete file from Daytona workspace: ${error}`);
@@ -521,20 +479,55 @@ export class DaytonaProvider implements ISandboxProvider {
 		await this.ensureInitialized();
 
 		try {
-			const dirData = {
-				path: dirPath,
-				type: 'directory',
-				recursive: options?.recursive || true,
-				permissions: options?.permissions || '755'
-			};
+			// Get the Daytona sandbox instance
+			const sandboxes = await this.daytona.list();
+			const daytonaSandbox = sandboxes.find((s) => s.id === sandboxId);
+			if (!daytonaSandbox) return false;
 
-			await this.apiCall('POST', `/workspaces/${sandboxId}/files`, dirData);
-
-			this.emit('file:changed', sandboxId, dirPath, 'created');
+			await daytonaSandbox.fs.createFolder(dirPath, options?.permissions || '755');
 			return true;
 		} catch (error) {
 			throw new Error(`Failed to create directory in Daytona workspace: ${error}`);
 		}
+	}
+
+	async forwardPort(
+		sandboxId: string,
+		internalPort: number,
+		options?: {
+			externalPort?: number;
+			protocol?: 'tcp' | 'udp';
+			public?: boolean;
+		}
+	): Promise<{ externalPort: number; url?: string }> {
+		throw new Error('forwardPort not implemented');
+	}
+
+	async removePortForward(sandboxId: string, externalPort: number): Promise<boolean> {
+		throw new Error('removePortForward not implemented');
+	}
+
+	async connectTerminal(
+		sandboxId: string,
+		options?: {
+			cols?: number;
+			rows?: number;
+			environment?: Record<string, string>;
+		}
+	): Promise<{ sessionId: string; wsUrl?: string; sshConnection?: any }> {
+		throw new Error('connectTerminal not implemented');
+	}
+
+	async disconnectTerminal(sessionId: string): Promise<boolean> {
+		throw new Error('disconnectTerminal not implemented');
+	}
+
+	async sendTerminalInput(sessionId: string, input: string): Promise<boolean> {
+		throw new Error('sendTerminalInput not implemented');
+	}
+
+	async resizeTerminal(sessionId: string, cols: number, rows: number): Promise<boolean> {
+		throw new Error('resizeTerminal not implemented');
 	}
 
 	async uploadFiles(
@@ -630,165 +623,7 @@ export class DaytonaProvider implements ISandboxProvider {
 			follow?: boolean;
 		}
 	): Promise<string[]> {
-		await this.ensureInitialized();
-
-		try {
-			const queryParams = new URLSearchParams();
-			if (options?.since) queryParams.set('since', options.since.toISOString());
-			if (options?.until) queryParams.set('until', options.until.toISOString());
-			if (options?.tail) queryParams.set('tail', options.tail.toString());
-
-			const response = await this.apiCall('GET', `/workspaces/${sandboxId}/logs?${queryParams}`);
-			return response.data.logs || [];
-		} catch (error) {
-			throw new Error(`Failed to get logs from Daytona workspace: ${error}`);
-		}
-	}
-
-	async connectTerminal(
-		sandboxId: string,
-		options?: {
-			shell?: string;
-			workingDir?: string;
-			rows?: number;
-			cols?: number;
-		}
-	): Promise<{
-		sessionId: string;
-		wsUrl?: string;
-		sshConnection?: any;
-	}> {
-		await this.ensureInitialized();
-
-		try {
-			const terminalData = {
-				shell: options?.shell || '/bin/bash',
-				workingDir: options?.workingDir || '/workspace',
-				rows: options?.rows || 24,
-				cols: options?.cols || 80
-			};
-
-			const response = await this.apiCall(
-				'POST',
-				`/workspaces/${sandboxId}/terminal`,
-				terminalData
-			);
-			const terminal = response.data;
-
-			const sessionId = terminal.sessionId;
-			this.emit('terminal:connected', sandboxId, sessionId);
-
-			return {
-				sessionId,
-				wsUrl: terminal.wsUrl,
-				sshConnection: terminal.sshConnection
-			};
-		} catch (error) {
-			throw new Error(`Failed to connect terminal to Daytona workspace: ${error}`);
-		}
-	}
-
-	async disconnectTerminal(sessionId: string): Promise<boolean> {
-		await this.ensureInitialized();
-
-		try {
-			await this.apiCall('DELETE', `/terminal/${sessionId}`);
-			this.emit('terminal:disconnected', '', sessionId);
-			return true;
-		} catch (error) {
-			throw new Error(`Failed to disconnect terminal session: ${error}`);
-		}
-	}
-
-	async forwardPort(
-		sandboxId: string,
-		internalPort: number,
-		options?: {
-			externalPort?: number;
-			protocol?: 'tcp' | 'udp';
-			public?: boolean;
-		}
-	): Promise<{ externalPort: number; url?: string }> {
-		await this.ensureInitialized();
-
-		try {
-			const portData = {
-				internalPort,
-				externalPort: options?.externalPort,
-				protocol: options?.protocol || 'tcp',
-				public: options?.public || false
-			};
-
-			const response = await this.apiCall('POST', `/workspaces/${sandboxId}/ports`, portData);
-			const port = response.data;
-
-			return {
-				externalPort: port.externalPort,
-				url: port.url
-			};
-		} catch (error) {
-			throw new Error(`Failed to forward port in Daytona workspace: ${error}`);
-		}
-	}
-
-	async removePortForward(sandboxId: string, externalPort: number): Promise<boolean> {
-		await this.ensureInitialized();
-
-		try {
-			await this.apiCall('DELETE', `/workspaces/${sandboxId}/ports/${externalPort}`);
-			return true;
-		} catch (error) {
-			throw new Error(`Failed to remove port forward from Daytona workspace: ${error}`);
-		}
-	}
-
-	async getProviderInfo(): Promise<{
-		version: string;
-		status: 'healthy' | 'degraded' | 'unavailable';
-		limits: {
-			maxSandboxes: number;
-			maxConcurrentSessions: number;
-			maxFileSize: number;
-			maxExecutionTime: number;
-		};
-		usage: {
-			activeSandboxes: number;
-			totalSandboxes: number;
-			resourceUsage: {
-				cpu: number;
-				memory: number;
-				storage: number;
-			};
-		};
-	}> {
-		await this.ensureInitialized();
-
-		try {
-			const response = await this.apiCall('GET', '/info');
-			const info = response.data;
-
-			return {
-				version: info.version || 'unknown',
-				status: info.status || 'healthy',
-				limits: {
-					maxSandboxes: daytonaConfig.limits.maxConcurrentWorkspaces,
-					maxConcurrentSessions: daytonaConfig.limits.maxConcurrentSessions,
-					maxFileSize: daytonaConfig.limits.maxFileSize,
-					maxExecutionTime: daytonaConfig.limits.maxExecutionTime
-				},
-				usage: {
-					activeSandboxes: info.activeWorkspaces || 0,
-					totalSandboxes: info.totalWorkspaces || 0,
-					resourceUsage: {
-						cpu: info.resourceUsage?.cpu || 0,
-						memory: info.resourceUsage?.memory || 0,
-						storage: info.resourceUsage?.storage || 0
-					}
-				}
-			};
-		} catch (error) {
-			throw new Error(`Failed to get Daytona provider info: ${error}`);
-		}
+		throw new Error('getLogs not implemented');
 	}
 
 	async healthCheck(): Promise<{
@@ -800,31 +635,11 @@ export class DaytonaProvider implements ISandboxProvider {
 		const startTime = Date.now();
 
 		try {
-			const response = await fetch(`${this.baseUrl}/health`, {
-				method: 'GET',
-				headers: {
-					Authorization: `Bearer ${this.apiKey}`,
-					'Content-Type': 'application/json'
-				},
-				signal: AbortSignal.timeout(5000)
-			});
-
-			const latency = Date.now() - startTime;
-
-			if (response.ok) {
-				const data = await response.json();
-				return {
-					healthy: true,
-					latency,
-					details: data
-				};
-			} else {
-				return {
-					healthy: false,
-					latency,
-					error: `HTTP ${response.status}: ${response.statusText}`
-				};
-			}
+			await this.daytona.list();
+			return {
+				healthy: true,
+				latency: Date.now() - startTime
+			};
 		} catch (error: any) {
 			const latency = Date.now() - startTime;
 			return {
@@ -832,172 +647,6 @@ export class DaytonaProvider implements ISandboxProvider {
 				latency,
 				error: error.message || String(error)
 			};
-		}
-	}
-
-	async cleanup(): Promise<void> {
-		// Clean up any active connections or resources
-		this.eventListeners.clear();
-		this.initialized = false;
-	}
-
-	// Private helper methods
-
-	private async ensureInitialized(): Promise<void> {
-		if (!this.initialized) {
-			await this.initialize();
-		}
-	}
-
-	private async apiCall(method: string, endpoint: string, data?: any): Promise<any> {
-		const url = `${this.baseUrl}${endpoint}`;
-		const headers: Record<string, string> = {
-			Authorization: `Bearer ${this.apiKey}`,
-			'Content-Type': 'application/json'
-		};
-
-		if (this.teamId) {
-			headers['X-Team-ID'] = this.teamId;
-		}
-
-		const options: RequestInit = {
-			method,
-			headers,
-			signal: AbortSignal.timeout(30000)
-		};
-
-		if (data) {
-			options.body = JSON.stringify(data);
-		}
-
-		const response = await fetch(url, options);
-
-		if (!response.ok) {
-			const errorText = await response.text();
-			throw new Error(
-				`Daytona API Error: ${response.status} ${response.statusText} - ${errorText}`
-			);
-		}
-
-		return response.json();
-	}
-
-	private mapWorkspaceToEnvironment(workspace: DaytonaWorkspace): SandboxEnvironment {
-		return {
-			id: workspace.id,
-			name: workspace.name,
-			provider: 'daytona',
-			status: this.mapStateToStatus(workspace.state),
-			template: workspace.workspace?.context?.repository?.name,
-			runtime: workspace.machine?.machineType?.name,
-			resources: {
-				cpu: this.mapMachineTypeToCpu(workspace.machine?.machineType?.name),
-				memory: this.mapMachineTypeToMemory(workspace.machine?.machineType?.name),
-				storage: 10 * 1024, // Default 10GB
-				bandwidth: 100 // Default 100 Mbps
-			},
-			network: {
-				ports: [], // Populated separately
-				publicUrl: workspace.ide?.url,
-				sshUrl: workspace.gitpodUrl
-			},
-			metadata: {},
-			createdAt: new Date(workspace.creationTime),
-			lastActivity: workspace.startedTime
-				? new Date(workspace.startedTime)
-				: new Date(workspace.creationTime),
-			expiresAt: undefined // Daytona doesn't have explicit expiration
-		};
-	}
-
-	private mapStateToStatus(state: string): SandboxStatus {
-		switch (state) {
-			case 'running':
-				return 'running';
-			case 'stopped':
-				return 'stopped';
-			case 'failed':
-				return 'error';
-			default:
-				return 'initializing';
-		}
-	}
-
-	private mapStatusToState(status: SandboxStatus): string {
-		switch (status) {
-			case 'running':
-				return 'running';
-			case 'stopped':
-				return 'stopped';
-			case 'error':
-				return 'failed';
-			default:
-				return 'running';
-		}
-	}
-
-	private mapResourcestoMachineType(resources?: Partial<SandboxConfig['resources']>): string {
-		if (!resources) return 'small';
-
-		const cpu = resources.cpu || 1;
-		const memory = resources.memory || 1024;
-
-		if (cpu >= 4 && memory >= 8192) return 'large';
-		if (cpu >= 2 && memory >= 4096) return 'medium';
-		return 'small';
-	}
-
-	private mapMachineTypeToCpu(machineType?: string): number {
-		switch (machineType) {
-			case 'large':
-				return 4;
-			case 'medium':
-				return 2;
-			case 'small':
-			default:
-				return 1;
-		}
-	}
-
-	private mapMachineTypeToMemory(machineType?: string): number {
-		switch (machineType) {
-			case 'large':
-				return 8192;
-			case 'medium':
-				return 4096;
-			case 'small':
-			default:
-				return 1024;
-		}
-	}
-
-	private emit<K extends keyof SandboxProviderEvents>(
-		event: K,
-		...args: Parameters<SandboxProviderEvents[K]>
-	): void {
-		const listeners = this.eventListeners.get(event) || [];
-		listeners.forEach((listener) => {
-			try {
-				listener(...args);
-			} catch (error) {
-				console.error(`Error in ${event} event listener:`, error);
-			}
-		});
-	}
-
-	// Event management methods
-	on<K extends keyof SandboxProviderEvents>(event: K, listener: SandboxProviderEvents[K]): void {
-		if (!this.eventListeners.has(event)) {
-			this.eventListeners.set(event, []);
-		}
-		this.eventListeners.get(event)!.push(listener);
-	}
-
-	off<K extends keyof SandboxProviderEvents>(event: K, listener: SandboxProviderEvents[K]): void {
-		const listeners = this.eventListeners.get(event) || [];
-		const index = listeners.indexOf(listener);
-		if (index > -1) {
-			listeners.splice(index, 1);
 		}
 	}
 }
