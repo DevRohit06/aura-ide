@@ -311,6 +311,16 @@ export class DatabaseService {
 		}
 	}
 
+	static async findProjectBySandboxId(sandboxId: string): Promise<Project | null> {
+		try {
+			const collection = await this.getProjectsCollection();
+			return await collection.findOne({ sandboxId });
+		} catch (error) {
+			console.error('Failed to find project by sandbox ID:', error);
+			throw error;
+		}
+	}
+
 	static async updateProject(id: string, updates: Partial<Project>): Promise<Project | null> {
 		try {
 			const collection = await this.getProjectsCollection();

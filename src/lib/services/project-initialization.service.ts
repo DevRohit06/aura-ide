@@ -21,6 +21,7 @@ export interface ProjectInitializationOptions {
 	framework: string;
 	userId: string;
 	description?: string;
+	sandboxProvider: 'daytona' | 'e2b'; // Required: choose sandbox provider
 	configuration?: {
 		typescript?: boolean;
 		eslint?: boolean;
@@ -54,21 +55,15 @@ export interface ProjectFile {
 export interface ProjectInitializationResult {
 	project: Project;
 	files: ProjectFile[];
-	storage: {
-		key: string;
-		url: string;
-		size: number;
-	};
-	sandboxes?: {
-		daytona?: {
-			id: string;
+	sandboxResult?: {
+		provider: 'daytona' | 'e2b';
+		sandboxId: string;
+		url?: string;
+		status: string;
+		storage?: {
+			key: string;
 			url: string;
-			status: string;
-		};
-		e2b?: {
-			id: string;
-			url: string;
-			status: string;
+			size: number;
 		};
 	};
 }
@@ -150,56 +145,71 @@ export class ProjectInitializationService {
 				}
 			});
 
-			// Step 3: Upload to R2 storage
-			this.updateProjectStatus(projectId, {
-				phase: 'uploading',
-				progress: 50,
-				message: 'Uploading project files to cloud storage...'
-			});
-
-			logger.info(`Uploading ${files.length} files to R2 storage`);
-			const storageResult = await Promise.race([
-				this.uploadToR2Storage(projectId, files),
-				new Promise<never>((_, reject) =>
-					setTimeout(() => reject(new Error('R2 upload timeout')), 30000)
-				)
-			]);
-			logger.info(`Upload completed: ${storageResult.key}`);
-
-			this.updateProjectStatus(projectId, {
-				phase: 'uploading',
-				progress: 70,
-				message: 'Files uploaded to cloud storage',
-				details: {
-					uploadProgress: 100
-				}
-			});
-
-			// Step 4: Create sandboxes if requested
-			let sandboxes;
-			if (options.sandboxOptions?.createDaytona || options.sandboxOptions?.createE2B) {
+			// Step 4: Create sandbox based on provider
+			let sandboxResult;
+			if (options.sandboxProvider === 'daytona') {
 				this.updateProjectStatus(projectId, {
 					phase: 'creating-sandboxes',
 					progress: 80,
-					message: 'Creating sandbox environments...'
+					message: 'Creating Daytona workspace and cloning project...'
 				});
 
-				logger.info(`Creating sandboxes for project ${projectId}`);
-				sandboxes = await Promise.race([
-					this.createSandboxes(projectId, options, files),
+				logger.info(`Creating Daytona workspace for project ${projectId}`);
+				sandboxResult = await Promise.race([
+					this.createDaytonaSandbox(projectId, options, files),
 					new Promise<never>((_, reject) =>
-						setTimeout(() => reject(new Error('Sandbox creation timeout')), 60000)
+						setTimeout(() => reject(new Error('Daytona sandbox creation timeout')), 60000)
 					)
 				]);
-				logger.info(`Sandboxes created:`, sandboxes);
+				logger.info(`Daytona workspace created:`, sandboxResult);
+			} else if (options.sandboxProvider === 'e2b') {
+				// Step 4a: Upload to R2 storage (for E2B flow)
+				this.updateProjectStatus(projectId, {
+					phase: 'uploading',
+					progress: 50,
+					message: 'Uploading project files to cloud storage...'
+				});
+
+				logger.info(`Uploading ${files.length} files to R2 storage for E2B`);
+				const storageResult = await Promise.race([
+					this.uploadToR2Storage(projectId, files),
+					new Promise<never>((_, reject) =>
+						setTimeout(() => reject(new Error('R2 upload timeout')), 30000)
+					)
+				]);
+				logger.info(`Upload completed: ${storageResult.key}`);
+
+				this.updateProjectStatus(projectId, {
+					phase: 'uploading',
+					progress: 70,
+					message: 'Files uploaded to cloud storage',
+					details: {
+						uploadProgress: 100
+					}
+				});
+
+				// Step 4b: Create E2B sandbox
+				this.updateProjectStatus(projectId, {
+					phase: 'creating-sandboxes',
+					progress: 80,
+					message: 'Creating E2B sandbox environment...'
+				});
+
+				logger.info(`Creating E2B sandbox for project ${projectId}`);
+				sandboxResult = await Promise.race([
+					this.createE2BSandbox(projectId, options, files),
+					new Promise<never>((_, reject) =>
+						setTimeout(() => reject(new Error('E2B sandbox creation timeout')), 60000)
+					)
+				]);
+				logger.info(`E2B sandbox created:`, sandboxResult);
 			}
 
 			// Step 5: Update project with final details
 			logger.info(`Finalizing project ${projectId}`);
 			const updatedProject = await this.finalizeProject(project, {
 				files,
-				storage: storageResult,
-				sandboxes
+				sandboxResult
 			});
 
 			this.updateProjectStatus(projectId, {
@@ -213,8 +223,7 @@ export class ProjectInitializationService {
 			return {
 				project: updatedProject,
 				files,
-				storage: storageResult,
-				sandboxes
+				sandboxResult
 			};
 		} catch (error) {
 			logger.error(`Project initialization failed for ${projectId}:`, error);
@@ -251,6 +260,7 @@ export class ProjectInitializationService {
 			ownerId: options.userId,
 			framework: options.framework as any,
 			status: 'initializing',
+			sandboxProvider: options.sandboxProvider,
 			configuration: {
 				typescript: options.configuration?.typescript ?? false,
 				eslint: options.configuration?.eslint ?? true,
@@ -445,28 +455,131 @@ export class ProjectInitializationService {
 	}
 
 	/**
+	 * Create Daytona sandbox and clone project directly into it
+	 */
+	private async createDaytonaSandbox(
+		projectId: string,
+		options: ProjectInitializationOptions,
+		files: ProjectFile[]
+	): Promise<{
+		provider: 'daytona';
+		sandboxId: string;
+		url: string;
+		status: string;
+	}> {
+		try {
+			const { DaytonaService } = await import('./sandbox/daytona.service.js');
+			const daytonaService = DaytonaService.getInstance();
+
+			// Create Daytona workspace
+			const daytonaSandbox = await daytonaService.createSandbox({
+				projectId,
+				options: {
+					type: options.framework,
+					memory: options.sandboxOptions?.daytonaConfig?.memory || '4GB',
+					cpu: options.sandboxOptions?.daytonaConfig?.cpu || '2vcpu',
+					keepAlive: options.sandboxOptions?.daytonaConfig?.keepAlive || true
+				}
+			});
+
+			// Clone project directly into Daytona workspace
+			await daytonaService.cloneProjectIntoSandbox(daytonaSandbox.id, options.templateId, files);
+
+			return {
+				provider: 'daytona',
+				sandboxId: daytonaSandbox.id,
+				url: daytonaSandbox.url,
+				status: daytonaSandbox.status
+			};
+		} catch (error) {
+			logger.error(`Daytona sandbox creation failed:`, error);
+			throw error;
+		}
+	}
+
+	/**
+	 * Create E2B sandbox using R2 + E2B flow
+	 */
+	private async createE2BSandbox(
+		projectId: string,
+		options: ProjectInitializationOptions,
+		files: ProjectFile[]
+	): Promise<{
+		provider: 'e2b';
+		sandboxId: string;
+		url: string;
+		status: string;
+		storage: {
+			key: string;
+			url: string;
+			size: number;
+		};
+	}> {
+		try {
+			// Upload to R2 first
+			const storageResult = await this.uploadToR2Storage(projectId, files);
+
+			const { E2BService } = await import('./sandbox/e2b.service.js');
+			const e2bService = new E2BService();
+
+			const e2bSandbox = await e2bService.createSandbox({
+				projectId,
+				options: {
+					template: options.sandboxOptions?.e2bConfig?.template || 'base',
+					timeout: options.sandboxOptions?.e2bConfig?.timeout || 600,
+					metadata: {
+						type: options.framework,
+						name: options.name
+					}
+				}
+			});
+
+			// Upload files to E2B
+			await e2bService.uploadFiles(e2bSandbox.id, files);
+
+			return {
+				provider: 'e2b',
+				sandboxId: e2bSandbox.id,
+				url: e2bSandbox.url,
+				status: e2bSandbox.status,
+				storage: storageResult
+			};
+		} catch (error) {
+			logger.error(`E2B sandbox creation failed:`, error);
+			throw error;
+		}
+	}
+
+	/**
 	 * Finalize project with all initialization results
 	 */
 	private async finalizeProject(
 		project: Project,
 		results: {
 			files: ProjectFile[];
-			storage: { key: string; url: string; size: number };
-			sandboxes?: any;
+			sandboxResult?: {
+				provider: 'daytona' | 'e2b';
+				sandboxId: string;
+				url?: string;
+				status: string;
+				storage?: {
+					key: string;
+					url: string;
+					size: number;
+				};
+			};
 		}
 	): Promise<Project> {
 		const updatedProject: Project = {
 			...project,
 			status: 'ready',
+			sandboxId: results.sandboxResult?.sandboxId,
 			updatedAt: new Date(),
 			metadata: {
 				...project.metadata,
 				fileCount: results.files.length,
 				totalSize: results.files.reduce((sum, file) => sum + file.size, 0),
-				storageKey: results.storage.key,
-				storageUrl: results.storage.url,
-				storageSize: results.storage.size,
-				sandboxes: results.sandboxes,
+				sandboxResult: results.sandboxResult,
 				initializationCompleted: new Date().toISOString()
 			}
 		};
@@ -483,6 +596,17 @@ export class ProjectInitializationService {
 		logger.info(
 			`Project ${projectId} status: ${status.phase} (${status.progress}%) - ${status.message}`
 		);
+
+		// Also update the project status in the database for real-time polling
+		DatabaseService.updateProject(projectId, {
+			status: status.phase === 'ready' ? 'ready' : 'initializing',
+			updatedAt: new Date(),
+			metadata: {
+				initializationStatus: status
+			}
+		}).catch((error) => {
+			logger.error(`Failed to update project status in database:`, error);
+		});
 	}
 
 	/**

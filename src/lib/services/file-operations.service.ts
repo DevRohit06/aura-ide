@@ -1,15 +1,15 @@
-import { get } from 'svelte/store';
-import { toast } from 'svelte-sonner';
 import { enhancedFileActions } from '$lib/stores/enhanced-file-operations.store';
 import { filesStore } from '$lib/stores/files.store';
 import { tabActions } from '$lib/stores/tabs.store';
-import type { FileSystemItem, File, Directory } from '$lib/types/files';
 import type {
 	CreateFileData,
 	DeleteFileData,
-	RenameFileData,
-	MoveFileData
+	MoveFileData,
+	RenameFileData
 } from '$lib/types/file-operations';
+import type { File, FileSystemItem } from '$lib/types/files';
+import { toast } from 'svelte-sonner';
+import { get } from 'svelte/store';
 
 // Clipboard state for copy/cut operations
 interface ClipboardState {
@@ -365,8 +365,8 @@ export class FileOperationsService {
 	}
 
 	// Save all files
-	static async saveAllFiles(): Promise<boolean> {
-		return await enhancedFileActions.saveAllFiles();
+	static async saveAllFiles(projectId?: string): Promise<boolean> {
+		return await enhancedFileActions.saveAllFiles(projectId);
 	}
 
 	// Open file in editor

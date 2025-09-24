@@ -789,6 +789,192 @@ export class R2StorageService {
 	}
 
 	/**
+	 * Create or update file in R2 storage with project metadata tracking
+	 */
+	async createFileInProject(
+		projectId: string,
+		filePath: string,
+		content: string,
+		metadata?: Record<string, any>
+	): Promise<{ success: boolean; message: string; data?: any; error?: string }> {
+		try {
+			// Create file in R2
+			const r2Key = `projects/${projectId}/${filePath}`;
+			const uploadResult = await this.uploadFile(r2Key, content, {
+				contentType: this.getContentType(filePath),
+				metadata: {
+					...metadata,
+					createdAt: new Date().toISOString(),
+					size: content.length.toString(),
+					projectId,
+					originalPath: filePath
+				},
+				compress: content.length > 1024
+			});
+
+			// Update project metadata
+			await this.updateProjectMetadata(projectId, {
+				path: filePath,
+				key: uploadResult.key,
+				size: uploadResult.size,
+				lastModified: new Date(),
+				version: 'latest',
+				etag: uploadResult.etag
+			});
+
+			return {
+				success: true,
+				message: `File '${filePath}' created successfully in project '${projectId}'`,
+				data: {
+					filePath,
+					r2Key: uploadResult.key,
+					size: uploadResult.size,
+					etag: uploadResult.etag,
+					contentType: this.getContentType(filePath)
+				}
+			};
+		} catch (error) {
+			console.error(`Failed to create file in project: ${projectId}/${filePath}`, error);
+			return {
+				success: false,
+				message: `Failed to create file '${filePath}'`,
+				error: error instanceof Error ? error.message : 'Unknown error'
+			};
+		}
+	}
+
+	/**
+	 * Update project metadata file
+	 */
+	private async updateProjectMetadata(
+		projectId: string,
+		fileInfo: {
+			path: string;
+			key: string;
+			size: number;
+			lastModified: Date;
+			version: string;
+			etag: string;
+		}
+	): Promise<void> {
+		try {
+			const metadataKey = `projects/${projectId}/_metadata.json`;
+
+			// Get existing metadata or create new
+			let projectMetadata = await this.getProjectMetadata(projectId);
+
+			if (!projectMetadata) {
+				projectMetadata = {
+					projectId,
+					files: [],
+					totalSize: 0,
+					fileCount: 0,
+					createdAt: new Date().toISOString(),
+					updatedAt: new Date().toISOString()
+				};
+			}
+
+			// Update or add file entry
+			const existingFileIndex = projectMetadata.files.findIndex((f) => f.path === fileInfo.path);
+
+			if (existingFileIndex >= 0) {
+				// Update existing file
+				projectMetadata.files[existingFileIndex] = fileInfo;
+			} else {
+				// Add new file
+				projectMetadata.files.push(fileInfo);
+				projectMetadata.fileCount++;
+			}
+
+			// Recalculate total size
+			projectMetadata.totalSize = projectMetadata.files.reduce((sum, f) => sum + f.size, 0);
+			projectMetadata.updatedAt = new Date().toISOString();
+
+			// Save updated metadata
+			await this.uploadFile(metadataKey, JSON.stringify(projectMetadata, null, 2), {
+				contentType: 'application/json',
+				metadata: {
+					projectId,
+					metadataType: 'project-files',
+					fileCount: projectMetadata.fileCount.toString(),
+					totalSize: projectMetadata.totalSize.toString()
+				}
+			});
+
+			logger.info(
+				`Updated project metadata for ${projectId}: ${projectMetadata.fileCount} files, ${projectMetadata.totalSize} bytes`
+			);
+		} catch (error) {
+			logger.error(`Failed to update project metadata for ${projectId}:`, error);
+			// Don't throw - metadata update failure shouldn't break file creation
+		}
+	}
+
+	/**
+	 * Get project metadata
+	 */
+	async getProjectMetadata(projectId: string): Promise<any | null> {
+		try {
+			const metadataKey = `projects/${projectId}/_metadata.json`;
+			const content = await this.downloadFile(metadataKey, { decompress: true });
+
+			if (!content) {
+				return null;
+			}
+
+			return JSON.parse(content.toString('utf-8'));
+		} catch (error) {
+			logger.warn(`Failed to get project metadata for ${projectId}:`, error);
+			return null;
+		}
+	}
+
+	/**
+	 * List project files from metadata
+	 */
+	async listProjectFiles(projectId: string): Promise<Array<{
+		path: string;
+		key: string;
+		size: number;
+		lastModified: Date;
+		version: string;
+		etag: string;
+	}> | null> {
+		try {
+			const metadata = await this.getProjectMetadata(projectId);
+			return metadata?.files || null;
+		} catch (error) {
+			logger.error(`Failed to list project files for ${projectId}:`, error);
+			return null;
+		}
+	}
+
+	/**
+	 * Get content type based on file extension
+	 */
+	private getContentType(fileName: string): string {
+		const ext = fileName.split('.').pop()?.toLowerCase();
+		const mimeTypes: Record<string, string> = {
+			html: 'text/html',
+			css: 'text/css',
+			js: 'text/javascript',
+			ts: 'text/typescript',
+			json: 'application/json',
+			md: 'text/markdown',
+			txt: 'text/plain',
+			svg: 'image/svg+xml',
+			png: 'image/png',
+			jpg: 'image/jpeg',
+			jpeg: 'image/jpeg',
+			gif: 'image/gif',
+			pdf: 'application/pdf',
+			zip: 'application/zip',
+			xml: 'application/xml'
+		};
+		return mimeTypes[ext || ''] || 'text/plain';
+	}
+
+	/**
 	 * Calculate compression ratio from object metadata
 	 */
 	private calculateCompressionRatio(objects: R2Object[]): number {
