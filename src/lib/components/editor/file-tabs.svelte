@@ -1,15 +1,20 @@
 <script lang="ts">
-	import {
-		filesStore,
-		openFiles,
-		activeFileId,
-		tabActions,
-		fileStateActions
-	} from '$lib/stores/editor.js';
-	import { getFileIcon } from './index.js';
-	import FileIcon from '@lucide/svelte/icons/file';
-	import XIcon from '@lucide/svelte/icons/x';
+	import { activeFileId, filesStore, openFiles, tabActions } from '$lib/stores/editor.js';
+	import { fileStateActions } from '$lib/stores/file-states.store.js';
+	import type { Project } from '$lib/types';
 	import Icon from '@iconify/svelte';
+	import FileIcon from '@lucide/svelte/icons/file';
+	import Loader2 from '@lucide/svelte/icons/loader-2';
+	import SaveIcon from '@lucide/svelte/icons/save';
+	import XIcon from '@lucide/svelte/icons/x';
+	import { getFileIcon } from './index.js';
+
+	// Props
+	interface Props {
+		project?: Project;
+	}
+
+	let { project = undefined }: Props = $props();
 
 	// Handle tab click
 	const handleTabClick = (fileId: string) => {
@@ -54,6 +59,13 @@
 			tabActions.closeFile(fileId);
 		});
 	};
+
+	// Save current file
+	const handleSave = async () => {
+		if ($activeFileId && fileStateActions.isFileDirty($activeFileId)) {
+			await fileStateActions.saveFile($activeFileId);
+		}
+	};
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
@@ -66,6 +78,7 @@
 				{#if file}
 					{@const isActive = fileId === $activeFileId}
 					{@const isDirty = fileStateActions.isFileDirty(fileId)}
+					{@const isLoading = fileStateActions.isFileLoading(fileId)}
 
 					<button
 						class="group flex max-w-48 min-w-fit items-center gap-2 border-r border-border bg-transparent px-3 py-2 text-sm transition-colors hover:bg-muted/50
@@ -81,6 +94,10 @@
 						<span class="min-w-0 flex-1 truncate">
 							{file.name}
 						</span>
+
+						{#if isLoading}
+							<Loader2 class="h-3 w-3 animate-spin text-muted-foreground" />
+						{/if}
 
 						{#if isDirty}
 							<span class="font-bold text-orange-500" title="Unsaved changes">•</span>
@@ -106,18 +123,32 @@
 			{/each}
 		</div>
 
-		<!-- Close all button -->
-		{#if $openFiles.length > 1}
-			<button
-				class="ml-auto flex items-center justify-center border-l border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-				onclick={handleCloseAll}
-				type="button"
-				aria-label="Close all tabs"
-				title="Close all tabs"
-			>
-				<XIcon class="h-4 w-4" />
-			</button>
-		{/if}
+		<!-- Action buttons -->
+		<div class="ml-auto flex items-center">
+			{#if $activeFileId && fileStateActions.isFileDirty($activeFileId)}
+				<button
+					class="flex items-center justify-center border-l border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+					onclick={handleSave}
+					type="button"
+					aria-label="Save current file"
+					title="Save current file (Ctrl+S)"
+				>
+					<SaveIcon class="h-4 w-4" />
+				</button>
+			{/if}
+
+			{#if $openFiles.length > 1}
+				<button
+					class="flex items-center justify-center border-l border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+					onclick={handleCloseAll}
+					type="button"
+					aria-label="Close all tabs"
+					title="Close all tabs"
+				>
+					<XIcon class="h-4 w-4" />
+				</button>
+			{/if}
+		</div>
 	</div>
 {:else}
 	<div class="flex h-10 border-b border-border bg-background">
