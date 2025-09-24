@@ -5,11 +5,20 @@
 	import * as Resizable from '$lib/components/ui/resizable/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import { activeFileId, filesStore } from '$lib/stores/editor.js';
+	import { fileActions } from '$lib/stores/files.store.js';
 	// Icons
 	import { TerminalManager } from '$lib/components/shared/terminal';
 	// import ChatSidebar from '@/components/chat/chat-sidebar.svelte';
 
 	let { data } = $props();
+
+	// Initialize files store with server-loaded data
+	$effect(() => {
+		if (data.files && data.files.length > 0) {
+			fileActions.loadFiles(data.files);
+			console.log(`Loaded ${data.files.length} files from server`);
+		}
+	});
 
 	function onLayoutChange(sizes: number[]) {
 		document.cookie = `PaneForge:layout=${JSON.stringify(sizes)}`;
