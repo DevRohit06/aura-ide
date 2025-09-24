@@ -51,7 +51,7 @@
 		<ChevronDown class="h-3 w-3 text-muted-foreground" />
 	</DropdownMenu.Trigger>
 
-	<DropdownMenu.Content class="w-[300px] p-1" align="start">
+	<DropdownMenu.Content class="max-h-[250px] w-[300px] p-1" align="start">
 		{#each providerGroups as provider (provider.name)}
 			<div class="px-2 py-1">
 				<div class="mb-1 text-xs font-medium text-muted-foreground">

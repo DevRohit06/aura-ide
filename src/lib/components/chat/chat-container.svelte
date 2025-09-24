@@ -22,7 +22,7 @@
 	let scrollContainer = $state<HTMLDivElement>();
 	let shouldAutoScroll = $state(true);
 	let userScrolled = $state(false);
-	let showScrollButton = $state(false);
+	let showScrollButton = $state(true);
 	let newMessagesCount = $state(0);
 	let lastMessageCount = $state(0);
 

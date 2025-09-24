@@ -7,7 +7,6 @@
 	import { createEventDispatcher, onMount } from 'svelte';
 	import ChatContainer from './chat-container.svelte';
 	import ChatInput from './chat-input.svelte';
-	import FileContextIndicator from './file-context-indicator.svelte';
 
 	// UI Message type for ChatContainer
 	interface UIMessage {
@@ -178,9 +177,10 @@
 					threadId,
 					content,
 					model: selectedModel,
-					provider: 'openai',
+					enableTools: true,
 					fileContext: fileContextMetadata?.fileContext,
-					contextVariables: fileContextMetadata?.context
+					contextVariables: fileContextMetadata?.context,
+					projectId: project.id
 				})
 			});
 
@@ -235,19 +235,15 @@
 
 <div class="flex h-full w-full flex-col border-l bg-background">
 	<!-- Header -->
-	<div class="flex items-center justify-between border-b p-4">
+	<div class="flex items-center justify-between border-b">
 		<div class="flex items-center gap-2">
 			<div class="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">🤖</div>
 			<div>
-				<h3 class="text-sm font-semibold">AI Assistant</h3>
-				<p class="text-xs text-muted-foreground">Ready to help</p>
+				<h3 class="text-sm font-semibold">Aura</h3>
 			</div>
 		</div>
 
 		<div class="flex items-center gap-1">
-			<!-- File context indicator -->
-			<FileContextIndicator />
-
 			{#if threadMessages.length > 0}
 				<Button variant="ghost" size="icon" class="h-8 w-8" onclick={clearChat} title="New chat">
 					🗑️
