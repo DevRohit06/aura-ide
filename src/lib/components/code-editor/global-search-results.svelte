@@ -1,6 +1,8 @@
 <script lang="ts">
 	import Badge from '$lib/components/ui/badge/badge.svelte';
 	import Button from '$lib/components/ui/button/button.svelte';
+	import { fileStateActions } from '$lib/stores/file-states.store.js';
+	import { fileActions } from '$lib/stores/files.store.js';
 	import {
 		searchActions,
 		searchResults,
@@ -8,21 +10,61 @@
 		searchSummary
 	} from '$lib/stores/search.store';
 	import { tabActions } from '$lib/stores/tabs.store';
+	import type { Project } from '$lib/types';
 	import type { FileSearchResult, SearchMatch } from '$lib/types/file-operations';
 
 	// Props
 	interface Props {
 		visible: boolean;
 		onClose: () => void;
+		project?: Project;
 	}
 
-	let { visible, onClose }: Props = $props();
+	let { visible, onClose, project = undefined }: Props = $props();
 
 	// Reactive state
 	let expandedFiles = $state<Set<string>>(new Set());
 
 	// Handle file click - open file and navigate to match
-	function handleFileClick(result: FileSearchResult, match?: SearchMatch) {
+	async function handleFileClick(result: FileSearchResult, match?: SearchMatch) {
+		const file = result.file;
+
+		// Load file content if not already loaded
+		if (!file.content || file.content === '') {
+			try {
+				fileStateActions.setFileLoading(file.id, true);
+
+				const response = await fetch('/api/files', {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json'
+					},
+					body: JSON.stringify({
+						operation: 'read',
+						sandboxId: project?.sandboxId || 'current-sandbox',
+						projectId: project?.id,
+						path: file.path,
+						sandboxProvider: project?.sandboxProvider
+					})
+				});
+
+				if (response.ok) {
+					const apiResult = await response.json();
+					if (apiResult.success && apiResult.data !== undefined) {
+						const content =
+							typeof apiResult.data.content === 'string'
+								? apiResult.data.content
+								: String(apiResult.data.content || '');
+						fileActions.updateFileContent(file.id, content);
+					}
+				}
+			} catch (error) {
+				console.error('Error loading file content:', error);
+			} finally {
+				fileStateActions.setFileLoading(file.id, false);
+			}
+		}
+
 		// Open the file in a new tab
 		tabActions.openFile(result.file.id);
 

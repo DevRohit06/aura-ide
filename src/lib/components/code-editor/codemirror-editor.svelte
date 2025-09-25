@@ -6,7 +6,7 @@
 	import { highlightActiveLine } from '@codemirror/view';
 	import { EditorView } from 'codemirror';
 	import { onDestroy, onMount } from 'svelte';
-	import { dracula, tomorrow, barf } from 'thememirror';
+	import { barf, dracula, tomorrow } from 'thememirror';
 	import ContextMenu from './context-menu.svelte';
 	import SearchPanel from './search-panel.svelte';
 	// Extracted utilities
@@ -348,6 +348,14 @@
 		cleanup();
 	});
 
+	// React to active file changes
+	$effect(() => {
+		const activeFileId = $tabsStore.activeFileId;
+		if (mounted && activeFileId !== currentFileId) {
+			initializeEditor();
+		}
+	});
+
 	// React to file content changes
 	$effect(() => {
 		const activeFileId = $tabsStore.activeFileId;
@@ -451,6 +459,7 @@
 			console.log('Search panel close requested');
 			showSearchPanel = false;
 		}}
+		{project}
 	/>
 
 	<!-- Context Menu wrapping the editor -->

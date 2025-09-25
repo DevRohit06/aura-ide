@@ -1,27 +1,30 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import Badge from '$lib/components/ui/badge/badge.svelte';
 	import Button from '$lib/components/ui/button/button.svelte';
 	import Input from '$lib/components/ui/input/input.svelte';
-	import Badge from '$lib/components/ui/badge/badge.svelte';
-	import GlobalSearchResults from './global-search-results.svelte';
-	import SearchHistory from './search-history.svelte';
-	import { searchStore, searchActions } from '$lib/stores/search.store';
-	import type { EditorView } from '@codemirror/view';
+	import { searchActions, searchStore } from '$lib/stores/search.store';
+	import type { Project } from '$lib/types';
 	import {
 		findNext,
 		findPrevious,
-		replaceNext,
 		replaceAll,
-		setSearchQuery,
-		SearchQuery
-	} from '@codemirror/search'; // Props
+		replaceNext,
+		SearchQuery,
+		setSearchQuery
+	} from '@codemirror/search';
+	import type { EditorView } from '@codemirror/view';
+	import { onDestroy } from 'svelte';
+	import GlobalSearchResults from './global-search-results.svelte';
+	import SearchHistory from './search-history.svelte';
+	// Props
 	interface Props {
 		editorView: EditorView | null;
 		visible: boolean;
 		onClose: () => void;
+		project?: Project;
 	}
 
-	let { editorView, visible, onClose }: Props = $props();
+	let { editorView, visible, onClose, project = undefined }: Props = $props();
 
 	// State
 	let searchInput = $state<HTMLInputElement | null>(null);
@@ -534,7 +537,11 @@
 {/if}
 
 <!-- Global Search Results -->
-<GlobalSearchResults visible={showGlobalResults} onClose={() => (showGlobalResults = false)} />
+<GlobalSearchResults
+	visible={showGlobalResults}
+	onClose={() => (showGlobalResults = false)}
+	{project}
+/>
 
 <!-- Search History -->
 <SearchHistory visible={showHistoryPanel} onClose={() => (showHistoryPanel = false)} />
