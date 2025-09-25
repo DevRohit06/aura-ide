@@ -29,7 +29,7 @@ export const POST = async ({ request }: { request: Request }) => {
 			maxTokens
 		});
 
-		// Build LLM request
+		// Build LLM request with default agent behavior
 		const llmRequest: LLMRequest = {
 			messages: messages.map((msg: any) => ({
 				role: msg.role,
@@ -45,7 +45,15 @@ export const POST = async ({ request }: { request: Request }) => {
 						variables: contextVariables,
 						override: true
 					}
-				: undefined,
+				: {
+						context: 'general-chat' as const,
+						promptId: 'general-chat',
+						variables: {
+							userName: 'Developer',
+							projectName: 'Aura IDE Project'
+						},
+						override: false
+					},
 			sessionId
 		};
 
