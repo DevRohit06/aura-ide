@@ -1,6 +1,6 @@
 import { vectorDbService } from '$lib/services/vector-db.server.js';
-import { json } from '@sveltejs/kit';
 import type { RequestHandler } from '@sveltejs/kit';
+import { json } from '@sveltejs/kit';
 
 export const POST: RequestHandler = async ({ request }) => {
 	try {
