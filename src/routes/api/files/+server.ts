@@ -51,7 +51,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			sandboxId: body.sandboxId
 		});
 
-		const { operation, projectId, sandboxId, path, content, newPath, metadata } = body;
+		const { operation, projectId, sandboxId, path, content, newPath, metadata, sandboxProvider } =
+			body;
 
 		// Validate required fields
 		if (!operation) {
@@ -91,7 +92,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				break;
 
 			case 'read':
-				result = await readFile({ projectId, sandboxId, path });
+				result = await readFile({ projectId, sandboxId, path, sandboxProvider });
 				break;
 
 			case 'update':
@@ -245,14 +246,16 @@ async function createFile({
 async function readFile({
 	projectId,
 	sandboxId,
-	path
+	path,
+	sandboxProvider
 }: {
 	projectId?: string;
 	sandboxId?: string;
 	path: string;
+	sandboxProvider?: 'daytona' | 'e2b';
 }) {
 	// Try reading from sandbox first (most up-to-date), then R2, then database
-	if (sandboxId) {
+	if (sandboxId && sandboxProvider === 'daytona') {
 		try {
 			const sandboxManager = SandboxManager.getInstance();
 			const content = await sandboxManager.readFile(sandboxId, path, {
@@ -265,7 +268,7 @@ async function readFile({
 		}
 	}
 
-	if (projectId) {
+	if (projectId && (!sandboxProvider || sandboxProvider === 'e2b')) {
 		try {
 			const fileData = await r2StorageService.downloadFile(`projects/${projectId}/${path}`);
 			if (fileData) {
@@ -277,12 +280,15 @@ async function readFile({
 	}
 
 	// Fallback to database
-	try {
-		const file = await filesService.getFileByPath(path);
-		return { content: file?.content || '', source: 'database', file };
-	} catch (error) {
-		throw new Error(`File not found: ${path}`);
-	}
+	// try {
+	// 	const file = await filesService.getFileByPath(path);
+	// 	return { content: file?.content || '', source: 'database', file };
+	// } catch (error) {
+	// 	throw new Error(`File not found: ${path}`);
+	// }
+
+	// If we reach here, file was not found in any source
+	throw new Error(`File not found: ${path}`);
 }
 
 async function updateFile({
