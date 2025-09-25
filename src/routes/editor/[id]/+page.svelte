@@ -49,6 +49,22 @@
 	let daytonaConnectionRegistered = $state(false);
 	let daytonaBridgeActive = $state(false);
 
+	// Command palette state
+	let commandPaletteOpen = $state(false);
+
+	// Keyboard event handling
+	function handleKeydown(event: KeyboardEvent) {
+		const { key } = event;
+		const cmdKey = event.ctrlKey || event.metaKey;
+		const shiftKey = event.shiftKey;
+
+		// Command Palette shortcuts
+		if ((cmdKey && shiftKey && key === 'P') || key === 'F1' || (cmdKey && key === 'k')) {
+			event.preventDefault();
+			commandPaletteOpen = true;
+		}
+	}
+
 	/**
 	 * Spin up Daytona sandbox for Daytona projects
 	 */
@@ -89,6 +105,7 @@
 		if (browser) {
 			window.addEventListener('beforeunload', handleBeforeUnload);
 			window.addEventListener('unload', handleBeforeUnload);
+			window.addEventListener('keydown', handleKeydown);
 		}
 	});
 
@@ -96,6 +113,7 @@
 		if (browser) {
 			window.removeEventListener('beforeunload', handleBeforeUnload);
 			window.removeEventListener('unload', handleBeforeUnload);
+			window.removeEventListener('keydown', handleKeydown);
 		}
 	});
 
