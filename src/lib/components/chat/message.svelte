@@ -1,7 +1,4 @@
 <script lang="ts">
-	import CodeBlockDisplay from '$lib/components/ui/code-block-display.svelte';
-	import { marked } from 'marked';
-
 	interface MessageType {
 		id: string;
 		content: string;
@@ -26,46 +23,13 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import Icon from '@iconify/svelte';
 	import { getFileIcon } from '../editor';
+	import Markdown from './markdown.svelte';
 
 	function formatTime(date: Date): string {
 		return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 	}
 
 	// Parse markdown content using marked lexer tokens
-	function parseMessageContent(
-		content: string
-	): Array<{ type: 'text' | 'code'; content: string; language?: string }> {
-		const tokens = marked.lexer(content);
-		const parts: Array<{ type: 'text' | 'code'; content: string; language?: string }> = [];
-
-		// Flatten tokens and extract text and code parts
-		function processTokens(tokens: any[]): void {
-			for (const token of tokens) {
-				if (token.type === 'code') {
-					parts.push({
-						type: 'code',
-						content: token.text,
-						language: token.lang || 'text'
-					});
-				} else if (token.type === 'text' || token.type === 'paragraph') {
-					// For text tokens, parse inline markdown
-					const text = token.type === 'paragraph' ? token.text : token.raw;
-					if (text.trim()) {
-						parts.push({ type: 'text', content: text });
-					}
-				} else if (token.tokens) {
-					// Recursively process nested tokens
-					processTokens(token.tokens);
-				}
-			}
-		}
-
-		processTokens(tokens);
-		return parts;
-	}
-
-	let messageParts = $derived(parseMessageContent(message.content));
-	console.log('Message Parts:', message);
 </script>
 
 <div
@@ -97,7 +61,7 @@
 			</span>
 		</div>
 	</div>
-	<div class="prose prose-sm dark:prose-invert max-w-none">
+	<div class="">
 		{#if message.isLoading}
 			<div class="flex items-center gap-2">
 				<div class="flex space-x-1">
@@ -111,13 +75,7 @@
 			</div>
 		{:else}
 			<div class="space-y-4 text-sm leading-relaxed">
-				{#each messageParts as part}
-					{#if part.type === 'text'}
-						<div>{@html marked.parseInline(part.content)}</div>
-					{:else if part.type === 'code'}
-						<CodeBlockDisplay code={part.content} language={part.language} />
-					{/if}
-				{/each}
+				<Markdown content={message.content} messageId={message.id} />
 			</div>
 		{/if}
 	</div>
