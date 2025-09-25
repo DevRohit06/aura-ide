@@ -70,6 +70,19 @@
 	// Track initialization
 	let initialized = $state(false);
 
+	// Keyboard event handling
+	function handleKeydown(event: KeyboardEvent) {
+		const { key } = event;
+		const cmdKey = event.ctrlKey || event.metaKey;
+		const shiftKey = event.shiftKey;
+
+		// Command Palette shortcuts
+		if ((cmdKey && shiftKey && key === 'P') || key === 'F1' || (cmdKey && key === 'k')) {
+			event.preventDefault();
+			commandPaletteOpen = true;
+		}
+	}
+
 	// Sidebar views configuration
 	const sidebarViews: SidebarView[] = [
 		{ id: 'explorer', name: 'Explorer', icon: 'folder-tree' },
@@ -225,7 +238,6 @@
 		try {
 			// Set loading state
 			console.log(`🔄 Starting to load content for file: ${file.name}`);
-			tabActions.openFile(fileId); // Ensure file tab is open
 			fileStateActions.setFileLoading(fileId, true);
 
 			// Load file content from sandbox API with timeout
@@ -242,7 +254,8 @@
 					operation: 'read',
 					sandboxId: project?.sandboxId || 'current-sandbox',
 					projectId: project?.id,
-					path: file.path
+					path: file.path,
+					sandboxProvider: project?.sandboxProvider
 				}),
 				signal: controller.signal
 			});
@@ -330,7 +343,33 @@
 				content: '',
 				size: 0,
 				modifiedAt: new Date(),
-				parentId: parentId || null
+				createdAt: new Date(),
+				parentId: parentId || null,
+				permissions: {
+					read: true,
+					write: true,
+					execute: false,
+					delete: true,
+					share: true,
+					owner: 'current-user',
+					collaborators: []
+				},
+				language: 'plaintext',
+				encoding: 'utf-8',
+				mimeType: 'text/plain',
+				isDirty: false,
+				isReadOnly: false,
+				metadata: {
+					extension: '',
+					lineCount: 0,
+					characterCount: 0,
+					wordCount: 0,
+					lastCursor: null,
+					bookmarks: [],
+					breakpoints: [],
+					folds: [],
+					searchHistory: []
+				}
 			};
 
 			fileActions.addFile(newFile);
@@ -357,9 +396,22 @@
 				name: folderName,
 				type: 'directory',
 				path: folderPath,
+				content: '',
 				children: [],
 				modifiedAt: new Date(),
-				parentId: parentId || null
+				createdAt: new Date(),
+				parentId: parentId || null,
+				permissions: {
+					read: true,
+					write: true,
+					execute: false,
+					delete: true,
+					share: true,
+					owner: 'current-user',
+					collaborators: []
+				},
+				isExpanded: false,
+				isRoot: false
 			};
 
 			fileActions.addFile(newFolder);
@@ -594,7 +646,7 @@
 </div>
 
 <!-- Command Palette -->
-<CommandPalette bind:open={commandPaletteOpen} />
+<CommandPalette bind:open={commandPaletteOpen} {project} />
 
 {#snippet FileTreeNode({
 	item,

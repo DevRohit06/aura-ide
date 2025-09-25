@@ -21,6 +21,10 @@
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import * as Command from '$lib/components/ui/command/index.js';
 	// Icons
+	import { fileActions, filesStore, tabActions, tabsStore } from '$lib/stores/editor.js';
+	import { fileStateActions } from '$lib/stores/file-states.store.js';
+	import { layoutActions } from '$lib/stores/layout.store.js';
+	import Icon from '@iconify/svelte';
 	import ClockIcon from '@lucide/svelte/icons/clock';
 	import FilePlusIcon from '@lucide/svelte/icons/file-plus';
 	import FolderPlusIcon from '@lucide/svelte/icons/folder-plus';
@@ -32,18 +36,14 @@
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import TerminalIcon from '@lucide/svelte/icons/terminal';
 	import ZapIcon from '@lucide/svelte/icons/zap';
-	// Stores
-	import { filesStore, tabActions, tabsStore } from '$lib/stores/editor.js';
-	import { fileStateActions } from '$lib/stores/file-states.store.js';
-	import { layoutActions } from '$lib/stores/layout.store.js';
-	import Icon from '@iconify/svelte';
 	import { getFileIcon } from '../editor';
 
 	// Props
 	let {
 		open = $bindable(false),
 		placeholder = 'Type a command or search...',
-		maxRecentFiles = 10
+		maxRecentFiles = 10,
+		project = undefined
 	} = $props();
 
 	// State
@@ -63,7 +63,43 @@
 					description: file.path,
 					icon: getFileIcon(file.name),
 					category: 'Recent Files',
-					action: () => {
+					action: async () => {
+						// Load file content if not already loaded
+						if (!file.content || file.content === '') {
+							try {
+								fileStateActions.setFileLoading(file.id, true);
+
+								const response = await fetch('/api/files', {
+									method: 'POST',
+									headers: {
+										'Content-Type': 'application/json'
+									},
+									body: JSON.stringify({
+										operation: 'read',
+										sandboxId: project?.sandboxId || 'current-sandbox',
+										projectId: project?.id,
+										path: file.path,
+										sandboxProvider: project?.sandboxProvider
+									})
+								});
+
+								if (response.ok) {
+									const result = await response.json();
+									if (result.success && result.data !== undefined) {
+										const content =
+											typeof result.data.content === 'string'
+												? result.data.content
+												: String(result.data.content || '');
+										fileActions.updateFileContent(file.id, content);
+									}
+								}
+							} catch (error) {
+								console.error('Error loading file content:', error);
+							} finally {
+								fileStateActions.setFileLoading(file.id, false);
+							}
+						}
+
 						tabActions.openFile(file.id);
 						open = false;
 					},
