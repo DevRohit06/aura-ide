@@ -389,6 +389,80 @@ class ChatStore {
 	}
 
 	/**
+	 * Delete a thread
+	 */
+	async deleteThread(threadId: string): Promise<void> {
+		try {
+			const response = await fetch(`/api/chat/threads/${threadId}`, {
+				method: 'DELETE',
+				headers: { 'Content-Type': 'application/json' }
+			});
+
+			if (!response.ok) {
+				throw new Error('Failed to delete thread');
+			}
+
+			// Remove from local threads
+			const threadIndex = this.threads.findIndex((t) => t.id === threadId);
+			if (threadIndex !== -1) {
+				this.threads.splice(threadIndex, 1);
+			}
+
+			// Clear active thread if it was deleted
+			if (this.activeThreadId === threadId) {
+				this.activeThreadId = null;
+			}
+		} catch (error) {
+			console.error('Failed to delete thread:', error);
+			throw error;
+		}
+	}
+
+	/**
+	 * Update thread properties (title, description, tags, etc.)
+	 */
+	async updateThread(threadId: string, updates: Partial<{
+		title: string;
+		name: string; // alias for title for backward compatibility
+		description: string;
+		tags: string[];
+		isPinned: boolean;
+		isArchived: boolean;
+	}>): Promise<void> {
+		try {
+			// Handle name -> title conversion for backward compatibility
+			const updatePayload = { ...updates };
+			if (updates.name && !updates.title) {
+				updatePayload.title = updates.name;
+				delete updatePayload.name;
+			}
+
+			const response = await fetch(`/api/chat/threads/${threadId}`, {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(updatePayload)
+			});
+
+			if (!response.ok) {
+				throw new Error('Failed to update thread');
+			}
+
+			const data = await response.json();
+			const updatedThread = data.thread;
+
+			// Update local thread
+			const threadIndex = this.threads.findIndex((t) => t.id === threadId);
+			if (threadIndex !== -1) {
+				// Merge updates into existing thread
+				this.threads[threadIndex] = { ...this.threads[threadIndex], ...updatedThread };
+			}
+		} catch (error) {
+			console.error('Failed to update thread:', error);
+			throw error;
+		}
+	}
+
+	/**
 	 * Pin/unpin a thread
 	 */
 	async toggleThreadPin(threadId: string): Promise<void> {
