@@ -4,6 +4,7 @@
  */
 
 import { env } from '$env/dynamic/private';
+import type { Directory, File, FileSystemItem } from '$lib/types/files';
 import { logger } from '$lib/utils/logger.js';
 import type { ProjectFile } from '../project-initialization.service.js';
 
@@ -684,6 +685,9 @@ export class DaytonaService {
 		try {
 			logger.info(`Listing files in Daytona sandbox ${sandboxId} at path: ${path}`);
 
+			// Ensure sandbox is running before file operations
+			await this.ensureSandboxRunning(sandbox);
+
 			// Build complete file tree starting from root
 			const fileTree = await this.buildFileTree(
 				sandbox.daytonaSandbox,
@@ -763,7 +767,7 @@ export class DaytonaService {
 						children: childIds,
 						isExpanded: false,
 						isRoot: parentId === null
-					});
+					} as Directory);
 
 					// Add children to result
 					result.push(...children);
@@ -805,12 +809,18 @@ export class DaytonaService {
 						isReadOnly: false,
 						metadata: {
 							extension,
-							lastModified: modifiedDate.toISOString(),
-							size: file.size || 0
+							lineCount: 0, // Will be calculated when content is loaded
+							characterCount: 0,
+							wordCount: 0,
+							lastCursor: null,
+							bookmarks: [],
+							breakpoints: [],
+							folds: [],
+							searchHistory: []
 						},
 						editorState: undefined,
 						aiContext: undefined
-					});
+					} as File);
 				}
 			}
 

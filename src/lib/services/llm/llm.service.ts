@@ -49,7 +49,7 @@ export class LLMService {
 	constructor(config: Partial<LLMServiceConfig> = {}) {
 		this.heliconeConfig = HeliconeConfigManager.getInstance().getConfig();
 		this.config = {
-			defaultModel: 'gpt-4',
+			defaultModel: 'gemini-1.5-flash',
 			defaultTemperature: 0,
 			maxTokens: 4096,
 			enableSystemPrompts: true,
