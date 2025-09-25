@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { activeFileId, filesStore, openFiles, tabActions } from '$lib/stores/editor.js';
+	import { activeFileId, filesStore, openFiles, tabActions, fileActions } from '$lib/stores/editor.js';
 	import { fileStateActions } from '$lib/stores/file-states.store.js';
 	import type { Project } from '$lib/types';
 	import Icon from '@iconify/svelte';
@@ -17,7 +17,8 @@
 	let { project = undefined }: Props = $props();
 
 	// Handle tab click
-	const handleTabClick = (fileId: string) => {
+	const handleTabClick = async (fileId: string) => {
+		// Switch to the file (no need to load content as sidebar already handles this)
 		tabActions.switchToFile(fileId);
 	};
 
