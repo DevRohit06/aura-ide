@@ -421,14 +421,17 @@ class ChatStore {
 	/**
 	 * Update thread properties (title, description, tags, etc.)
 	 */
-	async updateThread(threadId: string, updates: Partial<{
-		title: string;
-		name: string; // alias for title for backward compatibility
-		description: string;
-		tags: string[];
-		isPinned: boolean;
-		isArchived: boolean;
-	}>): Promise<void> {
+	async updateThread(
+		threadId: string,
+		updates: Partial<{
+			title: string;
+			name: string; // alias for title for backward compatibility
+			description: string;
+			tags: string[];
+			isPinned: boolean;
+			isArchived: boolean;
+		}>
+	): Promise<void> {
 		try {
 			// Handle name -> title conversion for backward compatibility
 			const updatePayload = { ...updates };
