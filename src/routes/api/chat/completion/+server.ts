@@ -1,13 +1,18 @@
 import { DatabaseService } from '$lib/services/database.service.js';
+import {
+	LangGraphWorkflowService,
+	type GraphState
+} from '$lib/services/langgraph-workflow.service.js';
 import { LLMService } from '$lib/services/llm/llm.service.js';
-import { r2StorageService } from '$lib/services/r2-storage.service.js';
 import { toolManager } from '$lib/services/tool-manager.service.js';
 import { webSocketService } from '$lib/services/websocket.service.js';
+import type { ChatMessage } from '$lib/types/chat.js';
+import type { ToolCallResult } from '$lib/types/tools.js';
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
 // Enhanced type definitions for better type safety
-interface ChatMessage {
+interface WorkflowMessage {
 	role: 'system' | 'user' | 'assistant';
 	content: string;
 }
@@ -43,488 +48,242 @@ interface ChatCompletionRequest {
 }
 
 interface ExecutionContext {
-	projectId?: string;
+	projectId: string;
 	userId: string;
+	sessionId: string;
 }
 
 /**
- * Formats tools for chat completion API
- * @returns Array of formatted tool definitions
+ * Enhanced workflow-based chat completion service
  */
-function getToolsForChatCompletion() {
-	return toolManager.getTools().map((tool) => ({
-		type: 'function' as const,
-		function: {
-			name: tool.name,
-			description: tool.description,
-			parameters: tool.parameters
-		}
-	}));
-}
+class WorkflowChatCompletionService {
+	private workflowService: LangGraphWorkflowService;
+	private llmService: LLMService;
 
-/**
- * Safely parses JSON arguments with fallback handling
- * @param argumentsString - JSON string to parse
- * @returns Parsed arguments object
- */
-function parseToolArguments(argumentsString: string): Record<string, unknown> {
-	try {
-		return JSON.parse(argumentsString);
-	} catch {
-		// If not valid JSON, treat as string content
-		return { content: argumentsString };
+	constructor() {
+		this.workflowService = new LangGraphWorkflowService();
+		this.llmService = new LLMService();
 	}
-}
 
-/**
- * Enhanced file operations that work directly with R2 storage
- */
-async function createFileInR2(
-	projectId: string,
-	filePath: string,
-	content: string,
-	metadata?: Record<string, any>
-): Promise<{ success: boolean; message: string; data?: any; error?: string }> {
-	try {
-		// Use the new R2 method that handles metadata
-		const result = await r2StorageService.createFileInProject(
-			projectId,
-			filePath,
-			content,
-			metadata
-		);
-
-		// Send WebSocket notification for real-time updates
-		if (result.success) {
-			try {
-				await webSocketService.send({
-					type: 'file_created',
-					data: {
-						sandboxId: projectId, // WebSocket uses sandboxId
-						path: filePath,
-						content: content.substring(0, 1000), // Send preview of content
-						isDirectory: false,
-						size: content.length,
-						lastModified: new Date().toISOString()
-					}
-				});
-			} catch (wsError) {
-				console.warn('Failed to send WebSocket notification:', wsError);
-				// Don't fail the operation if WebSocket fails
-			}
-		}
-
-		return result;
-	} catch (error) {
-		console.error(`Failed to create file in R2: ${filePath}`, error);
-		return {
-			success: false,
-			message: `Failed to create file '${filePath}'`,
-			error: error instanceof Error ? error.message : 'Unknown error'
-		};
-	}
-}
-
-/**
- * Read file from R2 storage
- */
-async function readFileFromR2(
-	projectId: string,
-	filePath: string
-): Promise<{ success: boolean; message: string; data?: any; error?: string }> {
-	try {
-		const r2Key = `projects/${projectId}/${filePath}`;
-		const content = await r2StorageService.downloadFile(r2Key, { decompress: true });
-
-		if (!content) {
-			return {
-				success: false,
-				message: `File '${filePath}' not found`,
-				error: 'FILE_NOT_FOUND'
-			};
-		}
-
-		return {
-			success: true,
-			message: `File '${filePath}' read successfully`,
-			data: {
-				filePath,
-				content: content.toString('utf-8'),
-				size: content.length
-			}
-		};
-	} catch (error) {
-		console.error(`Failed to read file from R2: ${filePath}`, error);
-		return {
-			success: false,
-			message: `Failed to read file '${filePath}'`,
-			error: error instanceof Error ? error.message : 'Unknown error'
-		};
-	}
-}
-
-/**
- * Enhanced tool execution with direct R2 operations
- */
-async function executeToolCallsWithR2(
-	toolCalls: ToolCall[],
-	context: ExecutionContext
-): Promise<ToolResult[]> {
-	const results: ToolResult[] = [];
-
-	for (const toolCall of toolCalls) {
+	/**
+	 * Process chat completion using workflow agent
+	 */
+	async processChatCompletion(
+		requestData: ChatCompletionRequest,
+		userId: string,
+		threadId: string,
+		projectId?: string
+	) {
 		try {
-			const args = parseToolArguments(toolCall.function.arguments);
+			// Get available tools
+			const availableTools = toolManager.getTools();
 
-			// Handle file operations directly with R2
-			if (toolCall.function.name === 'edit_file' && context.projectId) {
-				const operation = args.operation as string;
-				const filePath = args.filePath as string;
-				const content = args.content as string;
+			// Combine all tools
+			const allTools = [...availableTools];
 
-				let operationResult;
+			// Build enhanced context
+			const context: ExecutionContext = {
+				projectId: projectId || 'default',
+				userId,
+				sessionId: threadId
+			};
 
-				if (operation === 'create') {
-					operationResult = await createFileInR2(context.projectId, filePath, content || '', {
-						reason: args.reason as string,
-						modifiedBy: 'ai_agent',
-						modifiedAt: new Date().toISOString()
-					});
-				} else if (operation === 'read') {
-					operationResult = await readFileFromR2(context.projectId, filePath);
-				} else {
-					// For update, delete operations, fall back to tool manager
-					const enhancedArgs = {
-						...args,
-						projectId: context.projectId,
-						userId: context.userId
-					};
+			// Get recent messages for context
+			const recentMessages = await DatabaseService.findChatMessagesByThreadId(threadId, 10, 0);
+			const conversationHistory = recentMessages.map((msg) => ({
+				role: msg.role as 'system' | 'user' | 'assistant',
+				content: msg.content
+			}));
 
-					operationResult = await toolManager.executeToolCall(
-						{
-							name: toolCall.function.name,
-							parameters: enhancedArgs
-						},
-						{
-							projectId: context.projectId,
-							userId: context.userId
-						}
-					);
+			// Build enhanced user message with context
+			const enhancedContent = this.buildEnhancedContent(
+				requestData.content,
+				requestData.fileContext,
+				requestData.contextVariables
+			);
+
+			// Add the new user message
+			const messages: WorkflowMessage[] = [
+				...conversationHistory,
+				{
+					role: 'user',
+					content: enhancedContent
 				}
+			];
 
-				results.push({
-					tool_call_id: toolCall.id,
-					content: JSON.stringify(operationResult)
-				});
-			} else {
-				// Use tool manager for non-file operations or when no projectId
-				const enhancedArgs = {
-					...args,
-					...(context.projectId && { projectId: context.projectId }),
-					userId: context.userId
+			// Create workflow input
+			const workflowInput: GraphState = LangGraphWorkflowService.createWorkflowInput(
+				messages.map((msg) => ({
+					role: msg.role,
+					content: msg.content
+				})),
+				context,
+				allTools
+			);
+
+			// Execute workflow
+			const workflowResult = await this.workflowService.executeWorkflow(workflowInput);
+
+			// Process workflow result
+			return this.processWorkflowResult(workflowResult, context, requestData);
+		} catch (error) {
+			console.error('Workflow chat completion error:', error);
+			throw error;
+		}
+	}
+
+	/**
+	 * Build enhanced content with context
+	 */
+	private buildEnhancedContent(
+		content: string,
+		fileContext?: ChatCompletionRequest['fileContext'],
+		contextVariables?: ChatCompletionRequest['contextVariables']
+	): string {
+		if (!fileContext || !contextVariables) {
+			return content;
+		}
+
+		const fileInfo: string[] = [];
+		if (fileContext.fileName) fileInfo.push(`File: ${fileContext.fileName}`);
+		if (fileContext.filePath) fileInfo.push(`Path: ${fileContext.filePath}`);
+		if (fileContext.language) fileInfo.push(`Language: ${fileContext.language}`);
+
+		let contextInfo = '';
+
+		if (fileInfo.length > 0) {
+			contextInfo += `\n\n**Current File Context:**\n${fileInfo.join('\n')}`;
+		}
+
+		if (contextVariables.selectedCode) {
+			const language = fileContext.language || 'text';
+			contextInfo += `\n\n**Current File Content:**\n\`\`\`${language}\n${contextVariables.selectedCode}\n\`\`\``;
+		}
+
+		if (contextVariables.framework) {
+			contextInfo += `\n\n**Project Framework:** ${contextVariables.framework}`;
+		}
+
+		return content + contextInfo;
+	}
+
+	/**
+	 * Process workflow result and format response
+	 */
+	private async processWorkflowResult(
+		workflowResult: GraphState,
+		context: ExecutionContext,
+		requestData: ChatCompletionRequest
+	) {
+		const { finalResponse, toolResults } = workflowResult;
+
+		// Store the conversation in database
+		await this.storeConversation(workflowResult, context);
+
+		// Send WebSocket notifications for tool results
+		if (toolResults && toolResults.length > 0) {
+			await this.sendToolNotifications(toolResults, context);
+		}
+
+		const startTime = Date.now(); // Define startTime here
+
+		return {
+			content: finalResponse || 'No response generated',
+			usage: {
+				prompt_tokens: 0, // Would need to calculate actual usage
+				completion_tokens: 0,
+				total_tokens: 0
+			},
+			toolsUsed: (toolResults && toolResults.length > 0) || false,
+			toolResults: toolResults || [],
+			workflowSteps: workflowResult.currentStep,
+			metadata: {
+				model: workflowResult.analysis || 'unknown',
+				provider: 'workflow-agent',
+				tokens: 0, // Would need to calculate actual usage
+				latency: Date.now() - startTime,
+				temperature: 0.7,
+				contextFiles: requestData.fileContext ? [requestData.fileContext.filePath || ''] : [],
+				systemPromptId: 'workflow-agent'
+			}
+		};
+	}
+
+	/**
+	 * Store conversation in database
+	 */
+	private async storeConversation(workflowResult: GraphState, context: ExecutionContext) {
+		try {
+			const now = new Date();
+
+			// Store user message (get the last user message from the conversation)
+			const userMessage = workflowResult.messages
+				.filter((msg) => typeof msg === 'object' && 'role' in msg && msg.role === 'user')
+				.pop() as { role: string; content: string } | undefined;
+
+			if (userMessage) {
+				const chatMessage: ChatMessage = {
+					id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+					threadId: context.sessionId,
+					projectId: context.projectId,
+					userId: context.userId,
+					content: userMessage.content,
+					contentMarkdown: userMessage.content, // For now, just use content as markdown
+					role: 'user',
+					timestamp: now,
+					createdAt: now,
+					updatedAt: now
 				};
-
-				const result = await toolManager.executeToolCall(
-					{
-						name: toolCall.function.name,
-						parameters: enhancedArgs
-					},
-					{
-						projectId: context.projectId || '',
-						userId: context.userId
-					}
-				);
-
-				results.push({
-					tool_call_id: toolCall.id,
-					content: JSON.stringify(result)
-				});
+				await DatabaseService.createChatMessage(chatMessage);
 			}
-		} catch (toolError) {
-			console.error(`Error executing tool ${toolCall.function.name}:`, toolError);
 
-			const errorMessage =
-				toolError instanceof Error
-					? toolError.message
-					: 'Unknown error occurred during tool execution';
-
-			results.push({
-				tool_call_id: toolCall.id,
-				content: `Error: ${errorMessage}`
-			});
+			// Store assistant response
+			if (workflowResult.finalResponse) {
+				const chatMessage: ChatMessage = {
+					id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+					threadId: context.sessionId,
+					projectId: context.projectId,
+					userId: context.userId,
+					content: workflowResult.finalResponse,
+					contentMarkdown: workflowResult.finalResponse, // For now, just use content as markdown
+					role: 'assistant',
+					timestamp: now,
+					createdAt: now,
+					updatedAt: now
+				};
+				await DatabaseService.createChatMessage(chatMessage);
+			}
+		} catch (error) {
+			console.error('Failed to store conversation:', error);
 		}
 	}
 
-	return results;
-}
-
-/**
- * Executes tool calls from chat response with enhanced error handling
- * @param toolCalls - Array of tool calls to execute
- * @param context - Execution context with user and project info
- * @returns Array of tool execution results
- */
-async function executeToolCallsFromChat(
-	toolCalls: ToolCall[],
-	context: ExecutionContext
-): Promise<ToolResult[]> {
-	// Use enhanced R2 execution if projectId is available
-	if (context.projectId) {
-		return executeToolCallsWithR2(toolCalls, context);
-	}
-
-	// Fallback to original implementation
-	const results: ToolResult[] = [];
-
-	for (const toolCall of toolCalls) {
-		try {
-			// Parse arguments with fallback handling
-			const args = parseToolArguments(toolCall.function.arguments);
-
-			// Enhance args with context
-			const enhancedArgs = {
-				...args,
-				...(context.projectId && { projectId: context.projectId }),
-				userId: context.userId
-			};
-
-			// Execute the tool using tool manager
-			const result = await toolManager.executeToolCall(
-				{
-					name: toolCall.function.name,
-					parameters: enhancedArgs
-				},
-				{
-					projectId: context.projectId || '',
-					userId: context.userId
+	/**
+	 * Send WebSocket notifications for tool results
+	 */
+	private async sendToolNotifications(toolResults: ToolCallResult[], context: ExecutionContext) {
+		for (const result of toolResults) {
+			try {
+				if (result.success && result.message.includes('file')) {
+					await webSocketService.send({
+						type: 'file_created',
+						data: {
+							sandboxId: context.projectId,
+							path: result.message,
+							content: result.data,
+							isDirectory: false
+						}
+					});
 				}
-			);
-
-			results.push({
-				tool_call_id: toolCall.id,
-				content: JSON.stringify(result)
-			});
-		} catch (toolError) {
-			console.error(`Error executing tool ${toolCall.function.name}:`, toolError);
-
-			const errorMessage =
-				toolError instanceof Error
-					? toolError.message
-					: 'Unknown error occurred during tool execution';
-
-			results.push({
-				tool_call_id: toolCall.id,
-				content: `Error: ${errorMessage}`
-			});
+			} catch (error) {
+				console.warn('Failed to send tool notification:', error);
+			}
 		}
 	}
-
-	return results;
 }
 
-/**
- * Creates a tool call object with proper structure
- * @param name - Tool name
- * @param args - Tool arguments
- * @param callIndex - Call index for unique ID generation
- * @returns Formatted tool call object
- */
-function createToolCall(name: string, args: Record<string, unknown>, callIndex: number): ToolCall {
-	return {
-		id: `call_${Date.now()}_${callIndex}`,
-		function: {
-			name,
-			arguments: JSON.stringify(args)
-		}
-	};
-}
-
-/**
- * Parses tool commands from LLM response content with improved pattern matching
- * Supports patterns like "READ_FILE:", "EDIT_FILE:", "LIST_FILES:"
- * @param content - LLM response content to parse
- * @returns Array of parsed tool calls
- */
-function parseToolCommands(content: string): ToolCall[] {
-	const toolCalls: ToolCall[] = [];
-	let callIndex = 0;
-
-	// Enhanced pattern for READ_FILE: <filepath>
-	const readFilePattern = /READ_FILE:\s*([^\n\r]+)/gi;
-	let match = readFilePattern.exec(content);
-	while (match !== null) {
-		const filePath = match[1].trim();
-		if (filePath) {
-			toolCalls.push(
-				createToolCall(
-					'edit_file',
-					{
-						operation: 'read',
-						filePath
-					},
-					callIndex++
-				)
-			);
-		}
-		match = readFilePattern.exec(content);
-	}
-
-	// Enhanced pattern for LIST_FILES: <directory>
-	const listFilesPattern = /LIST_FILES:\s*([^\n\r]*)/gi;
-	match = listFilesPattern.exec(content);
-	while (match !== null) {
-		const directory = match[1]?.trim() || '';
-		toolCalls.push(createToolCall('list_files', { directoryPath: directory }, callIndex++));
-		match = listFilesPattern.exec(content);
-	}
-
-	// Enhanced pattern for EDIT_FILE: <filepath> followed by content
-	// This pattern captures multi-line content until the next command or end of string
-	const editFilePattern =
-		/EDIT_FILE:\s*([^\n\r]+)(?:\n([\s\S]*?)(?=\n(?:READ_FILE|EDIT_FILE|LIST_FILES):|$))?/gi;
-	match = editFilePattern.exec(content);
-	while (match !== null) {
-		const filePath = match[1].trim();
-		const fileContent = match[2]?.trim() || '';
-
-		if (filePath) {
-			toolCalls.push(
-				createToolCall(
-					'edit_file',
-					{
-						operation: 'create',
-						filePath,
-						content: fileContent,
-						reason: 'User requested file creation via chat'
-					},
-					callIndex++
-				)
-			);
-		}
-		match = editFilePattern.exec(content);
-	}
-
-	// Also look for more natural language patterns for file creation
-	const createFilePattern =
-		/(?:create|make|generate)\s+(?:a\s+)?(?:new\s+)?file\s+(?:called\s+|named\s+)?['""]?([^'""\n\r]+)['""]?(?:\s+with\s+(?:the\s+)?(?:following\s+)?content|:)?\s*\n([\s\S]*?)(?=\n\n|\n(?:create|make|generate)|$)/gi;
-	match = createFilePattern.exec(content);
-	while (match !== null) {
-		const filePath = match[1].trim();
-		const fileContent = match[2]?.trim() || '';
-
-		if (filePath && !filePath.includes(' ')) {
-			// Ensure it looks like a file path
-			toolCalls.push(
-				createToolCall(
-					'edit_file',
-					{
-						operation: 'create',
-						filePath,
-						content: fileContent,
-						reason: 'User requested file creation via natural language'
-					},
-					callIndex++
-				)
-			);
-		}
-		match = createFilePattern.exec(content);
-	}
-
-	return toolCalls;
-}
-
-/**
- * Validates the incoming request data
- * @param data - Request data to validate
- * @throws Error if validation fails
- */
-function validateRequest(data: unknown): asserts data is ChatCompletionRequest {
-	if (!data || typeof data !== 'object') {
-		throw new Error('Invalid request data');
-	}
-
-	const request = data as Partial<ChatCompletionRequest>;
-
-	if (!request.threadId || typeof request.threadId !== 'string') {
-		throw new Error('Missing or invalid threadId');
-	}
-
-	if (!request.content || typeof request.content !== 'string') {
-		throw new Error('Missing or invalid content');
-	}
-}
-
-/**
- * Builds enhanced user message with file context
- * @param content - Original message content
- * @param fileContext - File context information
- * @param contextVariables - Additional context variables
- * @returns Enhanced message content
- */
-function buildEnhancedContent(
-	content: string,
-	fileContext?: ChatCompletionRequest['fileContext'],
-	contextVariables?: ChatCompletionRequest['contextVariables']
-): string {
-	if (!fileContext || !contextVariables) {
-		return content;
-	}
-
-	const fileInfo: string[] = [];
-	if (fileContext.fileName) fileInfo.push(`File: ${fileContext.fileName}`);
-	if (fileContext.filePath) fileInfo.push(`Path: ${fileContext.filePath}`);
-	if (fileContext.language) fileInfo.push(`Language: ${fileContext.language}`);
-
-	let contextInfo = '';
-
-	if (fileInfo.length > 0) {
-		contextInfo += `\n\n**Current File Context:**\n${fileInfo.join('\n')}`;
-	}
-
-	if (contextVariables.selectedCode) {
-		const language = fileContext.language || 'text';
-		contextInfo += `\n\n**Current File Content:**\n\`\`\`${language}\n${contextVariables.selectedCode}\n\`\`\``;
-	}
-
-	if (contextVariables.framework) {
-		contextInfo += `\n\n**Project Framework:** ${contextVariables.framework}`;
-	}
-
-	return content + contextInfo;
-}
-
-/**
- * Creates the enhanced system prompt for tool usage
- * @param projectId - Current project ID
- * @returns System prompt string
- */
-function createToolSystemPrompt(projectId?: string): string {
-	return `You are an AI assistant with access to file editing tools and R2 cloud storage. You can read, create, edit, and manage files in the user's project.
-
-Available tools:
-- edit_file: Create, update, or delete files in the project (stored in R2 cloud storage)
-- read_file: Read file contents from R2 storage
-- list_files: List directory contents
-
-Current project context: ${projectId || 'not specified'}
-Storage: Files are automatically stored in Cloudflare R2 cloud storage for persistence and scalability.
-
-When the user asks you to work with files, you should use the appropriate tools to complete the request.
-
-For file operations, use this format:
-- To create a file: "EDIT_FILE: <filepath>" followed by the content
-- To read a file: "READ_FILE: <filepath>"
-- To list files: "LIST_FILES: <directory>"
-
-Examples:
-- "EDIT_FILE: src/components/Button.svelte" followed by the Svelte component code
-- "READ_FILE: package.json"
-- "LIST_FILES: src/"
-
-All files will be automatically saved to R2 cloud storage with proper versioning and compression for optimal performance.
-
-Please provide both the tool instruction and a natural language explanation of what you're doing.`;
-}
+// Create singleton instance
+const workflowChatService = new WorkflowChatCompletionService();
 
 export const POST: RequestHandler = async ({ request, locals }) => {
 	try {
@@ -535,17 +294,28 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 		// Parse and validate request data
 		const requestData = await request.json();
-		validateRequest(requestData);
+
+		if (!requestData || typeof requestData !== 'object') {
+			throw error(400, 'Invalid request data');
+		}
 
 		const {
 			threadId,
 			content,
-			model = 'gpt-4',
+			model = 'gemini-1.5-flash',
 			fileContext,
 			contextVariables,
 			enableTools = true,
 			projectId
-		} = requestData;
+		} = requestData as ChatCompletionRequest;
+
+		if (!threadId || typeof threadId !== 'string') {
+			throw error(400, 'Missing or invalid threadId');
+		}
+
+		if (!content || typeof content !== 'string') {
+			throw error(400, 'Missing or invalid content');
+		}
 
 		// Verify user has access to this thread
 		const thread = await DatabaseService.findChatThreadById(threadId);
@@ -553,123 +323,23 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			throw error(403, 'Access denied');
 		}
 
-		// Determine effective project ID
-		const effectiveProjectId = projectId || thread.projectId;
-		if (enableTools && !effectiveProjectId) {
-			throw error(400, 'projectId is required when tools are enabled');
-		}
+		// Process chat completion using workflow agent
+		const result = await workflowChatService.processChatCompletion(
+			{
+				threadId,
+				content,
+				model,
+				fileContext,
+				contextVariables,
+				enableTools,
+				projectId
+			},
+			locals.session.user.id,
+			threadId,
+			projectId
+		);
 
-		// Get recent messages for context
-		const recentMessages = await DatabaseService.findChatMessagesByThreadId(threadId, 10, 0);
-
-		// Build conversation context
-		const messages: ChatMessage[] = recentMessages.map((msg) => ({
-			role: msg.role as 'system' | 'user' | 'assistant',
-			content: msg.content
-		}));
-
-		// Build enhanced user message with file context
-		const enhancedContent = buildEnhancedContent(content, fileContext, contextVariables);
-
-		// Add the new user message
-		messages.push({
-			role: 'user',
-			content: enhancedContent
-		});
-
-		// Initialize LLM service
-		const llmService = new LLMService();
-
-		// Prepare base LLM request
-		const baseLLMRequest = {
-			messages: messages.map((msg) => ({
-				role: msg.role,
-				content: msg.content
-			})),
-			model,
-			temperature: 0.7,
-			maxTokens: 2000
-		};
-
-		// Check if model supports tools
-		const supportsTools =
-			model.includes('gpt-4') || model.includes('claude') || model.includes('gemini');
-
-		let aiResponse;
-		let toolCallResults: ToolResult[] = [];
-
-		if (enableTools && supportsTools) {
-			// Get available tools
-			const tools = getToolsForChatCompletion();
-
-			if (tools.length > 0) {
-				// Create enhanced prompt with tool instructions
-				const systemPrompt = createToolSystemPrompt(effectiveProjectId);
-
-				const messagesWithSystem: ChatMessage[] = [
-					{ role: 'system', content: systemPrompt },
-					...messages
-				];
-
-				// Get initial AI response
-				aiResponse = await llmService.invoke({
-					...baseLLMRequest,
-					messages: messagesWithSystem
-				});
-
-				// Parse and execute tool calls
-				const toolCalls = parseToolCommands(aiResponse.content);
-
-				if (toolCalls.length > 0) {
-					// Execute tool calls with enhanced R2 integration
-					toolCallResults = await executeToolCallsFromChat(toolCalls, {
-						projectId: effectiveProjectId,
-						userId: locals.session.user.id
-					});
-
-					// Get follow-up response with tool results
-					if (toolCallResults.length > 0) {
-						const toolResultsMessage: ChatMessage = {
-							role: 'user',
-							content: `Tool execution results:\n${toolCallResults
-								.map((result) => `Tool: ${result.tool_call_id}\nResult: ${result.content}`)
-								.join('\n\n')}\n\nPlease provide a summary of what was accomplished.`
-						};
-
-						const followUpResponse = await llmService.invoke({
-							...baseLLMRequest,
-							messages: [
-								...messagesWithSystem,
-								{ role: 'assistant', content: aiResponse.content },
-								toolResultsMessage
-							]
-						});
-
-						aiResponse = followUpResponse;
-					}
-				}
-			} else {
-				// No tools available, use standard response
-				aiResponse = await llmService.invoke(baseLLMRequest);
-			}
-		} else {
-			// Standard LLM response without tools
-			aiResponse = await llmService.invoke(baseLLMRequest);
-		}
-
-		// Return successful response with enhanced details
-		return json({
-			content: aiResponse.content,
-			usage: aiResponse.usage,
-			toolsUsed: toolCallResults.length > 0,
-			toolResults: toolCallResults,
-			r2StorageUsed:
-				!!effectiveProjectId &&
-				toolCallResults.some(
-					(result) => result.content.includes('R2 storage') || result.content.includes('r2Key')
-				),
-			projectId: effectiveProjectId
-		});
+		return json(result);
 	} catch (err) {
 		console.error('Chat completion error:', err);
 
