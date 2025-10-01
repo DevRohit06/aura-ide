@@ -1,9 +1,10 @@
 import { DatabaseService } from '$lib/services/database.service.js';
+import { listFiles as listFilesService } from '$lib/services/files-list.service';
 import { logger } from '$lib/utils/logger.js';
 import { error, redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ params, cookies, locals }) => {
+export const load: PageServerLoad = async ({ params, cookies, locals, url }) => {
 	const { id } = params;
 
 	// Check if user is authenticated
@@ -56,8 +57,22 @@ export const load: PageServerLoad = async ({ params, cookies, locals }) => {
 			throw error(500, 'Project initialization failed');
 		}
 
+		// If project is initializing, return minimal data and let client handle loading
+		if (project.status === 'initializing') {
+			return {
+				project: serializableProject,
+				setupStatus: null,
+				layout,
+				verticalLayout,
+				user: locals.session!.user,
+				recentMessages: [],
+				projectFiles: [],
+				isInitializing: true
+			};
+		}
+
 		// Load all data in parallel after we have the project
-		const [sandboxStatus, setupStatus, chatData, projectFiles] = await Promise.all([
+		const [sandboxStatus, setupStatus, projectFiles] = await Promise.all([
 			// Sandbox status check
 			project.sandboxId && project.status === 'ready'
 				? (async () => {
@@ -105,118 +120,37 @@ export const load: PageServerLoad = async ({ params, cookies, locals }) => {
 					})()
 				: Promise.resolve(null),
 
-			// Setup status fetch
-			project.status === 'initializing'
-				? (async () => {
-						try {
-							// Try to get project status from the status API
-							const response = await fetch(
-								`${process.env.ORIGIN || 'http://localhost:5173'}/api/projects/${id}/status`,
-								{
-									headers: {
-										cookie: `session=${cookies.get('session') || ''}`
-									}
-								}
-							);
-
-							if (response.ok) {
-								const statusData = await response.json();
-								return statusData.data;
-							}
-						} catch (error) {
-							console.warn('Failed to fetch project setup status:', error);
-						}
-						return null;
-					})()
-				: Promise.resolve(null),
-
-			// Chat data fetch
-			(async () => {
-				let chatThreads: any[] = [];
-				let recentMessages: any[] = [];
-				try {
-					// Get recent threads for this project
-					const threads = await DatabaseService.searchChatThreads({
-						userId: locals.session!.user.id,
-						projectId: id,
-						isArchived: false,
-						sortBy: 'lastMessageAt',
-						sortOrder: 'desc',
-						limit: 20
-					});
-
-					chatThreads = threads.map((thread) => ({
-						id: thread.id,
-						title: thread.title,
-						description: thread.description,
-						isArchived: thread.isArchived,
-						isPinned: thread.isPinned,
-						tags: thread.tags,
-						lastMessageAt: thread.lastMessageAt?.toISOString(),
-						statistics: thread.statistics,
-						createdAt: thread.createdAt?.toISOString(),
-						updatedAt: thread.updatedAt?.toISOString()
-					}));
-
-					// Get recent messages from the most recent thread OR across project if no specific thread
-					if (chatThreads.length > 0) {
-						const mostRecentThread = chatThreads[0];
-						const messages = await DatabaseService.findChatMessagesByThreadId(
-							mostRecentThread.id,
-							50,
-							0
-						);
-						recentMessages = messages.map((message) => ({
-							id: message.id,
-							threadId: message.threadId,
-							projectId: message.projectId,
-							userId: message.userId,
-							content: message.content,
-							contentMarkdown: message.contentMarkdown,
-							role: message.role,
-							timestamp: message.timestamp?.toISOString(),
-							parentMessageId: message.parentMessageId,
-							metadata: message.metadata
-						}));
-					} else {
-						// If no threads exist yet, get recent project messages across all potential threads
-						const messages = await DatabaseService.getRecentMessagesForProject(
-							id,
-							locals.session!.user.id,
-							20
-						);
-						recentMessages = messages.map((message) => ({
-							id: message.id,
-							threadId: message.threadId,
-							projectId: message.projectId,
-							userId: message.userId,
-							content: message.content,
-							contentMarkdown: message.contentMarkdown,
-							role: message.role,
-							timestamp: message.timestamp?.toISOString(),
-							parentMessageId: message.parentMessageId,
-							metadata: message.metadata
-						}));
-					}
-				} catch (error) {
-					console.warn('Failed to fetch chat data:', error);
-					// Don't fail the entire page load if chat data fails
-				}
-				return { chatThreads, recentMessages };
-			})(),
+			// Setup status fetch (not needed since we handle initializing above)
+			Promise.resolve(null),
 
 			// Project files fetch
 			(async () => {
 				let projectFiles: any[] = [];
 				try {
 					if (project.sandboxProvider === 'daytona' && project.sandboxId) {
-						// For Daytona projects, fetch files from the sandbox
-						const { DaytonaService } = await import('$lib/services/sandbox/daytona.service.js');
-						const daytonaService = DaytonaService.getInstance();
-						projectFiles = await daytonaService.listFiles(project.sandboxId, '');
-						logger.info(
-							`Loaded ${projectFiles.length} files from Daytona sandbox for project ${id}`
-						);
+						// Instead of calling the DaytonaService directly, use the unified files API
+						// This ensures the same batching/snippet behavior for Daytona as other providers.
+						try {
+							// Request async snippet loading to keep page load fast; the page can await the promises
+							const filesResult = await listFilesService(
+								{ projectId: project.id, sandboxId: project.sandboxId, path: '' },
+								{ includeSnippets: 'sync', batchSize: 10 }
+							);
+							projectFiles = Array.isArray(filesResult?.files) ? filesResult.files : [];
+
+							logger.info('filesResult', projectFiles);
+
+							logger.info(
+								'Project files from Daytona (via service, async snippets):',
+								projectFiles.length
+							);
+						} catch (error) {
+							logger.error(
+								`Failed to load files via listFilesService for Daytona for project ${id}:`,
+								error
+							);
+							projectFiles = [];
+						}
 					} else if (project.sandboxProvider === 'e2b' && project.id) {
 						// For E2B projects, fetch files from R2 via internal API
 						const response = await fetch(
@@ -230,6 +164,7 @@ export const load: PageServerLoad = async ({ params, cookies, locals }) => {
 						if (response.ok) {
 							const files = await response.json();
 							projectFiles = Array.isArray(files) ? files : [];
+							logger.info('Project files from R2 API:', projectFiles);
 							logger.info(`Loaded ${projectFiles.length} files from R2 storage for project ${id}`);
 						} else {
 							logger.warn(`Failed to fetch files from R2 API: ${response.status}`);
@@ -247,17 +182,14 @@ export const load: PageServerLoad = async ({ params, cookies, locals }) => {
 			})()
 		]);
 
-		console.log('chats', chatData.chatThreads.length, 'messages', chatData.recentMessages.length);
-		console.log('chat threads', chatData.chatThreads);
 		return {
 			project: serializableProject,
 			setupStatus,
 			layout,
 			verticalLayout,
 			user: locals.session!.user,
-			chatThreads: chatData.chatThreads,
-			recentMessages: chatData.recentMessages,
-			projectFiles
+			projectFiles,
+			isInitializing: false
 		};
 	} catch (err) {
 		console.error('Error loading project:', err);

@@ -11,12 +11,13 @@
 	// import ChatSidebar from '@/components/chat/chat-sidebar.svelte';
 
 	let { data } = $props();
+	const pageData = data as any;
 
 	// Initialize files store with server-loaded data
 	$effect(() => {
-		if (data.files && data.files.length > 0) {
-			fileActions.loadFiles(data.files);
-			console.log(`Loaded ${data.files.length} files from server`);
+		if (pageData.files && pageData.files.length > 0) {
+			fileActions.loadFiles(pageData.files);
+			console.log(`Loaded ${pageData.files.length} files from server`);
 		}
 	});
 
@@ -30,6 +31,21 @@
 
 	// Get current file and breadcrumbs
 	let currentFile = $derived($activeFileId ? $filesStore.get($activeFileId) : null);
+
+	import { indexAllFilesFromStore } from '$lib/services/vector-indexer.client';
+	import { onMount } from 'svelte';
+
+	onMount(() => {
+		// Give the file loader a chance to populate the store then kick off indexing
+		setTimeout(async () => {
+			try {
+				await indexAllFilesFromStore({ projectId: 'default', async: true });
+				console.log('Triggered background indexing for current workspace files');
+			} catch (err) {
+				console.warn('Failed to trigger workspace indexing on mount:', err);
+			}
+		}, 50);
+	});
 </script>
 
 <svelte:head>
@@ -40,21 +56,21 @@
 	<Sidebar.Provider>
 		<Resizable.Pane
 			collapsible
-			defaultSize={data.layout ? data.layout[0] : 20}
+			defaultSize={pageData.layout ? pageData.layout[0] : 20}
 			maxSize={20}
 			minSize={20}
 		>
 			<EnhancedSidebar />
 		</Resizable.Pane>
 		<Resizable.Handle />
-		<Resizable.Pane defaultSize={data.layout ? data.layout[1] : 80} class="h-full">
+		<Resizable.Pane defaultSize={pageData.layout ? pageData.layout[1] : 80} class="h-full">
 			<Resizable.PaneGroup
 				onLayoutChange={(layout: number[]) => onVerticalLayoutChange(layout)}
 				direction="vertical"
 				class="max-h-dvh overflow-hidden"
 			>
 				<Resizable.Pane
-					defaultSize={data.verticalLayout ? data.verticalLayout[0] : 80}
+					defaultSize={pageData.verticalLayout ? pageData.verticalLayout[0] : 80}
 					class="flex h-full flex-col"
 				>
 					<div class="">
@@ -82,7 +98,7 @@
 					{/if}
 				</Resizable.Pane>
 				<Resizable.Handle />
-				<Resizable.Pane defaultSize={data.verticalLayout ? data.verticalLayout[1] : 20}>
+				<Resizable.Pane defaultSize={pageData.verticalLayout ? pageData.verticalLayout[1] : 20}>
 					<TerminalManager />
 				</Resizable.Pane>
 			</Resizable.PaneGroup>
@@ -90,7 +106,7 @@
 		<Resizable.Handle />
 		<Resizable.Pane
 			collapsible
-			defaultSize={data.layout ? data.layout[2] : 20}
+			defaultSize={pageData.layout ? pageData.layout[2] : 20}
 			maxSize={40}
 			minSize={20}
 			class="h-full w-fit"

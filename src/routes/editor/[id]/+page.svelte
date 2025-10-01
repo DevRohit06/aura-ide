@@ -12,7 +12,7 @@
 	import { projectActions } from '$lib/stores/current-project.store.js';
 	import { activeFileId, fileActions, filesStore } from '$lib/stores/editor.js';
 	import { createBreadcrumbs } from '$lib/utils/file-tree';
-	import { onDestroy, onMount } from 'svelte';
+	import { onMount } from 'svelte';
 	// Icons
 	import { TerminalManager } from '$lib/components/shared/terminal';
 	import ChatSidebar from '@/components/chat/chat-sidebar.svelte';
@@ -22,28 +22,47 @@
 	// Types
 
 	let { data } = $props();
+	const pageData = data as any;
 
 	// Enhanced sidebar state
 	let useEnhancedSidebar = $state(false);
 
 	function onLayoutChange(sizes: number[]) {
-		document.cookie = `PaneForge:layout=${JSON.stringify(sizes)}`;
+		try {
+			document.cookie = `PaneForge:layout=${JSON.stringify(sizes)}`;
+		} catch (err) {
+			console.debug('Failed to persist layout to cookie', err);
+		}
 	}
 
 	function onVerticalLayoutChange(sizes: number[]) {
-		document.cookie = `PaneForge:vertical-layout=${JSON.stringify(sizes)}`;
+		try {
+			document.cookie = `PaneForge:vertical-layout=${JSON.stringify(sizes)}`;
+		} catch (err) {
+			console.debug('Failed to persist vertical layout to cookie', err);
+		}
 	}
 
-	// Get current file and breadcrumbs
+	// Reactive current file and breadcrumbs using $derived helper
 	let currentFile = $derived($activeFileId ? $filesStore.get($activeFileId) : null);
 	let breadcrumbs = $derived(currentFile ? createBreadcrumbs(currentFile.path) : []);
 
-	// Project data
-	let project = $derived(data.project);
-	let setupStatus = $derived(data.setupStatus);
-	let isProjectReady = $derived(project?.status === 'ready');
-	let isProjectInitializing = $derived(project?.status === 'initializing');
+	// Project data (derived from page `data` prop)
+	let project = $derived(pageData.project);
+	let setupStatus = $derived(pageData.setupStatus);
+	let isProjectReady = $derived(project?.status === 'ready' && !pageData.isInitializing);
+	let isProjectInitializing = $derived(pageData.isInitializing === true);
 	let isProjectError = $derived(project?.status === 'error');
+
+	// Loading state for initialization
+	let initProgress = $state(0);
+	let initStatus = $state('Initializing...');
+	let initSteps = $state<Array<{ name: string; status: 'pending' | 'loading' | 'complete' | 'error'; message?: string }>>([
+		{ name: 'Loading project', status: 'loading' },
+		{ name: 'Starting sandbox', status: 'pending' },
+		{ name: 'Loading files', status: 'pending' },
+		{ name: 'Indexing workspace', status: 'pending' }
+	]);
 
 	// Daytona connection management
 	let daytonaConnectionRegistered = $state(false);
@@ -85,36 +104,122 @@
 		}
 	}
 
-	onMount(() => {
-		// Set current project ID for global access
-		if (project?.id) {
-			projectActions.setCurrentProject(project.id);
-		}
+	$effect(() => {
+		console.log('📊 Page data received:', {
+			hasProjectFiles: !!pageData.projectFiles,
+			projectFilesLength: pageData.projectFiles?.length || 0,
+			projectFilesType: typeof pageData.projectFiles,
+			projectId: project?.id
+		});
 
-		// Initialize files store with data from server
-		if (data.projectFiles && data.projectFiles.length > 0) {
-			// Clear existing files and load new ones from server
-			filesStore.set(new Map());
-			data.projectFiles.forEach((file: any) => {
-				fileActions.addFile(file);
-			});
-			console.log(`Loaded ${data.projectFiles.length} files from server into file store`);
-		}
-
-		// Add event listeners for page unload (only in browser)
-		if (browser) {
-			window.addEventListener('beforeunload', handleBeforeUnload);
-			window.addEventListener('unload', handleBeforeUnload);
-			window.addEventListener('keydown', handleKeydown);
+		if (pageData.projectFiles && pageData.projectFiles.length > 0) {
+			console.log('📁 Sample project files:', pageData.projectFiles.slice(0, 3));
+			fileActions.loadFiles(pageData.projectFiles);
+			console.log(`📁 Loaded ${pageData.projectFiles.length} files from server`);
+		} else {
+			console.warn('⚠️ No project files received from server');
+			console.log('Available pageData keys:', Object.keys(pageData));
 		}
 	});
 
-	onDestroy(() => {
-		if (browser) {
-			window.removeEventListener('beforeunload', handleBeforeUnload);
-			window.removeEventListener('unload', handleBeforeUnload);
-			window.removeEventListener('keydown', handleKeydown);
+	// Poll initialization status if project is initializing
+	async function pollInitStatus() {
+		if (!isProjectInitializing) return;
+
+		try {
+			const response = await fetch(`/api/projects/${project.id}/init-status`);
+			if (response.ok) {
+				const data = await response.json();
+				initProgress = data.progress || 0;
+				initStatus = data.message || 'Initializing...';
+				if (data.steps) {
+					initSteps = data.steps;
+				}
+
+				// If complete, reload the page
+				if (data.complete) {
+					window.location.reload();
+				} else if (!data.error) {
+					// Continue polling
+					setTimeout(pollInitStatus, 1000);
+				}
+			}
+		} catch (error) {
+			console.error('Failed to poll init status:', error);
+			setTimeout(pollInitStatus, 2000);
 		}
+	}
+
+	onMount(() => {
+		// If project is initializing, start polling
+		if (isProjectInitializing) {
+			pollInitStatus();
+			return;
+		}
+
+		// Single initialization block: set project and load files, register listeners, and kick off indexing
+		try {
+			const pid = project?.id || pageData?.project?.id || 'default';
+			if (pid) {
+				projectActions.setCurrentProject(pid);
+			}
+
+			// Load files from server only once
+			const serverFiles: any[] = pageData?.projectFiles || [];
+			console.log('🔍 Server files data:', {
+				hasServerFiles: !!serverFiles,
+				serverFilesLength: serverFiles.length,
+				firstFile: serverFiles[0] || null
+			});
+
+			if (serverFiles && serverFiles.length > 0) {
+				filesStore.set(new Map());
+				for (const file of serverFiles) fileActions.addFile(file);
+				console.log(`📁 Loaded ${serverFiles.length} files from server into file store`);
+
+				// Debug: check what's actually in the store
+				setTimeout(() => {
+					console.log('📂 Files store after loading:', {
+						storeSize: $filesStore.size,
+						fileKeys: Array.from($filesStore.keys()).slice(0, 5)
+					});
+				}, 100);
+			} else {
+				console.warn('⚠️ No server files to load into file store');
+			}
+
+			// Register lifecycle listeners (only in browser)
+			if (browser) {
+				window.addEventListener('beforeunload', handleBeforeUnload);
+				window.addEventListener('unload', handleBeforeUnload);
+				window.addEventListener('keydown', handleKeydown);
+			}
+
+			// Kick off background indexing (non-blocking). Use actual project id when possible.
+			(async () => {
+				try {
+					const indexingProjectId = project?.id || pageData?.project?.id || 'default';
+					console.log(`🔍 Triggering background indexing for project: ${indexingProjectId}`);
+					const result = await indexAllFilesFromStore({
+						projectId: indexingProjectId,
+						async: true
+					});
+					console.log('✅ Background indexing result:', result);
+				} catch (err) {
+					console.error('❌ Failed to trigger workspace indexing on mount:', err);
+				}
+			})();
+		} catch (err) {
+			console.error('Editor page mount error:', err);
+		}
+
+		return () => {
+			if (browser) {
+				window.removeEventListener('beforeunload', handleBeforeUnload);
+				window.removeEventListener('unload', handleBeforeUnload);
+				window.removeEventListener('keydown', handleKeydown);
+			}
+		};
 	});
 
 	function handleRetrySetup() {
@@ -125,6 +230,8 @@
 	function handleGoToDashboard() {
 		goto('/dashboard');
 	}
+
+	import { indexAllFilesFromStore } from '$lib/services/vector-indexer.client';
 </script>
 
 <svelte:head>
@@ -154,12 +261,67 @@
 		</div>
 	</div>
 {:else if isProjectInitializing}
-	<div class="flex h-screen items-center justify-center p-4">
-		<div class="w-full max-w-md space-y-4">
+	<div class="flex h-screen items-center justify-center bg-background p-4">
+		<div class="w-full max-w-md space-y-6">
+			<!-- Header -->
 			<div class="text-center">
-				<LoaderIcon class="mx-auto h-8 w-8 animate-spin text-muted-foreground" />
-				<h2 class="mt-4 text-xl font-semibold">Setting up {project.name}</h2>
-				<p class="mt-2 text-sm text-muted-foreground">
+				<h1 class="text-2xl font-bold">Aura IDE</h1>
+				<p class="mt-2 text-sm text-muted-foreground">Preparing {project.name}</p>
+			</div>
+
+			<!-- Progress Bar -->
+			<div class="space-y-2">
+				<Progress value={initProgress} class="h-2" />
+				<p class="text-center text-sm text-muted-foreground">{Math.round(initProgress)}%</p>
+			</div>
+
+			<!-- Current Status -->
+			<div class="text-center">
+				<div class="flex items-center justify-center gap-2">
+					<LoaderIcon class="h-4 w-4 animate-spin" />
+					<p class="text-sm font-medium">{initStatus}</p>
+				</div>
+			</div>
+
+			<!-- Steps -->
+			<div class="space-y-3">
+				{#each initSteps as step}
+					<div class="flex items-center gap-3 rounded-lg border p-3 {step.status === 'complete' ? 'bg-green-50 dark:bg-green-950/20' : step.status === 'loading' ? 'bg-blue-50 dark:bg-blue-950/20' : step.status === 'error' ? 'bg-red-50 dark:bg-red-950/20' : ''}">
+						<!-- Status Icon -->
+						<div class="flex-shrink-0">
+							{#if step.status === 'complete'}
+								<div class="flex h-6 w-6 items-center justify-center rounded-full bg-green-500 text-white">
+									<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+									</svg>
+								</div>
+							{:else if step.status === 'loading'}
+								<div class="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+							{:else if step.status === 'error'}
+								<div class="flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-white">
+									<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+									</svg>
+								</div>
+							{:else}
+								<div class="h-6 w-6 rounded-full border-2 border-muted"></div>
+							{/if}
+						</div>
+
+						<!-- Step Info -->
+						<div class="flex-1">
+							<p class="text-sm font-medium">{step.name}</p>
+							{#if step.message}
+								<p class="text-xs text-muted-foreground">{step.message}</p>
+							{/if}
+						</div>
+					</div>
+				{/each}
+			</div>
+
+			<!-- Tip -->
+			<div class="rounded-lg bg-muted/50 p-4 text-center">
+				<p class="text-xs text-muted-foreground">
 					{setupStatus?.message || 'Initializing project environment...'}
 				</p>
 			</div>
@@ -252,11 +414,7 @@
 				class="h-full w-fit"
 			>
 				{#if browser}
-					<ChatSidebar
-						{project}
-						chatThreads={data.chatThreads}
-						recentMessages={data.recentMessages}
-					/>
+					<ChatSidebar {project} />
 				{/if}
 			</Resizable.Pane>
 		</Sidebar.Provider>
