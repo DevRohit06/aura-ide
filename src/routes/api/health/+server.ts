@@ -4,7 +4,6 @@
  */
 
 import { DatabaseService } from '$lib/services/database.service';
-import { SandboxProviderFactory } from '$lib/services/sandbox/provider-factory';
 import { webSocketService } from '$lib/services/websocket.service';
 import { json, type RequestHandler } from '@sveltejs/kit';
 
@@ -14,7 +13,6 @@ interface HealthCheck {
 	services: {
 		database: ServiceHealth;
 		websocket: ServiceHealth;
-		sandbox_providers: ServiceHealth;
 		file_storage: ServiceHealth;
 		template_service: ServiceHealth;
 	};
@@ -44,7 +42,6 @@ export const GET: RequestHandler = async () => {
 		services: {
 			database: await checkDatabaseHealth(),
 			websocket: await checkWebSocketHealth(),
-			sandbox_providers: await checkSandboxProvidersHealth(),
 			file_storage: await checkFileStorageHealth(),
 			template_service: await checkTemplateServiceHealth()
 		},
@@ -67,6 +64,12 @@ export const GET: RequestHandler = async () => {
 
 	return json(healthCheck, {
 		status: healthCheck.status === 'healthy' ? 200 : healthCheck.status === 'degraded' ? 200 : 503
+	});
+};
+
+export const HEAD: RequestHandler = async () => {
+	return new Response(null, {
+		status: 200
 	});
 };
 
@@ -114,76 +117,6 @@ async function checkWebSocketHealth(): Promise<ServiceHealth> {
 			response_time: Date.now() - startTime,
 			last_check: new Date().toISOString(),
 			error: error instanceof Error ? error.message : 'WebSocket service failed'
-		};
-	}
-}
-
-async function checkSandboxProvidersHealth(): Promise<ServiceHealth> {
-	const startTime = Date.now();
-
-	try {
-		// Get available providers from factory
-		const factory = SandboxProviderFactory.getInstance();
-		const availableProviders = factory.getAvailableProviders();
-
-		const healthResults: Array<{
-			name: string;
-			status: 'healthy' | 'degraded' | 'unhealthy';
-			latency: number;
-			error?: string;
-		}> = [];
-
-		// Test each provider
-		for (const providerName of availableProviders) {
-			try {
-				const provider = factory.createProvider(providerName);
-				const healthResult = await provider.healthCheck();
-
-				healthResults.push({
-					name: providerName,
-					status: healthResult.healthy ? 'healthy' : 'unhealthy',
-					latency: healthResult.latency,
-					error: healthResult.error
-				});
-			} catch (error) {
-				healthResults.push({
-					name: providerName,
-					status: 'unhealthy',
-					latency: 0,
-					error: error instanceof Error ? error.message : 'Health check failed'
-				});
-			}
-		}
-
-		const healthyProviders = healthResults.filter((p) => p.status === 'healthy');
-		const status =
-			healthyProviders.length === 0
-				? 'unhealthy'
-				: healthyProviders.length < availableProviders.length
-					? 'degraded'
-					: 'healthy';
-
-		return {
-			status,
-			response_time: Date.now() - startTime,
-			last_check: new Date().toISOString(),
-			details: {
-				total_providers: availableProviders.length,
-				healthy_providers: healthyProviders.length,
-				providers: healthResults.map((p) => ({
-					name: p.name,
-					status: p.status,
-					latency: p.latency,
-					error: p.error
-				}))
-			}
-		};
-	} catch (error) {
-		return {
-			status: 'unhealthy',
-			response_time: Date.now() - startTime,
-			last_check: new Date().toISOString(),
-			error: error instanceof Error ? error.message : 'Sandbox providers check failed'
 		};
 	}
 }

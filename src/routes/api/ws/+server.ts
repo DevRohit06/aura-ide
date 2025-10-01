@@ -12,6 +12,7 @@ import type {
 } from '$lib/services/websocket.service';
 import type { RequestHandler } from '@sveltejs/kit';
 import type { WebSocket } from 'ws';
+import WebSocketClient from 'ws';
 
 // WebSocket server setup
 let wss: any = null;
@@ -48,21 +49,22 @@ const fileWatchers = new Map<
 	}
 >();
 
+// Terminal proxy sessions map: proxySessionId -> provider ws client and client connections
+const terminalProxySessions = new Map<
+	string,
+	{
+		providerWs?: WebSocket;
+		sandboxId: string;
+		clients: Set<string>;
+	}
+>();
+
 /**
- * Initialize WebSocket server
+ * Initialize WebSocket server (no longer needed with SvelteKit upgrade handling)
  */
 function initializeWebSocketServer() {
-	if (typeof window !== 'undefined') {
-		return; // Client-side, skip server initialization
-	}
-
-	try {
-		// Note: In a real implementation, you'd properly set up the WebSocket server
-		// This is a simplified version for demonstration
-		console.log('WebSocket server would be initialized here');
-	} catch (error) {
-		console.error('Failed to initialize WebSocket server:', error);
-	}
+	// WebSocket server is now handled by SvelteKit's GET handler
+	console.log('WebSocket server initialization delegated to SvelteKit');
 }
 
 /**
@@ -114,7 +116,7 @@ async function handleMessage(connectionId: string, message: AnyWebSocketMessage)
 	if (!connection) return;
 
 	try {
-		switch (message.type) {
+		switch ((message as any).type) {
 			case 'terminal_create':
 				await handleTerminalCreate(connectionId, message as TerminalMessage);
 				break;
@@ -149,6 +151,18 @@ async function handleMessage(connectionId: string, message: AnyWebSocketMessage)
 
 			case 'cursor_position':
 				await handleCursorPosition(connectionId, message as CollaborationMessage);
+				break;
+
+			case 'terminal_proxy_start':
+				await handleTerminalProxyStart(connectionId, message);
+				break;
+
+			case 'terminal_proxy_input':
+				await handleTerminalProxyInput(connectionId, message);
+				break;
+
+			case 'terminal_proxy_close':
+				await handleTerminalProxyClose(connectionId, message);
 				break;
 
 			default:
@@ -479,15 +493,191 @@ function simulateCommandExecution(command: string): string {
 	}
 }
 
+async function handleTerminalProxyStart(connectionId: string, message: any) {
+	const connection = connections.get(connectionId);
+	if (!connection) throw new Error('Connection not found');
+
+	const { sandboxId, preferredWsUrl, shell, dimensions, clientSessionId, providerSessionId } =
+		message.data || {};
+
+	if (!sandboxId) throw new Error('sandboxId is required to start proxy');
+
+	// Authorization check: ensure the WebSocket connection is associated with the same sandbox
+	if (connection.sandboxId && connection.sandboxId !== sandboxId) {
+		throw new Error('Unauthorized to open terminal proxy for this sandbox');
+	}
+
+	// Ask the SandboxManager for the provider for this sandbox and create a provider-side session
+	const { sandboxManager } = await import('$lib/services/sandbox/sandbox-manager');
+	const provider = await sandboxManager.getProviderForSandbox(sandboxId);
+
+	// Attempt to create/connect the provider terminal session
+	const providerConnection = await provider.connectTerminal(sandboxId, {
+		shell,
+		rows: dimensions?.rows,
+		cols: dimensions?.cols
+	});
+
+	// If provider returned an absolute wsUrl, open a ws client to the provider and proxy data
+	const providerWsUrl = providerConnection?.wsUrl;
+	const proxySessionId =
+		providerConnection?.sessionId ||
+		`proxy_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+	// Create proxy session entry
+	terminalProxySessions.set(proxySessionId, { sandboxId, clients: new Set([connectionId]) });
+
+	if (providerWsUrl && providerWsUrl.startsWith('ws')) {
+		// Open client to provider and pipe messages back to the requesting client(s)
+		const providerClient = new WebSocketClient(providerWsUrl as string);
+		terminalProxySessions.get(proxySessionId)!.providerWs = providerClient;
+
+		providerClient.on('open', () => {
+			// Notify the requesting client that proxy is ready
+			const conn = connections.get(connectionId);
+			conn?.ws.send(JSON.stringify({ type: 'terminal_proxy_ready', data: { proxySessionId } }));
+		});
+
+		providerClient.on('message', (data: Buffer | string) => {
+			// Broadcast to all clients connected to this proxy session
+			const session = terminalProxySessions.get(proxySessionId);
+			if (!session) return;
+			for (const clientId of session.clients) {
+				const clientConn = connections.get(clientId);
+				if (clientConn) {
+					clientConn.ws.send(
+						JSON.stringify({
+							type: 'terminal_proxy_data',
+							data: { proxySessionId, content: typeof data === 'string' ? data : data.toString() }
+						})
+					);
+				}
+			}
+		});
+
+		providerClient.on('error', (err) => {
+			const session = terminalProxySessions.get(proxySessionId);
+			if (session) {
+				for (const clientId of session.clients) {
+					const clientConn = connections.get(clientId);
+					clientConn?.ws.send(
+						JSON.stringify({
+							type: 'terminal_proxy_error',
+							data: { proxySessionId, error: String(err) }
+						})
+					);
+				}
+			}
+		});
+
+		providerClient.on('close', () => {
+			const session = terminalProxySessions.get(proxySessionId);
+			if (session) {
+				for (const clientId of session.clients) {
+					const clientConn = connections.get(clientId);
+					clientConn?.ws.send(
+						JSON.stringify({ type: 'terminal_proxy_closed', data: { proxySessionId } })
+					);
+				}
+				terminalProxySessions.delete(proxySessionId);
+			}
+		});
+	} else if (providerConnection?.sshConnection) {
+		// Provider only supports SSH — inform client
+		const conn = connections.get(connectionId);
+		conn?.ws.send(
+			JSON.stringify({
+				type: 'terminal_proxy_ssh',
+				data: {
+					proxySessionId,
+					ssh: providerConnection.sshConnection,
+					publicUrl: providerConnection.publicUrl
+				}
+			})
+		);
+	} else {
+		// No wsUrl and no ssh — indicate that only publicUrl may be available
+		const conn = connections.get(connectionId);
+		conn?.ws.send(
+			JSON.stringify({
+				type: 'terminal_proxy_error',
+				data: { proxySessionId, error: 'Provider did not return a usable terminal URL' }
+			})
+		);
+	}
+}
+
+async function handleTerminalProxyInput(connectionId: string, message: any) {
+	const { proxySessionId, content } = message.data || {};
+	if (!proxySessionId || typeof content !== 'string')
+		throw new Error('proxySessionId and content required');
+
+	const session = terminalProxySessions.get(proxySessionId);
+	if (!session || !session.providerWs)
+		throw new Error('Proxy session not found or provider not connected');
+
+	// Write to provider
+	try {
+		session.providerWs.send(content);
+	} catch (err) {
+		const conn = connections.get(connectionId);
+		conn?.ws.send(
+			JSON.stringify({ type: 'terminal_proxy_error', data: { proxySessionId, error: String(err) } })
+		);
+	}
+}
+
+async function handleTerminalProxyClose(connectionId: string, message: any) {
+	const { proxySessionId } = message.data || {};
+	if (!proxySessionId) throw new Error('proxySessionId required');
+
+	const session = terminalProxySessions.get(proxySessionId);
+	if (session) {
+		// Disconnect provider WS and notify clients
+		if (session.providerWs) {
+			try {
+				session.providerWs.close();
+			} catch (err) {
+				// ignore
+			}
+		}
+		for (const clientId of session.clients) {
+			const clientConn = connections.get(clientId);
+			clientConn?.ws.send(
+				JSON.stringify({ type: 'terminal_proxy_closed', data: { proxySessionId } })
+			);
+		}
+		terminalProxySessions.delete(proxySessionId);
+	}
+}
+
 // Initialize the WebSocket server
 initializeWebSocketServer();
 
-// SvelteKit API handler (placeholder - WebSocket upgrade happens at server level)
-export const GET: RequestHandler = async ({ url }) => {
-	return new Response('WebSocket endpoint - upgrade required', {
-		status: 426,
-		headers: {
-			Upgrade: 'websocket'
-		}
+// SvelteKit API handler for WebSocket upgrade
+export const GET: RequestHandler = async ({ request }) => {
+	const upgradeHeader = request.headers.get('upgrade');
+	if (upgradeHeader !== 'websocket') {
+		return new Response('Expected websocket', { status: 400 });
+	}
+
+	const { socket, response } = await import('ws').then(({ WebSocketServer }) => {
+		const wss = new WebSocketServer({ noServer: true });
+		return new Promise<{ socket: WebSocket; response: Response }>((resolve) => {
+			wss.handleUpgrade(request as any, request as any, Buffer.alloc(0), (ws) => {
+				resolve({
+					socket: ws,
+					response: new Response(null, { status: 101 })
+				});
+			});
+		});
 	});
+
+	// Generate unique connection ID
+	const connectionId = `ws_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+	// Handle the new connection
+	handleConnection(socket, connectionId);
+
+	return response;
 };
