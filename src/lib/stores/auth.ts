@@ -1,10 +1,12 @@
 import { browser } from '$app/environment';
 import { goto } from '$app/navigation';
-import { authClient } from '$lib/auth.client';
+import { createAuthClient } from 'better-auth/client';
 import { derived } from 'svelte/store';
 
+const authClient = createAuthClient();
+
 // Use Better Auth's reactive session store
-const session = authClient.useSession();
+const session = authClient.useSession;
 
 // Create derived stores for easier use
 export const user = derived(session, ($session) => $session.data?.user || null);

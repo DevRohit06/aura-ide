@@ -22,16 +22,20 @@ export const auth = betterAuth({
 		requireEmailVerification: false // Can be enabled later
 	},
 	socialProviders: {
-		google: {
-			clientId: env.GOOGLE_CLIENT_ID || '',
-			clientSecret: env.GOOGLE_CLIENT_SECRET || '',
-			enabled: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET)
-		},
-		github: {
-			clientId: env.GITHUB_CLIENT_ID || '',
-			clientSecret: env.GITHUB_CLIENT_SECRET || '',
-			enabled: !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET)
-		}
+		...(env.GOOGLE_CLIENT_ID &&
+			env.GOOGLE_CLIENT_SECRET && {
+				google: {
+					clientId: env.GOOGLE_CLIENT_ID,
+					clientSecret: env.GOOGLE_CLIENT_SECRET
+				}
+			}),
+		...(env.GITHUB_CLIENT_ID &&
+			env.GITHUB_CLIENT_SECRET && {
+				github: {
+					clientId: env.GITHUB_CLIENT_ID,
+					clientSecret: env.GITHUB_CLIENT_SECRET
+				}
+			})
 	},
 	session: {
 		expiresIn: 60 * 60 * 24 * 7, // 7 days
