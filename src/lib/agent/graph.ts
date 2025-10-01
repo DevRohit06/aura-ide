@@ -119,7 +119,7 @@ async function humanReviewNode(state: typeof AgentState.State) {
 	if (toolCallsArray && toolCallsArray.length) {
 		// Filter out any null/undefined items
 		const validToolCalls = toolCallsArray.filter((tc: any) => tc != null);
-		
+
 		// If any tool call is in the sensitive list, request human review
 		if (validToolCalls.some((tc: any) => tc?.name && sensitive.has(tc.name))) {
 			logger.info(
