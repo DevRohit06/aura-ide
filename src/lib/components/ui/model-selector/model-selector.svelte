@@ -1,10 +1,12 @@
 <script lang="ts">
+	import modelCatalog from '$lib/data/models.json';
 	import { Badge } from '@/components/ui/badge';
 	import * as Command from '@/components/ui/command';
 	import * as DropdownMenu from '@/components/ui/dropdown-menu';
 	import { Separator } from '@/components/ui/separator';
 	import { LLM_PROVIDERS } from '@/types/llm.types';
 	import { Check, ChevronDown, Code, Eye, SquareFunction, Zap } from 'lucide-svelte';
+	import { createEventDispatcher } from 'svelte';
 
 	let {
 		value = $bindable(),
@@ -23,30 +25,82 @@
 	let open = $state(false);
 	let searchValue = $state('');
 
-	// Get all models grouped by provider
+	// Build provider groups from the static model catalog
 	const providerGroups = $derived.by(() => {
-		return Object.values(LLM_PROVIDERS).filter((provider) =>
-			provider.models.some(
-				(model) =>
-					model.name.toLowerCase().includes(searchValue.toLowerCase()) ||
-					model.id.toLowerCase().includes(searchValue.toLowerCase())
+		const catalogModels = (modelCatalog as any)?.data?.models || [];
+		const groups: Record<string, any> = {};
+		for (const entry of catalogModels) {
+			const provider =
+				entry.endpoints?.[0]?.providerSlug || entry.endpoints?.[0]?.provider || 'other';
+			if (!groups[provider])
+				groups[provider] = { name: provider, displayName: provider, models: [] };
+
+			// derive a simplified model descriptor used by the UI
+			const firstEp = entry.endpoints && entry.endpoints[0] ? entry.endpoints[0] : null;
+			const pricing = firstEp?.endpoint?.pricing?.[0] || firstEp?.pricing?.[0] || {};
+			const inputCost = pricing.input ? pricing.input * 1e6 : undefined;
+			const outputCost = pricing.output ? pricing.output * 1e6 : undefined;
+			const capabilities = {
+				text: true,
+				vision: Array.isArray(entry.inputModalities) && entry.inputModalities.includes('image'),
+				functionCalling:
+					(entry.supportedParameters || []).includes('tools') ||
+					(entry.supportedParameters || []).includes('tool_choice'),
+				codeExecution: false
+			};
+
+			// Extract API model name from description
+			const desc = entry.description || '';
+			const match = desc.match(/API model name: ([^\s]+)/);
+			const apiModelName = match ? match[1] : entry.id;
+
+			groups[provider].models.push({
+				id: entry.id,
+				name: entry.name,
+				provider: provider,
+				contextLength: entry.contextLength || entry.maxOutput || 0,
+				inputCost,
+				outputCost,
+				capabilities,
+				apiModelName
+			});
+		}
+
+		// Convert to array and apply search filter
+		return Object.values(groups).map((g: any) => ({
+			...g,
+			models: g.models.filter(
+				(model: any) =>
+					(model.name || '').toLowerCase().includes(searchValue.toLowerCase()) ||
+					(model.id || '').toLowerCase().includes(searchValue.toLowerCase()) ||
+					(model.apiModelName || '').toLowerCase().includes(searchValue.toLowerCase())
 			)
-		);
+		}));
 	});
 
-	// Find the selected model
+	// Find the selected model from the static catalog-derived providerGroups
 	const selectedModel = $derived.by(() => {
 		if (!value) return null;
-		return Object.values(LLM_PROVIDERS)
-			.flatMap((p) => p.models)
-			.find((m) => m.id === value);
+		const groups = providerGroups as any;
+		for (const g of groups) {
+			const found = g.models.find((m: any) => m.id === value);
+			if (found) return found;
+		}
+		return null;
 	});
+
+	const dispatch = createEventDispatcher();
 
 	function selectModel(modelId: string) {
 		value = modelId;
 		onValueChange?.(modelId);
 		open = false;
 		searchValue = '';
+		try {
+			dispatch('change', selectedModel?.apiModelName || modelId);
+		} catch (e) {}
+		// Development-only debug
+		if (import.meta.env?.MODE !== 'production') console.debug('model-selector selected', modelId);
 	}
 
 	function getCapabilityIcon(capability: string) {
@@ -67,6 +121,11 @@
 		if (inputCost === 0 && outputCost === 0) return 'Free';
 		return `$${inputCost?.toFixed(2) || '0'}/$${outputCost?.toFixed(2) || '0'}`;
 	}
+
+	// Log value changes in development via a reactive statement
+	if (import.meta.env?.MODE !== 'production') {
+		$: console.debug('model-selector value', value);
+	}
 </script>
 
 <DropdownMenu.Root bind:open>
@@ -74,7 +133,7 @@
 		{#if selectedModel}
 			<div class="flex items-center gap-2">
 				<Badge variant="secondary" class="text-xs">
-					{LLM_PROVIDERS[selectedModel.provider]?.displayName}
+					{LLM_PROVIDERS[selectedModel.provider]?.displayName || selectedModel.provider}
 				</Badge>
 				<span class="truncate">{selectedModel.name}</span>
 			</div>
@@ -91,9 +150,9 @@
 			<Command.List class="max-h-[300px]">
 				{#each providerGroups as provider (provider.name)}
 					<Command.Group heading={provider.displayName}>
-						{#each provider.models.filter((model) => model.name
+						{#each provider.models.filter((model: any) => (model.name || '')
 									.toLowerCase()
-									.includes(searchValue.toLowerCase()) || model.id
+									.includes(searchValue.toLowerCase()) || (model.id || '')
 									.toLowerCase()
 									.includes(searchValue.toLowerCase())) as model (model.id)}
 							<Command.Item

@@ -40,6 +40,7 @@
 	import { gitChanges } from '$lib/data/dummy-files.js';
 	import { initializeDummyData } from '$lib/data/initialize-dummy-data.js';
 
+	import VectorDbStatus from '$lib/components/editor/vector-db-status.svelte';
 	import { filesStore, fileStateActions, tabActions } from '$lib/stores/editor.ts';
 	import { fileActions } from '$lib/stores/files.store.js';
 	import Icon from '@iconify/svelte';
@@ -623,6 +624,11 @@
 						{@render FileTreeNode({ item, level: 0, isRoot: true })}
 					{/each}
 				{/if}
+			</div>
+
+			<!-- Vector Database Status -->
+			<div class="border-t border-border p-2">
+				<VectorDbStatus {project} />
 			</div>
 		{:else if currentView === 'search'}
 			<div class="p-4">

@@ -18,6 +18,16 @@
 		shellPath?: string;
 		workingDirectory?: string;
 		showWelcome?: boolean;
+		// New props for provider-backed terminal
+		connection?: {
+			wsUrl?: string;
+			ssh?: { host: string; port?: number; user?: string; instructions?: string };
+			publicUrl?: string;
+			terminalSessionId?: string;
+			providerSessionId?: string;
+		};
+		incomingSessionId?: string | null;
+		sandboxId?: string | null;
 	}
 
 	let {
@@ -28,17 +38,28 @@
 		fontFamily = '"Fira Code", "JetBrains Mono", "Cascadia Code", Consolas, monospace',
 		shellPath,
 		workingDirectory,
-		showWelcome = true
+		showWelcome = true,
+		connection = undefined,
+		incomingSessionId = null,
+		sandboxId = null
 	}: Props = $props();
 
 	// Terminal state
 	let terminal = $state<Terminal | undefined>();
-	let sessionId: string | null = $state(null);
+	let sessionId: string | null = $state(incomingSessionId || null);
 	let isLoading = $state(true);
 	let error = $state<string | null>(null);
 	let fitAddon: any = $state();
 	let searchAddon: any = $state();
 	let webLinksAddon: any = $state();
+
+	// WebSocket for provider terminal
+	let socket = $state<WebSocket | null>(null);
+	let socketOpen = $derived(() => !!socket && socket?.readyState === WebSocket.OPEN);
+
+	// Control WebSocket to server (for proxying to provider)
+	let controlSocket = $state<WebSocket | null>(null);
+	let proxySessionId: string | null = $state(null);
 
 	// Input handling state
 	let currentLine = $state('');
@@ -123,12 +144,21 @@
 			// Load addons
 			await loadAddons();
 
-			// Create terminal session
-			// sessionId = terminalService.createSession(terminal, {
-			// 	title: 'Main Terminal',
-			// 	cwd: workingDirectory,
-			// 	shell: shellPath
-			// });
+			// If consumer passed in a session id, keep it, otherwise generate one on demand
+			if (!sessionId) {
+				sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+			}
+
+			// If provider supplied a WebSocket URL, connect now and pipe messages to xterm
+			if (connection?.wsUrl) {
+				if (shouldUseProxy(connection.wsUrl)) {
+					await startProxySession();
+				} else {
+					connectToProvider(connection.wsUrl);
+				}
+			} else {
+				await startProxySession();
+			}
 
 			// Focus if needed
 			if (autoFocus) {
@@ -143,32 +173,184 @@
 		}
 	}
 
+	// New helper: determine if we should proxy
+	function shouldUseProxy(wsUrl?: string) {
+		if (!wsUrl) return true; // no provider wsUrl -> use server proxy
+		if (wsUrl.startsWith('/')) return true; // relative path -> same-origin proxy at server
+		try {
+			const u = new URL(wsUrl);
+			// If different host/origin than current page, prefer server proxy for security
+			return u.origin !== window.location.origin;
+		} catch (err) {
+			return true;
+		}
+	}
+
+	async function startProxySession() {
+		if (!sandboxId) {
+			console.warn('Cannot start proxy session without sandboxId');
+			return;
+		}
+
+		// Establish control socket to our central /api/ws endpoint
+		if (!controlSocket || controlSocket.readyState !== WebSocket.OPEN) {
+			const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+			const url = `${proto}://${window.location.host}/api/ws`;
+			controlSocket = new WebSocket(url);
+
+			controlSocket.onopen = () => {
+				console.debug('Control websocket opened for terminal proxy');
+
+				const payload = {
+					type: 'terminal_proxy_start',
+					data: {
+						sandboxId,
+						providerSessionId: connection?.providerSessionId,
+						preferredWsUrl: connection?.wsUrl,
+						shell: shellPath || '/bin/bash',
+						dimensions: { cols: 80, rows: 24 },
+						clientSessionId: incomingSessionId || proxySessionId
+					}
+				};
+
+				controlSocket?.send(JSON.stringify(payload));
+			};
+
+			controlSocket.onmessage = (evt) => {
+				try {
+					const msg = JSON.parse(evt.data as string);
+					switch (msg.type) {
+						case 'terminal_proxy_ready':
+							proxySessionId = msg.data.proxySessionId;
+							// write an initial status to terminal
+							terminal?.writeln('[connected to provider via proxy]');
+							break;
+						case 'terminal_proxy_data':
+							if (msg.data && msg.data.content) {
+								terminal?.write(msg.data.content);
+							}
+							break;
+						case 'terminal_proxy_ssh':
+							// provider requires SSH - surface instructions
+							connection = connection || {};
+							connection.ssh = msg.data.ssh;
+							terminal?.writeln('[ssh only connection, copy instructions to connect]');
+							break;
+						case 'terminal_proxy_error':
+							terminal?.writeln(`[proxy error] ${msg.data?.error || 'unknown'}`);
+							break;
+						case 'terminal_proxy_closed':
+							terminal?.writeln('[provider connection closed]');
+							proxySessionId = null;
+							break;
+						default:
+							console.debug('Unhandled proxy message', msg.type);
+					}
+				} catch (err) {
+					console.warn('Invalid proxy control message', err);
+				}
+			};
+
+			controlSocket.onclose = () => {
+				console.debug('Control websocket closed');
+				controlSocket = null;
+				proxySessionId = null;
+			};
+		}
+	}
+
+	function sendProxyInput(content: string) {
+		if (controlSocket && controlSocket.readyState === WebSocket.OPEN && proxySessionId) {
+			controlSocket.send(
+				JSON.stringify({ type: 'terminal_proxy_input', data: { proxySessionId, content } })
+			);
+		}
+	}
+
+	// Update connectToProvider to prefer proxy when appropriate
+	function connectToProvider(wsUrl?: string) {
+		if (shouldUseProxy(wsUrl)) {
+			startProxySession();
+			return;
+		}
+
+		// existing same-origin direct path logic
+		let resolved = wsUrl || '';
+		if (wsUrl && wsUrl.startsWith('/')) {
+			const origin = typeof window !== 'undefined' ? window.location.origin : '';
+			resolved = origin.replace(/^http/, 'ws') + wsUrl;
+		}
+
+		// Close existing socket if present
+		if (socket) {
+			socket.close();
+			socket = null;
+		}
+
+		socket = new WebSocket(resolved);
+		socket.binaryType = 'arraybuffer';
+
+		socket.onopen = () => {
+			console.debug('Provider terminal websocket open', resolved);
+			socket?.send(JSON.stringify({ type: 'init', sessionId }));
+		};
+
+		socket.onmessage = (evt) => {
+			try {
+				if (!terminal) return;
+				if (typeof evt.data === 'string') {
+					terminal.write(evt.data);
+				} else if (evt.data instanceof ArrayBuffer) {
+					const text = new TextDecoder('utf-8').decode(evt.data);
+					terminal.write(text);
+				} else if (evt.data instanceof Blob) {
+					evt.data.text().then((t) => safeWrite(t));
+				} else {
+					safeWrite(String(evt.data));
+				}
+			} catch (err) {
+				console.warn('Failed to write provider message to terminal', err);
+			}
+		};
+
+		socket.onerror = (err) => {
+			console.warn('Provider terminal websocket error', err);
+		};
+
+		socket.onclose = (ev) => {
+			console.debug('Provider terminal websocket closed', ev);
+			socket = null;
+		};
+	}
+
+	// Load addons for xterm (Fit, Search, WebLinks) - restored implementation
 	async function loadAddons() {
 		try {
-			// Load FitAddon
 			const FitAddon = (await XtermAddon.FitAddon()).FitAddon;
-			fitAddon = new FitAddon();
-			terminal.loadAddon(fitAddon);
-
-			// Load SearchAddon
 			const SearchAddon = (await XtermAddon.SearchAddon()).SearchAddon;
-			searchAddon = new SearchAddon();
-			terminal.loadAddon(searchAddon);
-
-			// Load WebLinksAddon
 			const WebLinksAddon = (await XtermAddon.WebLinksAddon()).WebLinksAddon;
-			webLinksAddon = new WebLinksAddon();
-			terminal.loadAddon(webLinksAddon);
 
-			// Initial fit
-			fitAddon.fit();
+			fitAddon = new FitAddon();
+			searchAddon = new SearchAddon();
+			webLinksAddon = new WebLinksAddon();
+
+			terminal?.loadAddon(fitAddon);
+			terminal?.loadAddon(searchAddon);
+			terminal?.loadAddon(webLinksAddon);
+
+			// Initial fit if available
+			try {
+				fitAddon?.fit();
+			} catch (err) {
+				// ignore
+			}
 		} catch (err) {
 			console.warn('Some terminal addons failed to load:', err);
-			// Try to load just the fit addon as fallback
+			// Try minimal fit addon fallback
 			try {
 				const FitAddon = (await XtermAddon.FitAddon()).FitAddon;
 				fitAddon = new FitAddon();
-				terminal.loadAddon(fitAddon);
+				terminal?.loadAddon(fitAddon);
 				fitAddon.fit();
 			} catch (fitErr) {
 				console.error('Critical: FitAddon failed to load:', fitErr);
@@ -176,15 +358,60 @@
 		}
 	}
 
+	// Defensive wrappers: ensure terminal exists before calling methods
+	function safeWrite(data: string) {
+		if (!terminal) return;
+		terminal.write(data);
+	}
+
+	function safeWriteln(data: string) {
+		if (!terminal) return;
+		terminal.writeln(data);
+	}
+
+	function safeHasSelection(): boolean {
+		try {
+			return !!terminal && (terminal as any).hasSelection
+				? (terminal as any).hasSelection()
+				: false;
+		} catch (err) {
+			return false;
+		}
+	}
+
+	function safeGetSelection(): string {
+		try {
+			return terminal && (terminal as any).getSelection ? (terminal as any).getSelection() : '';
+		} catch (err) {
+			return '';
+		}
+	}
+
 	// Enhanced input handling with line editing
 	function onData(data: string) {
 		if (readonly || !sessionId) return;
+
+		// If using proxy path (control socket), forward input via controlSocket
+		if (controlSocket && controlSocket.readyState === WebSocket.OPEN && proxySessionId) {
+			sendProxyInput(data);
+			return;
+		}
+
+		// If socket is open, forward input bytes directly to provider
+		if (socket && socket.readyState === WebSocket.OPEN) {
+			try {
+				socket.send(data);
+				return;
+			} catch (err) {
+				console.warn('Failed to send data to provider websocket', err);
+			}
+		}
 
 		const code = data.charCodeAt(0);
 
 		switch (code) {
 			case 13: // Enter
-				terminal.writeln('');
+				safeWriteln('');
 				handleCommand(currentLine);
 				resetCurrentLine();
 				break;
@@ -199,13 +426,7 @@
 				break;
 
 			case 3: // Ctrl+C
-				terminal.writeln('\x1b[1;31m^C\x1b[0m');
-				resetCurrentLine();
-				// Get new prompt from service
-				const session = terminalService.getSession(sessionId);
-				if (session) {
-					terminal.write(`\x1b[1;36m${getCurrentPrompt()}\x1b[0m $ `);
-				}
+				handleCtrlC();
 				break;
 
 			default:
@@ -239,7 +460,7 @@
 				domEvent.preventDefault();
 				if (cursorPosition > 0) {
 					cursorPosition--;
-					terminal.write('\x1b[D'); // Move cursor left
+					safeWrite('\x1b[D'); // Move cursor left
 				}
 				break;
 
@@ -247,7 +468,7 @@
 				domEvent.preventDefault();
 				if (cursorPosition < currentLine.length) {
 					cursorPosition++;
-					terminal.write('\x1b[C'); // Move cursor right
+					safeWrite('\x1b[C'); // Move cursor right
 				}
 				break;
 
@@ -282,8 +503,8 @@
 		if (domEvent.ctrlKey || domEvent.metaKey) {
 			switch (key) {
 				case 'c':
-					if (terminal.hasSelection()) {
-						navigator.clipboard?.writeText(terminal.getSelection());
+					if (safeHasSelection()) {
+						navigator.clipboard?.writeText(safeGetSelection());
 						domEvent.preventDefault();
 					}
 					break;
@@ -382,14 +603,8 @@
 			cursorPosition = currentLine.length;
 			redrawCurrentLine();
 		} else if (matches.length > 1) {
-			terminal.writeln('');
-			terminal.writeln(matches.join('  '));
-			// Redraw prompt and current line
-			// const session = terminalService.getSession(sessionId!);
-			// if (session) {
-			// 	terminal.write(`\x1b[1;36m${getCurrentPrompt()}\x1b[0m $ `);
-			// 	terminal.write(currentLine);
-			// }
+			terminal?.writeln('');
+			terminal?.writeln(matches.join('  '));
 		}
 	}
 
@@ -400,6 +615,7 @@
 	}
 
 	function redrawCurrentLine() {
+		if (!terminal) return;
 		// Clear current line
 		terminal.write('\x1b[2K\r'); // Clear line and return to start
 
@@ -432,6 +648,7 @@
 		if (!sessionId) return '~';
 		// const session = terminalService.getSession(sessionId);
 		// return session ? session.cwd.replace(process.env.HOME || '', '~') : '~';
+		return '~';
 	}
 
 	// Handle resize
@@ -490,6 +707,16 @@
 		} catch (err) {
 			console.warn('Error during terminal cleanup:', err);
 		}
+
+		// Teardown: close socket when component destroyed
+		try {
+			if (socket) {
+				socket.close();
+				socket = null;
+			}
+		} catch (err) {
+			console.warn('Error closing provider websocket on destroy', err);
+		}
 	});
 
 	// Public methods
@@ -536,10 +763,36 @@
 	export function executeCommand(command: string) {
 		if (sessionId) {
 			currentLine = command;
-			terminal.writeln(command);
+			// In executeCommand
+			safeWriteln(command);
 			handleCommand(command);
 			resetCurrentLine();
 		}
+	}
+
+	// Copy helper exposed for SSH instructions (re-used elsewhere)
+	async function copyToClipboard(text: string) {
+		try {
+			if (!text) return;
+			await navigator.clipboard.writeText(text);
+		} catch (err) {
+			console.warn('Failed to copy to clipboard', err);
+		}
+	}
+
+	// Update occurrences to use safe wrappers where appropriate
+	// e.g., in onKey: use safeHasSelection() and safeGetSelection()
+	// Update onKey usage inline
+	// (No code duplication here - just using helper functions above)
+
+	// Replace deprecated on:click in template by updating attributes later via string replacement
+
+	// Ensure other terminal calls guard for undefined terminal
+	// e.g. in handleTabCompletion we already updated; ensure safe calls
+
+	function handleCtrlC() {
+		safeWriteln('\x1b[1;31m^C\x1b[0m');
+		resetCurrentLine();
 	}
 </script>
 
@@ -549,6 +802,33 @@
 	role="application"
 	aria-label="Enhanced Terminal"
 >
+	<!-- Connection metadata toolbar -->
+	{#if connection}
+		<div class="absolute top-2 right-2 z-10 flex items-center gap-2">
+			{#if connection?.publicUrl}
+				<a href={connection.publicUrl} target="_blank" class="rounded bg-muted px-2 py-1 text-xs"
+					>Open Preview</a
+				>
+			{/if}
+			{#if connection?.ssh}
+				<div class="flex items-center gap-2 rounded bg-muted px-2 py-1 text-xs">
+					<span class="font-mono"
+						>{connection?.ssh?.user}@{connection?.ssh?.host}{connection?.ssh?.port
+							? `:${connection?.ssh?.port}`
+							: ''}</span
+					>
+					<button
+						class="ml-1 text-xs"
+						onclick={() =>
+							copyToClipboard(
+								connection?.ssh?.instructions || `${connection?.ssh?.user}@${connection?.ssh?.host}`
+							)}>Copy</button
+					>
+				</div>
+			{/if}
+		</div>
+	{/if}
+
 	{#if isLoading}
 		<div class="flex h-full items-center justify-center">
 			<div class="flex items-center gap-2 text-sm text-muted-foreground">
@@ -565,10 +845,8 @@
 				<div class="text-xs text-muted-foreground">{error}</div>
 				<button
 					class="mt-2 rounded-md bg-secondary px-3 py-1 text-xs transition-colors hover:bg-secondary/80"
-					onclick={() => window.location.reload()}
+					onclick={() => window.location.reload()}>Reload</button
 				>
-					Reload
-				</button>
 			</div>
 		</div>
 	{:else}
