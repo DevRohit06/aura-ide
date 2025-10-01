@@ -365,7 +365,7 @@ describe('Sandbox API Integration Tests', () => {
 
 			// Verify service statuses
 			expect(health.services).toHaveProperty('database');
-			expect(health.services).toHaveProperty('websocket');
+			expect(health.services).toHaveProperty('sse_streaming');
 			expect(health.services).toHaveProperty('sandbox_providers');
 			expect(health.services).toHaveProperty('file_storage');
 			expect(health.services).toHaveProperty('template_service');
