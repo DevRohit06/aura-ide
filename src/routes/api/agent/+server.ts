@@ -60,7 +60,7 @@ const MAX_TERMINAL_OUTPUT_LINES = 10;
 async function createNewThread(userId: string, projectId?: string): Promise<string> {
 	const newThread = {
 		id: crypto.randomUUID(),
-		projectId: projectId || null,
+		projectId: projectId || undefined,
 		userId,
 		title: 'New Chat',
 		isArchived: false,
@@ -215,16 +215,155 @@ function extractMessageContent(content: any): string {
 		if (content.text) return String(content.text);
 		if (content.content) return String(content.content);
 		if (content.message) return String(content.message);
-		// Fallback: stringify but avoid [object Object]
+
+		// Handle tool results specifically
+		if (content.toolResults && Array.isArray(content.toolResults)) {
+			return formatToolResults(content.toolResults);
+		}
+
+		// If it's a tool call result, format it properly
+		if (content.success !== undefined && content.message) {
+			return formatSingleToolResult(content);
+		}
+
+		// Fallback: try to create a readable representation
 		try {
-			const str = JSON.stringify(content);
-			return str.length > 100 ? 'Complex response object' : str;
+			const str = JSON.stringify(content, null, 2);
+			if (str.length > 500) {
+				// For large objects, provide a summary
+				return `Response data (${Object.keys(content).length} properties): ${Object.keys(content).slice(0, 3).join(', ')}${Object.keys(content).length > 3 ? '...' : ''}`;
+			}
+			return str;
 		} catch {
 			return 'Complex response object';
 		}
 	}
 
 	return String(content);
+}
+
+/**
+ * Format tool results for display
+ */
+function formatToolResults(results: any[]): string {
+	return results
+		.map((result, index) => {
+			const prefix = results.length > 1 ? `Tool ${index + 1}: ` : '';
+			return prefix + formatSingleToolResult(result);
+		})
+		.join('\n\n');
+}
+
+/**
+ * Format a single tool result for display
+ */
+function formatSingleToolResult(result: any): string {
+	if (!result) return 'No result';
+
+	let output = '';
+
+	if (result.success === false) {
+		output = `❌ ${result.message || 'Operation failed'}`;
+		if (result.error) {
+			output += `\nError: ${result.error}`;
+		}
+	} else if (result.success === true) {
+		output = `✅ ${result.message || 'Operation completed'}`;
+	} else if (result.message) {
+		output = result.message;
+	} else {
+		output = 'Operation completed';
+	}
+
+	// Add relevant data if present
+	if (result.data) {
+		if (typeof result.data === 'string') {
+			if (result.data.length > 200) {
+				output += `\n\nData: ${result.data.slice(0, 200)}...`;
+			} else {
+				output += `\n\nData: ${result.data}`;
+			}
+		} else if (result.data.filePath || result.data.content !== undefined) {
+			// File operation result
+			if (result.data.filePath) {
+				output += `\nFile: ${result.data.filePath}`;
+			}
+			if (result.data.size !== undefined) {
+				output += `\nSize: ${result.data.size} bytes`;
+			}
+		} else if (typeof result.data === 'object') {
+			try {
+				const dataStr = JSON.stringify(result.data, null, 2);
+				if (dataStr.length > 200) {
+					output += `\n\nData: ${dataStr.slice(0, 200)}...`;
+				} else {
+					output += `\n\nData: ${dataStr}`;
+				}
+			} catch {
+				output += '\n\nData: [Complex object]';
+			}
+		}
+	}
+
+	return output;
+}
+
+/**
+ * Extract tool calls metadata from messages for database storage
+ */
+function extractToolCallsMetadata(messages: any[]): Record<string, any> {
+	const lastMessage = messages?.[messages.length - 1];
+	if (!lastMessage) return {};
+
+	const toolCalls = (lastMessage as any)?.tool_calls;
+	if (!toolCalls || !Array.isArray(toolCalls) || toolCalls.length === 0) {
+		return {};
+	}
+
+	// Extract and sanitize tool calls for metadata
+	const sanitizedToolCalls = toolCalls.map((tc: any) => ({
+		name: tc?.name || tc?.function?.name || '',
+		arguments: tc?.args || tc?.arguments || tc?.function?.arguments || {},
+		id: tc?.id || '',
+		type: tc?.type || 'function'
+	}));
+
+	return {
+		toolCalls: sanitizedToolCalls,
+		hasToolCalls: true,
+		toolCallCount: sanitizedToolCalls.length
+	};
+}
+
+/**
+ * Extract tool execution results from message history
+ */
+function extractToolResults(messages: any[]): any[] {
+	const toolResults: any[] = [];
+
+	// Look for tool messages (responses from tool executions)
+	for (const message of messages) {
+		if (message?.tool_call_id && message?.content) {
+			toolResults.push({
+				tool_call_id: message.tool_call_id,
+				content: message.content,
+				success: !message.content?.includes?.('error') && !message.content?.includes?.('failed'),
+				message:
+					typeof message.content === 'string' ? message.content : JSON.stringify(message.content)
+			});
+		} else if (message?.name && message?.content && message?.type === 'tool') {
+			// Alternative tool message format
+			toolResults.push({
+				tool_name: message.name,
+				content: message.content,
+				success: !message.content?.includes?.('error') && !message.content?.includes?.('failed'),
+				message:
+					typeof message.content === 'string' ? message.content : JSON.stringify(message.content)
+			});
+		}
+	}
+
+	return toolResults;
 }
 
 /**
@@ -430,20 +569,29 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		const lastMessage = result.messages?.[result.messages?.length - 1];
 		const assistantContent = extractMessageContent(lastMessage?.content ?? 'No response');
 
+		// Check for tool execution results in the message history
+		const toolResults = extractToolResults(result.messages || []);
+		const toolResultsSummary =
+			toolResults.length > 0
+				? `\n\n**Tool Execution Results:**\n${formatToolResults(toolResults)}`
+				: '';
+
+		// Combine assistant response with tool results
+		const fullContent = assistantContent + toolResultsSummary;
+
+		// Extract tool calls and results for metadata
+		const toolCallsMetadata = extractToolCallsMetadata(result.messages);
+
 		// Save assistant response
-		const assistantMessageDoc = createMessageDoc(
-			actualThreadId,
-			userId,
-			assistantContent,
-			'assistant',
-			{
-				projectId,
-				metadata: {
-					model: `${result.modelConfig?.provider}/${result.modelConfig?.model}`,
-					provider: result.modelConfig?.provider
-				}
+		const assistantMessageDoc = createMessageDoc(actualThreadId, userId, fullContent, 'assistant', {
+			projectId,
+			metadata: {
+				model: `${result.modelConfig?.provider}/${result.modelConfig?.model}`,
+				provider: result.modelConfig?.provider,
+				...toolCallsMetadata,
+				toolResults: toolResults.length > 0 ? toolResults : undefined
 			}
-		);
+		});
 		await DatabaseService.createChatMessage(assistantMessageDoc);
 
 		// Update thread title if first exchange
@@ -454,7 +602,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 		return json({
 			success: true,
-			response: assistantContent,
+			response: fullContent,
 			threadId: actualThreadId,
 			metadata: {
 				awaitingHumanInput: result.awaitingHumanInput,
@@ -464,7 +612,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				modelConfig: result.modelConfig,
 				modelUsageHistory: result.modelUsageHistory,
 				terminalOutput: result.terminalOutput?.slice(-MAX_TERMINAL_OUTPUT_LINES) || [],
-				hasCodeContext: result.codeContext?.length > 0
+				hasCodeContext: result.codeContext?.length > 0,
+				toolCallsExecuted: toolResults.length
 			}
 		});
 	} catch (err: any) {
@@ -575,6 +724,9 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
 		const lastMessage = result.messages?.[result.messages?.length - 1];
 		const resumeContent = extractMessageContent(lastMessage?.content ?? 'Action completed');
 
+		// Extract tool calls metadata for resume response
+		const toolCallsMetadata = extractToolCallsMetadata(result.messages);
+
 		// Save response
 		const resumeMessageDoc = createMessageDoc(threadId, userId, resumeContent, 'assistant', {
 			projectId,
@@ -582,7 +734,8 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
 				model: `${result.modelConfig?.provider}/${result.modelConfig?.model}`,
 				provider: result.modelConfig?.provider,
 				interruptAction: action,
-				appliedEdits: appliedEdits.length
+				appliedEdits: appliedEdits.length,
+				...toolCallsMetadata
 			}
 		});
 		await DatabaseService.createChatMessage(resumeMessageDoc);

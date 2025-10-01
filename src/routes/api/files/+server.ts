@@ -145,7 +145,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				break;
 
 			case 'list':
-				result = await listFilesService({ projectId, sandboxId, path: resolvedPath });
+				result = await listFilesService(
+					{ projectId, sandboxId, path: resolvedPath },
+					{ includeSnippets: false }
+				);
 				break;
 
 			default:
