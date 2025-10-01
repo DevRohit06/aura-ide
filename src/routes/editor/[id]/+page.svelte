@@ -1,55 +1,79 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
+	import { onMount } from 'svelte';
+	// PaneForge
+	import { Pane } from 'paneforge';
+	// Components
 	import CodemirrorEditor from '$lib/components/code-editor/codemirror-editor.svelte';
+	import ActivityBar from '$lib/components/editor/activity-bar.svelte';
+	import BottomStatusBar from '$lib/components/editor/bottom-status-bar.svelte';
 	import FileTabs from '$lib/components/editor/file-tabs.svelte';
+	import TopMenubar from '$lib/components/editor/top-menubar.svelte';
+	import CommandPalette from '$lib/components/shared/command-palette.svelte';
+	import ComprehensiveSettingsDialog from '$lib/components/shared/comprehensive-settings-dialog.svelte';
 	import EnhancedSidebar from '$lib/components/shared/enhanced-sidebar.svelte';
+	import { TerminalManager } from '$lib/components/shared/terminal';
+	import ChatSidebar from '@/components/chat/chat-sidebar.svelte';
+	// UI Components
 	import * as Alert from '$lib/components/ui/alert/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Progress } from '$lib/components/ui/progress/index.js';
 	import * as Resizable from '$lib/components/ui/resizable/index.js';
-	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import { projectActions } from '$lib/stores/current-project.store.js';
 	import { activeFileId, fileActions, filesStore } from '$lib/stores/editor.js';
 	import { sidebarPanelActions, sidebarPanelsStore } from '$lib/stores/sidebar-panels.store';
+	// Utils and Services
+	import { indexAllFilesFromStore } from '$lib/services/vector-indexer.client';
 	import { createBreadcrumbs } from '$lib/utils/file-tree';
-	import { onMount } from 'svelte';
 	// Icons
-	import { TerminalManager } from '$lib/components/shared/terminal';
-	import ChatSidebar from '@/components/chat/chat-sidebar.svelte';
 	import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
 	import FolderIcon from '@lucide/svelte/icons/folder';
 	import LoaderIcon from '@lucide/svelte/icons/loader-2';
-	// Types
 
 	let { data } = $props();
 	const pageData = data as any;
 
-	// Enhanced sidebar state
-	let useEnhancedSidebar = $state(false);
-
-	function onLayoutChange(sizes: number[]) {
-		try {
-			document.cookie = `PaneForge:layout=${JSON.stringify(sizes)}`;
-		} catch (err) {
-			console.debug('Failed to persist layout to cookie', err);
-		}
-	}
-
-	function onVerticalLayoutChange(sizes: number[]) {
-		try {
-			document.cookie = `PaneForge:vertical-layout=${JSON.stringify(sizes)}`;
-		} catch (err) {
-			console.debug('Failed to persist vertical layout to cookie', err);
-		}
-	}
+	// Pane state management
+	let leftPane = $state<ReturnType<typeof Pane> | undefined>();
+	let rightPane = $state<ReturnType<typeof Pane> | undefined>();
+	let terminalPane = $state<ReturnType<typeof Pane> | undefined>();
+	let leftPaneCollapsed = $state(false);
+	let rightPaneCollapsed = $state(false);
+	let terminalCollapsed = $state(false);
 
 	// Reactive current file and breadcrumbs using $derived helper
 	let currentFile = $derived($activeFileId ? $filesStore.get($activeFileId) : null);
 	let breadcrumbs = $derived(currentFile ? createBreadcrumbs(currentFile.path) : []);
 
 	// Subscribe to sidebar store for pane visibility
-	let sidebarState = $state(sidebarPanelsStore);
+	let sidebarState = $derived($sidebarPanelsStore);
+
+	// Sync pane states with store
+	$effect(() => {
+		const state = $sidebarPanelsStore;
+
+		// Left sidebar sync
+		if (!state.panels.leftSidebarVisible && !leftPaneCollapsed) {
+			leftPane?.collapse();
+		} else if (state.panels.leftSidebarVisible && leftPaneCollapsed) {
+			leftPane?.expand();
+		}
+
+		// Right sidebar sync
+		if (!state.panels.rightSidebarVisible && !rightPaneCollapsed) {
+			rightPane?.collapse();
+		} else if (state.panels.rightSidebarVisible && rightPaneCollapsed) {
+			rightPane?.expand();
+		}
+
+		// Terminal sync
+		if (!state.panels.terminalVisible && !terminalCollapsed) {
+			terminalPane?.collapse();
+		} else if (state.panels.terminalVisible && terminalCollapsed) {
+			terminalPane?.expand();
+		}
+	});
 
 	// Project data (derived from page `data` prop)
 	let project = $derived(pageData.project);
@@ -76,6 +100,9 @@
 
 	// Command palette state
 	let commandPaletteOpen = $state(false);
+
+	// Settings dialog state
+	let settingsOpen = $state(false);
 
 	// Merged keyboard event handling
 	function handleKeydownMerged(event: KeyboardEvent) {
@@ -248,7 +275,53 @@
 		goto('/dashboard');
 	}
 
-	import { indexAllFilesFromStore } from '$lib/services/vector-indexer.client';
+	// Sync pane states with store
+	$effect(() => {
+		const state = sidebarState;
+		if (!state.panels.leftSidebarVisible && !leftPaneCollapsed) {
+			leftPane?.collapse();
+		} else if (state.panels.leftSidebarVisible && leftPaneCollapsed) {
+			leftPane?.expand();
+		}
+
+		if (!state.panels.rightSidebarVisible && !rightPaneCollapsed) {
+			rightPane?.collapse();
+		} else if (state.panels.rightSidebarVisible && rightPaneCollapsed) {
+			rightPane?.expand();
+		}
+
+		if (!state.panels.terminalVisible && !terminalCollapsed) {
+			terminalPane?.collapse();
+		} else if (state.panels.terminalVisible && terminalCollapsed) {
+			terminalPane?.expand();
+		}
+	});
+
+	// Sync pane states with store
+	$effect(() => {
+		const state = sidebarState;
+		if (!state.panels.leftSidebarVisible && !leftPaneCollapsed) {
+			leftPane?.collapse();
+		} else if (state.panels.leftSidebarVisible && leftPaneCollapsed) {
+			leftPane?.expand();
+		}
+
+		if (!state.panels.rightSidebarVisible && !rightPaneCollapsed) {
+			rightPane?.collapse();
+		} else if (state.panels.rightSidebarVisible && rightPaneCollapsed) {
+			rightPane?.expand();
+		}
+
+		if (!state.panels.terminalVisible && !terminalCollapsed) {
+			terminalPane?.collapse();
+		} else if (state.panels.terminalVisible && terminalCollapsed) {
+			terminalPane?.expand();
+		}
+	});
+
+	function handleSettingsClick() {
+		settingsOpen = true;
+	}
 </script>
 
 <svelte:head>
@@ -385,86 +458,126 @@
 		</div>
 	</div>
 {:else if isProjectReady}
-	<Resizable.PaneGroup {onLayoutChange} direction="horizontal" class="max-h-dvh overflow-hidden">
-		<Sidebar.Provider>
-			<Resizable.Pane
-				collapsible={!$sidebarState.panels.leftSidebarVisible}
-				defaultSize={data.layout && typeof data.layout[0] === 'number' ? data.layout[0] : 20}
-				maxSize={20}
-				minSize={20}
-			>
-				<EnhancedSidebar {project} />
-			</Resizable.Pane>
-			<Resizable.Handle />
-			<Resizable.Pane
-				defaultSize={data.layout && typeof data.layout[1] === 'number' ? data.layout[1] : 80}
-				class="h-full"
-			>
-				<Resizable.PaneGroup
-					onLayoutChange={(layout: number[]) => onVerticalLayoutChange(layout)}
-					direction="vertical"
-					class="max-h-dvh overflow-hidden"
-				>
-					<Resizable.Pane
-						defaultSize={$sidebarState.panels.terminalVisible
-							? data.verticalLayout && typeof data.verticalLayout[0] === 'number'
-								? data.verticalLayout[0]
-								: 80
-							: 100}
-						class="flex h-full flex-col"
-					>
-						<!-- File Tabs -->
-						<div class="border-b">
-							<FileTabs {project} />
-						</div>
+	<div class="flex h-dvh flex-col overflow-hidden">
+		<!-- Top Menubar -->
+		<TopMenubar {project} />
 
-						<!-- Editor Content -->
-						{#if currentFile}
-							<div class="!relative !h-[100%] !overflow-auto">
-								<CodemirrorEditor {project} />
+		<!-- Main Content Area -->
+
+		<div class="flex h-full flex-1 overflow-hidden">
+			<!-- Activity Bar - Always Visible -->
+			<ActivityBar onSettingsClick={handleSettingsClick} />
+			<!-- Main Layout -->
+			<Resizable.PaneGroup direction="horizontal" class=" flex-1">
+				<!-- Left Sidebar -->
+				<Resizable.Pane
+					defaultSize={20}
+					collapsedSize={0}
+					collapsible={true}
+					minSize={15}
+					maxSize={30}
+					bind:this={leftPane}
+					onCollapse={() => {
+						leftPaneCollapsed = true;
+						sidebarPanelActions.hideLeftSidebar();
+					}}
+					onExpand={() => {
+						leftPaneCollapsed = false;
+						sidebarPanelActions.showLeftSidebar();
+					}}
+				>
+					<EnhancedSidebar {project} />
+				</Resizable.Pane>
+				<Resizable.Handle />
+
+				<!-- Main Content Area -->
+				<Resizable.Pane defaultSize={60}>
+					<Resizable.PaneGroup direction="vertical">
+						<!-- Editor -->
+						<Resizable.Pane defaultSize={80} class="flex h-full flex-col">
+							<!-- File Tabs -->
+							<div class="border-b">
+								<FileTabs {project} />
 							</div>
-						{:else}
-							<div class="flex flex-1 items-center justify-center">
-								<div class="space-y-4 text-center">
-									<div class="text-6xl">📝</div>
-									<div>
-										<h2 class="mb-2 text-xl font-semibold">Welcome to {project.name}</h2>
-										<p class="text-muted-foreground">
-											Choose a file from the sidebar to start editing
-										</p>
-										<p class="mt-2 text-xs text-muted-foreground">
-											Framework: {project.framework}
-										</p>
+
+							<!-- Editor Content -->
+							{#if currentFile}
+								<div class="!relative !h-[100%] !overflow-auto">
+									<CodemirrorEditor {project} />
+								</div>
+							{:else}
+								<div class="flex flex-1 items-center justify-center">
+									<div class="space-y-4 text-center">
+										<div class="text-6xl">📝</div>
+										<div>
+											<h2 class="mb-2 text-xl font-semibold">Welcome to {project.name}</h2>
+											<p class="text-muted-foreground">
+												Choose a file from the sidebar to start editing
+											</p>
+											<p class="mt-2 text-xs text-muted-foreground">
+												Framework: {project.framework}
+											</p>
+										</div>
 									</div>
 								</div>
-							</div>
-						{/if}
-					</Resizable.Pane>
-					<Resizable.Handle />
-					<Resizable.Pane
-						collapsible={!$sidebarState.panels.terminalVisible}
-						defaultSize={data.verticalLayout && typeof data.verticalLayout[1] === 'number'
-							? data.verticalLayout[1]
-							: 20}
-					>
-						<TerminalManager {project} />
-					</Resizable.Pane>
-				</Resizable.PaneGroup>
-			</Resizable.Pane>
-			<Resizable.Handle />
-			<Resizable.Pane
-				collapsible={!$sidebarState.panels.rightSidebarVisible}
-				defaultSize={data.layout && typeof data.layout[2] === 'number' ? data.layout[2] : 20}
-				maxSize={40}
-				minSize={20}
-				class="h-full w-fit"
-			>
-				{#if browser}
-					<ChatSidebar {project} />
-				{/if}
-			</Resizable.Pane>
-		</Sidebar.Provider>
-	</Resizable.PaneGroup>
+							{/if}
+						</Resizable.Pane>
+						<Resizable.Handle />
+
+						<!-- Terminal -->
+						<Resizable.Pane
+							defaultSize={20}
+							collapsedSize={0}
+							collapsible={true}
+							minSize={10}
+							maxSize={50}
+							bind:this={terminalPane}
+							onCollapse={() => {
+								terminalCollapsed = true;
+								sidebarPanelActions.hideTerminal();
+							}}
+							onExpand={() => {
+								terminalCollapsed = false;
+								sidebarPanelActions.showTerminal();
+							}}
+						>
+							<TerminalManager {project} />
+						</Resizable.Pane>
+					</Resizable.PaneGroup>
+				</Resizable.Pane>
+				<Resizable.Handle />
+
+				<!-- Right Sidebar (Chat) -->
+				<Resizable.Pane
+					defaultSize={20}
+					collapsedSize={0}
+					collapsible={true}
+					minSize={15}
+					maxSize={40}
+					bind:this={rightPane}
+					onCollapse={() => {
+						rightPaneCollapsed = true;
+						sidebarPanelActions.hideRightSidebar();
+					}}
+					onExpand={() => {
+						rightPaneCollapsed = false;
+						sidebarPanelActions.showRightSidebar();
+					}}
+				>
+					{#if browser}
+						<ChatSidebar {project} />
+					{/if}
+				</Resizable.Pane>
+			</Resizable.PaneGroup>
+		</div>
+
+		<!-- Bottom Status Bar -->
+		<BottomStatusBar {project} />
+	</div>
+
+	<!-- Settings Dialog -->
+	<ComprehensiveSettingsDialog bind:open={settingsOpen} />
+	<CommandPalette bind:open={commandPaletteOpen} {project} />
 {:else}
 	<div class="flex h-screen items-center justify-center">
 		<div class="space-y-4 text-center">

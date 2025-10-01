@@ -134,11 +134,9 @@ export const load: PageServerLoad = async ({ params, cookies, locals, url }) => 
 							// Request async snippet loading to keep page load fast; the page can await the promises
 							const filesResult = await listFilesService(
 								{ projectId: project.id, sandboxId: project.sandboxId, path: '' },
-								{ includeSnippets: 'sync', batchSize: 10 }
+								{ includeSnippets: 'sync', batchSize: 50 }
 							);
 							projectFiles = Array.isArray(filesResult?.files) ? filesResult.files : [];
-
-							logger.info('filesResult', projectFiles);
 
 							logger.info(
 								'Project files from Daytona (via service, async snippets):',
@@ -164,7 +162,6 @@ export const load: PageServerLoad = async ({ params, cookies, locals, url }) => 
 						if (response.ok) {
 							const files = await response.json();
 							projectFiles = Array.isArray(files) ? files : [];
-							logger.info('Project files from R2 API:', projectFiles);
 							logger.info(`Loaded ${projectFiles.length} files from R2 storage for project ${id}`);
 						} else {
 							logger.warn(`Failed to fetch files from R2 API: ${response.status}`);

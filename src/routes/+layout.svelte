@@ -3,12 +3,10 @@
 	import SettingsInitializer from '$lib/components/shared/settings-initializer.svelte';
 	import { Toaster } from '$lib/components/ui/sonner/index.js';
 	import { initializeTheme } from '$lib/config/theme-init.js';
-	import { webSocketActions } from '$lib/stores/websocket.store';
 	import { cleanupFileStorage } from '$lib/utils/storage-cleanup.js';
 	import { ModeWatcher } from 'mode-watcher';
 	import { onMount } from 'svelte';
 	import '../app.css';
-	// Initialize authentication
 
 	let { children } = $props();
 
@@ -20,15 +18,8 @@
 	// Clean up file-related localStorage on app start
 	cleanupFileStorage();
 
-	// Initialize WebSocket connection for real-time updates
-
 	onMount(async () => {
-		await webSocketActions.connect();
 		loading = false;
-		return () => {
-			// Cleanup on component unmount
-			webSocketActions.disconnect();
-		};
 	});
 </script>
 
