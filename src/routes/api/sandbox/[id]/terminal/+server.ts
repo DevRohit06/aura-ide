@@ -87,14 +87,57 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
 		const terminalSessionId = `terminal_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
 		// For now, we'll return connection info for WebSocket upgrade
-		// In a real implementation, this would establish a WebSocket connection
-		const connectionInfo = {
-			terminalSessionId,
-			websocketUrl: `/api/sandbox/${sandboxId}/terminal/${terminalSessionId}/ws`,
-			shell,
-			workingDir,
-			dimensions: dimensions || { cols: 80, rows: 24 }
-		};
+		// Prefer provider-backed terminal sessions when available
+		let connectionInfo: {
+			terminalSessionId: string;
+			providerSessionId?: string;
+			wsUrl?: string;
+			ssh?: { host: string; port?: number; user?: string; instructions?: string };
+			publicUrl?: string;
+			shell?: string;
+			workingDir?: string;
+			websocketUrl?: string;
+			dimensions?: { cols: number; rows: number };
+		} | null = null;
+
+		try {
+			if (provider && typeof provider.connectTerminal === 'function') {
+				const providerConnection = await provider.connectTerminal(session.sandboxId, {
+					shell,
+					workingDir,
+					rows: dimensions?.rows,
+					cols: dimensions?.cols
+				});
+
+				connectionInfo = {
+					terminalSessionId,
+					providerSessionId: providerConnection?.sessionId,
+					wsUrl: providerConnection?.wsUrl,
+					ssh: providerConnection?.sshConnection,
+					publicUrl: providerConnection?.publicUrl,
+					shell,
+					workingDir
+				};
+			} else {
+				connectionInfo = {
+					terminalSessionId,
+					websocketUrl: `/api/sandbox/${sandboxId}/terminal/${terminalSessionId}/ws`,
+					shell,
+					workingDir,
+					dimensions: dimensions || { cols: 80, rows: 24 }
+				};
+			}
+		} catch (err) {
+			// If provider connect fails, fall back to local session info
+			console.warn('Provider connectTerminal failed, falling back to local session:', err);
+			connectionInfo = {
+				terminalSessionId,
+				websocketUrl: `/api/sandbox/${sandboxId}/terminal/${terminalSessionId}/ws`,
+				shell,
+				workingDir,
+				dimensions: dimensions || { cols: 80, rows: 24 }
+			};
+		}
 
 		// Update session activity
 		sessionService.updateLastActivity(session.id);
@@ -102,7 +145,8 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
 		return json({
 			success: true,
 			terminal: connectionInfo,
-			message: 'Terminal session created. Connect to WebSocket URL for real-time access.'
+			message:
+				'Terminal session created. Connect to the returned connection info for real-time access.'
 		});
 	} catch (error) {
 		console.error('Failed to create terminal session:', error);
