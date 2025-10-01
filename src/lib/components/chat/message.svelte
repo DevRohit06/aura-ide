@@ -437,8 +437,8 @@
 																<div class="font-medium">{getToolDescription(toolCall)}</div>
 																{#if toolCall.args && toolCall.args.content}
 																	<pre
-																		class="mt-1 max-h-20 overflow-x-auto overflow-y-auto rounded bg-gray-100 p-1 text-xs">{toolCall.args
-																			.content}</pre>
+																		class="mt-1 max-h-20 overflow-x-auto overflow-y-auto rounded bg-gray-100 p-1 text-xs">{toolCall
+																			.args.content}</pre>
 																{/if}
 															</div>
 														</div>
