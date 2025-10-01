@@ -24,6 +24,36 @@ export interface ChatMessage {
 		contextFiles?: string[]; // File paths that influenced this message
 		systemPromptId?: string;
 		errorDetails?: string;
+		toolCalls?: Array<{
+			name: string;
+			arguments: Record<string, any>;
+			id: string;
+			type: string;
+		}>;
+		hasToolCalls?: boolean;
+		toolCallCount?: number;
+		toolResults?: Array<{
+			tool_call_id?: string;
+			tool_name?: string;
+			content: any;
+			success: boolean;
+			message: string;
+		}>;
+		interruptAction?: string;
+		appliedEdits?: number;
+		agentInterrupt?: {
+			toolCalls: Array<{
+				name: string;
+				parameters: Record<string, any>;
+				id?: string;
+			}>;
+			stateSnapshot?: {
+				currentFile?: string | null;
+				sandboxId?: string | null;
+				fileContent?: string | null;
+			};
+			reason?: string;
+		};
 	};
 	fileContext?: {
 		fileName?: string;

@@ -600,7 +600,6 @@ export class SandboxManager {
 		}
 	): Promise<{
 		sessionId: string;
-		wsUrl?: string;
 		sshConnection?: any;
 	}> {
 		await this.ensureInitialized();

@@ -83,10 +83,10 @@ export const chatThreadsActions = {
 		threadId: string,
 		role: ChatMessage['role'],
 		content: string,
-		metadata?: ChatMessage['metadata']
+		metadata?: ChatMessage['metadata'] & { messageId?: string; isStreaming?: boolean }
 	) {
 		const msg: ChatMessage = {
-			id: crypto.randomUUID(),
+			id: metadata?.messageId || crypto.randomUUID(),
 			role,
 			content,
 			timestamp: new Date().toISOString(),
@@ -118,6 +118,34 @@ export const chatThreadsActions = {
 			return { ...store };
 		});
 		return msg.id;
+	},
+
+	updateMessage(
+		projectId: string,
+		threadId: string,
+		messageId: string,
+		content: string,
+		metadata?: Partial<ChatMessage['metadata'] & { isStreaming?: boolean }>
+	) {
+		chatThreadsStore.update((store) => {
+			const list = store[projectId] ?? [];
+			const threadIndex = list.findIndex((t) => t.id === threadId);
+			if (threadIndex === -1) return { ...store };
+
+			const messageIndex = list[threadIndex].messages.findIndex((m) => m.id === messageId);
+			if (messageIndex === -1) return { ...store };
+
+			list[threadIndex].messages[messageIndex].content = content;
+			if (metadata) {
+				list[threadIndex].messages[messageIndex].metadata = {
+					...list[threadIndex].messages[messageIndex].metadata,
+					...metadata
+				};
+			}
+			list[threadIndex].updatedAt = new Date().toISOString();
+			store[projectId] = [...list];
+			return { ...store };
+		});
 	},
 
 	renameThread(projectId: string, threadId: string, title: string) {
