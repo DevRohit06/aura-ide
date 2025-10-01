@@ -935,4 +935,107 @@ export class DaytonaService {
 		// The Daytona SDK doesn't provide a getWorkspace method
 		return 'running';
 	}
+
+	/**
+	 * Create or obtain a terminal session for a Daytona sandbox.
+	 * Returns a canonical connection object consumed by the server terminal endpoint.
+	 */
+	async connectTerminal(
+		sandboxId: string,
+		options?: {
+			shell?: string;
+			cols?: number;
+			rows?: number;
+			cwd?: string;
+		}
+	): Promise<{
+		sessionId: string;
+		wsUrl?: string;
+		sshConnection?: { host: string; port?: number; user?: string; instructions?: string };
+		publicUrl?: string;
+	}> {
+		await this.ensureInitialized();
+
+		const sandbox = this.activeSandboxes.get(sandboxId);
+		if (!sandbox) {
+			logger.error(`Daytona sandbox not found for terminal connect: ${sandboxId}`);
+			throw new Error(`Sandbox not found: ${sandboxId}`);
+		}
+
+		// Prefer SDK-backed terminal/session creation when available
+		try {
+			const sdk = sandbox.daytonaSandbox;
+			// Try common SDK terminal/session creation points
+			if (sdk) {
+				// 1) Modern SDK may have a terminal.createSession API
+				if (sdk.terminal && typeof sdk.terminal.createSession === 'function') {
+					logger.info(
+						`Creating Daytona terminal session via sdk.terminal.createSession for ${sandboxId}`
+					);
+					const session = await sdk.terminal.createSession({
+						cols: options?.cols,
+						rows: options?.rows,
+						cwd: options?.cwd
+					});
+					return {
+						sessionId: session.id || session.sessionId || `${sandboxId}-${Date.now()}`,
+						wsUrl: session.wsUrl || session.websocketUrl || session.url,
+						publicUrl: sandbox.url
+					};
+				}
+
+				// 2) Some SDKs expose a process.createPty / process.connectPty
+				if (sdk.process && typeof sdk.process.createPty === 'function') {
+					logger.info(`Creating Daytona PTY via sdk.process.createPty for ${sandboxId}`);
+					const pty = await sdk.process.createPty({
+						cols: options?.cols || 80,
+						rows: options?.rows || 24,
+						cwd: options?.cwd || '/workspace'
+					});
+					// PTY may return a websocket url or a token to build one
+					return {
+						sessionId: pty.id || pty.sessionId || `${sandboxId}-pty-${Date.now()}`,
+						wsUrl: pty.wsUrl || pty.websocketUrl || pty.url,
+						publicUrl: sandbox.url
+					};
+				}
+
+				// 3) Some SDKs expose top-level connectTerminal-style helper
+				if (typeof sdk.connectTerminal === 'function') {
+					logger.info(`Calling sdk.connectTerminal for ${sandboxId}`);
+					const session = await sdk.connectTerminal({
+						cols: options?.cols,
+						rows: options?.rows,
+						cwd: options?.cwd
+					});
+					return {
+						sessionId: session.id || session.sessionId || `${sandboxId}-${Date.now()}`,
+						wsUrl: session.wsUrl || session.websocketUrl || session.url,
+						sshConnection: session.ssh || session.sshConnection,
+						publicUrl: sandbox.url
+					};
+				}
+			}
+
+			// 4) If SDK not present or none of the helpers exist, try API-based hinting
+			logger.info(
+				`No direct terminal creation helper found in Daytona SDK for ${sandboxId}. Falling back to public URL / proxy approach.`
+			);
+
+			const fallbackSessionId = `${sandboxId}-fallback-${Date.now()}`;
+			// Return a local proxy path where our server can establish and proxy a connection later
+			return {
+				sessionId: fallbackSessionId,
+				wsUrl: `/api/sandbox/${sandboxId}/terminal/proxy/${fallbackSessionId}`,
+				publicUrl: sandbox.url
+			};
+		} catch (error) {
+			logger.error(`Failed to create terminal session for Daytona sandbox ${sandboxId}:`, error);
+			// On error, still provide the public UI URL so the client can link out
+			return {
+				sessionId: `${sandboxId}-error-${Date.now()}`,
+				publicUrl: sandbox.url
+			};
+		}
+	}
 }

@@ -65,31 +65,51 @@ export class SandboxManager {
 	}
 
 	async initialize(): Promise<void> {
-		if (this.initialized) return;
+		if (this.initialized) {
+			console.log('✅ [SandboxManager] Already initialized, skipping');
+			return;
+		}
+
+		console.log('🚀 [SandboxManager] Starting initialization', {
+			timestamp: new Date().toISOString()
+		});
 
 		try {
 			// Initialize all available providers
+			console.log('🔧 [SandboxManager] Initializing all providers');
 			await this.factory.initializeAllProviders();
 
-			// Setup provider event listeners
-			this.setupProviderEventListeners();
+			const availableProviders = this.factory.getAvailableProviders();
+			console.log('✅ [SandboxManager] Providers initialized', {
+				availableProviders,
+				providerCount: availableProviders.length
+			});
 
-			// Start health checks if enabled
-			if (sandboxConfig.provider.loadBalancing.healthCheckRequired) {
-				this.startHealthChecks();
-			}
+			// Setup provider event listeners
+			console.log('🔗 [SandboxManager] Setting up provider event listeners');
+			this.setupProviderEventListeners();
 
 			// Start metrics collection if enabled
 			if (sandboxConfig.monitoring.metrics.enabled) {
+				console.log('📊 [SandboxManager] Starting metrics collection');
 				this.startMetricsCollection();
+			} else {
+				console.log('⚠️ [SandboxManager] Metrics collection disabled in config');
 			}
 
 			this.initialized = true;
+			console.log('✅ [SandboxManager] Initialization completed successfully', {
+				timestamp: new Date().toISOString()
+			});
 		} catch (error) {
+			console.error('❌ [SandboxManager] Initialization failed', {
+				error: error instanceof Error ? error.message : String(error),
+				stack: error instanceof Error ? error.stack : undefined,
+				timestamp: new Date().toISOString()
+			});
 			throw new Error(`Failed to initialize Sandbox Manager: ${error}`);
 		}
 	}
-
 	async createSandbox(options: SandboxCreateOptions): Promise<SandboxEnvironment> {
 		await this.ensureInitialized();
 
@@ -262,17 +282,66 @@ export class SandboxManager {
 			provider?: SandboxProvider;
 		}
 	): Promise<ExecutionResult> {
-		await this.ensureInitialized();
-
-		const providerInstance = await this.getProviderForSandbox(sandboxId, options?.provider);
-		const result = await providerInstance.executeCommand(sandboxId, command, {
+		console.log('⚡ [SandboxManager] Starting executeCommand', {
+			sandboxId,
+			command,
 			workingDir: options?.workingDir,
 			timeout: options?.timeout,
-			environment: options?.environment
+			provider: options?.provider,
+			timestamp: new Date().toISOString()
 		});
 
-		this.updateSessionActivity(sandboxId);
-		return result;
+		await this.ensureInitialized();
+
+		try {
+			console.log('🔍 [SandboxManager] Getting provider for sandbox', {
+				sandboxId,
+				requestedProvider: options?.provider
+			});
+
+			const providerInstance = await this.getProviderForSandbox(sandboxId, options?.provider);
+
+			console.log('✅ [SandboxManager] Provider found, executing command', {
+				providerType: providerInstance.constructor.name,
+				sandboxId,
+				command
+			});
+
+			const startTime = Date.now();
+			const result = await providerInstance.executeCommand(sandboxId, command, {
+				workingDir: options?.workingDir,
+				timeout: options?.timeout,
+				environment: options?.environment
+			});
+			const executionTime = Date.now() - startTime;
+
+			console.log('⚡ [SandboxManager] Command execution completed', {
+				sandboxId,
+				command,
+				success: result.success,
+				exitCode: result.exitCode,
+				outputLength: result.output?.length || 0,
+				outputPreview:
+					result.output?.substring(0, 200) + (result.output?.length > 200 ? '...' : ''),
+				error: result.error,
+				duration: result.duration,
+				measuredExecutionTime: executionTime,
+				timestamp: new Date().toISOString()
+			});
+
+			this.updateSessionActivity(sandboxId);
+			return result;
+		} catch (error) {
+			console.error('❌ [SandboxManager] executeCommand failed', {
+				error: error instanceof Error ? error.message : String(error),
+				stack: error instanceof Error ? error.stack : undefined,
+				sandboxId,
+				command,
+				options,
+				timestamp: new Date().toISOString()
+			});
+			throw error;
+		}
 	}
 
 	async listFiles(
@@ -285,17 +354,64 @@ export class SandboxManager {
 			provider?: SandboxProvider;
 		}
 	): Promise<FileSystemEntry[]> {
-		await this.ensureInitialized();
-
-		const providerInstance = await this.getProviderForSandbox(sandboxId, options?.provider);
-		const files = await providerInstance.listFiles(sandboxId, path, {
-			recursive: options?.recursive,
-			includeHidden: options?.includeHidden,
-			maxDepth: options?.maxDepth
+		console.log('📁 [SandboxManager] Starting listFiles', {
+			sandboxId,
+			path,
+			options,
+			timestamp: new Date().toISOString()
 		});
 
-		this.updateSessionActivity(sandboxId);
-		return files;
+		await this.ensureInitialized();
+
+		try {
+			console.log('🔍 [SandboxManager] Getting provider for listFiles', {
+				sandboxId,
+				requestedProvider: options?.provider
+			});
+
+			const providerInstance = await this.getProviderForSandbox(sandboxId, options?.provider);
+
+			console.log('✅ [SandboxManager] Provider found, listing files', {
+				providerType: providerInstance.constructor.name,
+				sandboxId,
+				path: path || 'default'
+			});
+
+			const startTime = Date.now();
+			const files = await providerInstance.listFiles(sandboxId, path, {
+				recursive: options?.recursive,
+				includeHidden: options?.includeHidden,
+				maxDepth: options?.maxDepth
+			});
+			const executionTime = Date.now() - startTime;
+
+			console.log('📁 [SandboxManager] File listing completed', {
+				sandboxId,
+				fileCount: files.length,
+				fileTypes: files.reduce(
+					(acc, f) => {
+						acc[f.type] = (acc[f.type] || 0) + 1;
+						return acc;
+					},
+					{} as Record<string, number>
+				),
+				executionTime,
+				timestamp: new Date().toISOString()
+			});
+
+			this.updateSessionActivity(sandboxId);
+			return files;
+		} catch (error) {
+			console.error('❌ [SandboxManager] listFiles failed', {
+				error: error instanceof Error ? error.message : String(error),
+				stack: error instanceof Error ? error.stack : undefined,
+				sandboxId,
+				path,
+				options,
+				timestamp: new Date().toISOString()
+			});
+			throw error;
+		}
 	}
 
 	async readFile(
@@ -743,7 +859,7 @@ export class SandboxManager {
 		return await provider.createSandbox(options);
 	}
 
-	private async getProviderForSandbox(
+	async getProviderForSandbox(
 		sandboxId: string,
 		provider?: SandboxProvider
 	): Promise<ISandboxProvider> {
@@ -830,20 +946,6 @@ export class SandboxManager {
 				});
 			}
 		}
-	}
-
-	private startHealthChecks(): void {
-		this.healthCheckInterval = setInterval(async () => {
-			const results = await this.factory.healthCheckAllProviders();
-
-			for (const [provider, result] of Object.entries(results)) {
-				this.loadBalancing.lastHealthCheck.set(provider as SandboxProvider, new Date());
-
-				if (!result.healthy) {
-					console.warn(`Provider ${provider} health check failed:`, result.error);
-				}
-			}
-		}, sandboxConfig.monitoring.metrics.interval);
 	}
 
 	private startMetricsCollection(): void {

@@ -3,6 +3,7 @@
  * Provides local development sandbox functionality
  */
 
+import { env } from '$env/dynamic/private';
 import type { SandboxProvider, SandboxStatus } from '$lib/types/sandbox.js';
 import { exec } from 'child_process';
 import * as fs from 'fs/promises';
@@ -356,14 +357,14 @@ export class LocalProvider implements ISandboxProvider {
 			: sandbox.path;
 
 		try {
-			const env = {
-				...process.env,
+			const envVars = {
+				...env,
 				...options?.environment
 			};
 
 			const { stdout, stderr } = await execAsync(command, {
 				cwd: workingDir,
-				env,
+				env: envVars,
 				timeout: options?.timeout || 30000,
 				maxBuffer: 1024 * 1024 // 1MB
 			});

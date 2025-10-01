@@ -1,3 +1,4 @@
+import { env } from '$env/dynamic/private';
 import type { Directory, File, FileSystemItem } from '$lib/types/files';
 import { Db, MongoClient, ObjectId } from 'mongodb';
 
@@ -24,7 +25,7 @@ export class FilesService {
 
 	static async getDb(): Promise<Db> {
 		if (!this.db) {
-			const connectionString = process.env.DATABASE_URL || 'mongodb://localhost:27017/aura';
+			const connectionString = env.DATABASE_URL || 'mongodb://localhost:27017/aura';
 			const client = new MongoClient(connectionString);
 			await client.connect();
 			this.db = client.db();

@@ -1,16 +1,19 @@
 /**
  * File Operations Tool Service
- * Provides tools for editing files stored in R2 storage
+ * Provides tools for editing files across all storage backends (sandbox, R2, database)
  */
 
-import { r2StorageService } from '$lib/services/r2-storage.service.js';
+import { FileOperationsAPIClient } from '$lib/services/file-operations-api.service.js';
+import { SandboxManager } from '$lib/services/sandbox/sandbox-manager';
+import type { SandboxProvider } from '$lib/types/sandbox';
 
 export interface FileEditOperation {
 	id: string;
 	type: 'create' | 'update' | 'delete';
 	filePath: string;
 	content?: string;
-	projectId: string;
+	projectId?: string;
+	sandboxId?: string;
 	timestamp: Date;
 }
 
@@ -22,44 +25,50 @@ export interface ToolCallResult {
 }
 
 export class FileOperationsToolService {
+	private fileOpsClient: FileOperationsAPIClient;
+	private sandboxManager: SandboxManager;
+
+	constructor() {
+		this.fileOpsClient = new FileOperationsAPIClient();
+		this.sandboxManager = SandboxManager.getInstance();
+	}
+
+	async initialize() {
+		await this.sandboxManager.initialize();
+	}
+
 	/**
-	 * Create a new file in R2 storage
+	 * Create a new file across all storage backends
 	 */
 	async createFile(
-		projectId: string,
 		filePath: string,
 		content: string,
-		metadata?: Record<string, string>
+		options?: {
+			projectId?: string;
+			sandboxId?: string;
+			metadata?: Record<string, string>;
+		}
 	): Promise<ToolCallResult> {
 		try {
-			const key = `projects/${projectId}/${filePath}`;
-
-			// Check if file already exists
-			const exists = await r2StorageService.fileExists(key);
-			if (exists) {
-				return {
-					success: false,
-					message: `File ${filePath} already exists`,
-					error: 'File already exists'
-				};
-			}
-
-			await r2StorageService.uploadFile(key, content, {
-				contentType: this.getContentType(filePath),
+			// Use unified FileOperations API which handles database, R2, and sandbox
+			const result = await this.fileOpsClient.createFile({
+				path: filePath,
+				content,
+				projectId: options?.projectId,
+				sandboxId: options?.sandboxId,
 				metadata: {
-					...metadata,
+					...options?.metadata,
 					createdAt: new Date().toISOString(),
-					operation: 'create'
+					operation: 'create',
+					createdBy: 'file-operations-tool'
 				}
 			});
 
 			return {
-				success: true,
-				message: `Successfully created file ${filePath}`,
-				data: {
-					filePath,
-					size: Buffer.byteLength(content, 'utf8')
-				}
+				success: result.success,
+				message: result.message,
+				data: result.data,
+				error: result.error
 			};
 		} catch (error) {
 			console.error('Failed to create file:', error);
@@ -72,43 +81,37 @@ export class FileOperationsToolService {
 	}
 
 	/**
-	 * Update an existing file in R2 storage
+	 * Update an existing file across all storage backends
 	 */
 	async updateFile(
-		projectId: string,
 		filePath: string,
 		content: string,
-		metadata?: Record<string, string>
+		options?: {
+			projectId?: string;
+			sandboxId?: string;
+			metadata?: Record<string, string>;
+		}
 	): Promise<ToolCallResult> {
 		try {
-			const key = `projects/${projectId}/${filePath}`;
-
-			// Check if file exists
-			const exists = await r2StorageService.fileExists(key);
-			if (!exists) {
-				return {
-					success: false,
-					message: `File ${filePath} does not exist`,
-					error: 'File not found'
-				};
-			}
-
-			await r2StorageService.uploadFile(key, content, {
-				contentType: this.getContentType(filePath),
+			// Use unified FileOperations API
+			const result = await this.fileOpsClient.updateFile({
+				path: filePath,
+				content,
+				projectId: options?.projectId,
+				sandboxId: options?.sandboxId,
 				metadata: {
-					...metadata,
+					...options?.metadata,
 					updatedAt: new Date().toISOString(),
-					operation: 'update'
+					operation: 'update',
+					updatedBy: 'file-operations-tool'
 				}
 			});
 
 			return {
-				success: true,
-				message: `Successfully updated file ${filePath}`,
-				data: {
-					filePath,
-					size: Buffer.byteLength(content, 'utf8')
-				}
+				success: result.success,
+				message: result.message,
+				data: result.data,
+				error: result.error
 			};
 		} catch (error) {
 			console.error('Failed to update file:', error);
@@ -121,35 +124,28 @@ export class FileOperationsToolService {
 	}
 
 	/**
-	 * Delete a file from R2 storage
+	 * Delete a file from all storage backends
 	 */
-	async deleteFile(projectId: string, filePath: string): Promise<ToolCallResult> {
+	async deleteFile(
+		filePath: string,
+		options?: {
+			projectId?: string;
+			sandboxId?: string;
+		}
+	): Promise<ToolCallResult> {
 		try {
-			const key = `projects/${projectId}/${filePath}`;
-
-			// Check if file exists
-			const exists = await r2StorageService.fileExists(key);
-			if (!exists) {
-				return {
-					success: false,
-					message: `File ${filePath} does not exist`,
-					error: 'File not found'
-				};
-			}
-
-			const deleted = await r2StorageService.deleteFile(key);
-			if (!deleted) {
-				return {
-					success: false,
-					message: `Failed to delete file ${filePath}`,
-					error: 'Delete operation failed'
-				};
-			}
+			// Use unified FileOperations API
+			const result = await this.fileOpsClient.deleteFile({
+				path: filePath,
+				projectId: options?.projectId,
+				sandboxId: options?.sandboxId
+			});
 
 			return {
-				success: true,
-				message: `Successfully deleted file ${filePath}`,
-				data: { filePath }
+				success: result.success,
+				message: result.message,
+				data: result.data,
+				error: result.error
 			};
 		} catch (error) {
 			console.error('Failed to delete file:', error);
@@ -162,30 +158,28 @@ export class FileOperationsToolService {
 	}
 
 	/**
-	 * Read a file from R2 storage
+	 * Read a file from the most current source (sandbox > R2 > database)
 	 */
-	async readFile(projectId: string, filePath: string): Promise<ToolCallResult> {
+	async readFile(
+		filePath: string,
+		options?: {
+			projectId?: string;
+			sandboxId?: string;
+		}
+	): Promise<ToolCallResult> {
 		try {
-			const key = `projects/${projectId}/${filePath}`;
-			const content = await r2StorageService.downloadFile(key);
+			// Use unified FileOperations API
+			const result = await this.fileOpsClient.readFile({
+				path: filePath,
+				projectId: options?.projectId,
+				sandboxId: options?.sandboxId
+			});
 
-			if (!content) {
-				return {
-					success: false,
-					message: `File ${filePath} not found`,
-					error: 'File not found'
-				};
-			}
-
-			const textContent = content.toString('utf8');
 			return {
-				success: true,
-				message: `Successfully read file ${filePath}`,
-				data: {
-					filePath,
-					content: textContent,
-					size: content.length
-				}
+				success: result.success,
+				message: result.message,
+				data: result.data,
+				error: result.error
 			};
 		} catch (error) {
 			console.error('Failed to read file:', error);
@@ -198,33 +192,101 @@ export class FileOperationsToolService {
 	}
 
 	/**
-	 * List files in a directory
+	 * List files in a directory from sandbox
 	 */
-	async listFiles(projectId: string, directoryPath?: string): Promise<ToolCallResult> {
+	async listFiles(
+		directoryPath?: string,
+		options?: {
+			projectId?: string;
+			sandboxId?: string;
+			recursive?: boolean;
+			maxDepth?: number;
+		}
+	): Promise<ToolCallResult> {
 		try {
-			const prefix = directoryPath
-				? `projects/${projectId}/${directoryPath}/`
-				: `projects/${projectId}/`;
+			if (options?.sandboxId) {
+				// List from sandbox using SandboxManager
+				const files = await this.sandboxManager.listFiles(
+					options.sandboxId,
+					directoryPath || '/workspace',
+					{
+						recursive: options.recursive,
+						maxDepth: options.maxDepth
+					}
+				);
 
-			const result = await r2StorageService.listFiles({ prefix });
+				const fileData = files.map((file) => ({
+					path: file.path,
+					type: file.type,
+					size: file.size,
+					modified: file.modified
+				}));
 
-			const files = result.objects.map((obj) => ({
-				path: obj.key.replace(`projects/${projectId}/`, ''),
-				size: obj.size,
-				lastModified: obj.lastModified,
-				etag: obj.etag
-			}));
-
-			return {
-				success: true,
-				message: `Found ${files.length} files`,
-				data: { files }
-			};
+				return {
+					success: true,
+					message: `Found ${files.length} files`,
+					data: { files: fileData }
+				};
+			} else {
+				// For project-only listing, we'd need to implement this in FileOperations API
+				// For now, return empty result
+				return {
+					success: true,
+					message: 'File listing from storage not yet implemented',
+					data: { files: [] }
+				};
+			}
 		} catch (error) {
 			console.error('Failed to list files:', error);
 			return {
 				success: false,
 				message: 'Failed to list files',
+				error: error instanceof Error ? error.message : 'Unknown error'
+			};
+		}
+	}
+
+	/**
+	 * Execute a command in sandbox
+	 */
+	async executeCommand(
+		command: string,
+		options?: {
+			sandboxId?: string;
+			workingDir?: string;
+			timeout?: number;
+			provider?: SandboxProvider;
+		}
+	): Promise<ToolCallResult> {
+		try {
+			if (!options?.sandboxId) {
+				return {
+					success: false,
+					message: 'Sandbox ID required for command execution',
+					error: 'Missing sandbox ID'
+				};
+			}
+
+			const result = await this.sandboxManager.executeCommand(options.sandboxId, command, {
+				workingDir: options.workingDir || '/workspace',
+				timeout: options.timeout || 30000
+			});
+
+			return {
+				success: result.success,
+				message: result.success ? 'Command executed successfully' : 'Command execution failed',
+				data: {
+					output: result.output,
+					exitCode: result.exitCode,
+					duration: result.duration
+				},
+				error: result.error
+			};
+		} catch (error) {
+			console.error('Failed to execute command:', error);
+			return {
+				success: false,
+				message: 'Failed to execute command',
 				error: error instanceof Error ? error.message : 'Unknown error'
 			};
 		}

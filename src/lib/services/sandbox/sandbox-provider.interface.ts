@@ -341,7 +341,8 @@ export interface ISandboxProvider {
 	): Promise<{
 		sessionId: string;
 		wsUrl?: string;
-		sshConnection?: any;
+		sshConnection?: { host: string; port?: number; user?: string; instructions?: string };
+		publicUrl?: string;
 	}>;
 
 	/**

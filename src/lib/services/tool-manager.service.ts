@@ -3,6 +3,7 @@
  * Handles registration and execution of AI tools
  */
 
+import { telemetryService } from '$lib/services/telemetry.client';
 import type {
 	FileEditToolParams,
 	FileEditToolResult,
@@ -73,6 +74,9 @@ class ToolManager {
 		});
 
 		try {
+			// Telemetry: start event
+			void telemetryService.trackToolCallStart(callId, toolCall, context);
+
 			// Update status to executing
 			this.updateCallStatus(callId, 'executing');
 
@@ -84,6 +88,9 @@ class ToolManager {
 			const result = await tool.handler(toolCall.parameters, context);
 			const duration = Date.now() - startTime;
 
+			// Telemetry: end event (capture usage if present)
+			void telemetryService.trackToolCallEnd(callId, toolCall, context, result, duration);
+
 			// Update status to success
 			this.updateCallStatus(callId, 'success', result, undefined, duration);
 
@@ -91,6 +98,15 @@ class ToolManager {
 		} catch (error) {
 			const duration = Date.now() - startTime;
 			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+			// Telemetry: end event with error
+			void telemetryService.trackToolCallEnd(
+				callId,
+				toolCall,
+				context,
+				{ success: false, error: errorMessage },
+				duration
+			);
 
 			// Update status to error
 			this.updateCallStatus(callId, 'error', undefined, errorMessage, duration);
@@ -222,6 +238,173 @@ class ToolManager {
 			},
 			handler: this.handleListFiles.bind(this)
 		});
+
+		// Web Search Tool (calls server-side Tavily endpoint)
+		this.registerTool({
+			name: 'web_search',
+			description:
+				'Perform a web search using the configured web search provider (Tavily). Returns summarized search results and top links.',
+			parameters: {
+				type: 'object',
+				properties: {
+					query: { type: 'string', description: 'Natural language search query' },
+					maxResults: { type: 'number', description: 'Number of top results to return' },
+					projectId: { type: 'string', description: 'Optional project id to associate the search' }
+				},
+				required: ['query']
+			},
+			handler: async (params: any, _context: any) => {
+				try {
+					const q = String(params.query);
+					const max = Number(params.maxResults || 3);
+					const res = await fetch('/api/tools/web-search', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ query: q, maxResults: max })
+					});
+
+					if (!res.ok) {
+						const err = await res.json();
+						return { success: false, message: err.message || 'Search failed' };
+					}
+
+					const payload = await res.json();
+					return { success: true, message: 'Search completed', data: payload.data };
+				} catch (error) {
+					return {
+						success: false,
+						message: error instanceof Error ? error.message : 'Unknown error'
+					};
+				}
+			}
+		});
+
+		// Fetch Files Tool (batch read)
+		this.registerTool({
+			name: 'fetch_files',
+			description:
+				'Fetch contents of multiple files in a project or sandbox in a single request. Returns a map of path->content.',
+			parameters: {
+				type: 'object',
+				properties: {
+					paths: {
+						type: 'string',
+						description: 'Comma-separated list or JSON array of file paths to fetch'
+					},
+					sandboxId: {
+						type: 'string',
+						description: 'Optional sandbox id to read directly from runtime'
+					},
+					projectId: {
+						type: 'string',
+						description: 'Optional project id to fallback to persisted storage'
+					}
+				},
+				required: ['paths']
+			},
+			handler: async (params: any, _context: any) => {
+				try {
+					let paths: string[] = [];
+					if (Array.isArray(params.paths)) paths = params.paths;
+					else if (typeof params.paths === 'string') {
+						try {
+							paths = JSON.parse(params.paths);
+							if (!Array.isArray(paths))
+								paths = params.paths.split(',').map((p: string) => p.trim());
+						} catch (e) {
+							paths = params.paths.split(',').map((p: string) => p.trim());
+						}
+					}
+					const sandboxId = params.sandboxId;
+					const projectId = params.projectId;
+
+					const res = await fetch('/api/tools/fetch-files', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ paths, sandboxId, projectId })
+					});
+
+					if (!res.ok) {
+						const err = await res.json();
+						return { success: false, message: err.message || 'Fetch files failed' };
+					}
+
+					const payload = await res.json();
+					return { success: true, message: 'Files fetched', data: payload.data };
+				} catch (error) {
+					return {
+						success: false,
+						message: error instanceof Error ? error.message : 'Unknown error'
+					};
+				}
+			}
+		});
+
+		// Summarize Files Tool
+		this.registerTool({
+			name: 'summarize_files',
+			description:
+				'Summarize multiple files using server-side LLM. Returns a map of path->summary+excerpt.',
+			parameters: {
+				type: 'object',
+				properties: {
+					paths: {
+						type: 'string',
+						description: 'Comma-separated list or JSON array of file paths to summarize'
+					},
+					sandboxId: {
+						type: 'string',
+						description: 'Optional sandbox id to read directly from runtime'
+					},
+					projectId: {
+						type: 'string',
+						description: 'Optional project id to fallback to persisted storage'
+					},
+					maxExcerpt: {
+						type: 'string',
+						description: 'Max characters to include in excerpt (number)'
+					}
+				},
+				required: ['paths']
+			},
+			handler: async (params: any, _context: any) => {
+				try {
+					let paths: string[] = [];
+					if (Array.isArray(params.paths)) paths = params.paths;
+					else if (typeof params.paths === 'string') {
+						try {
+							paths = JSON.parse(params.paths);
+							if (!Array.isArray(paths))
+								paths = params.paths.split(',').map((p: string) => p.trim());
+						} catch (e) {
+							paths = params.paths.split(',').map((p: string) => p.trim());
+						}
+					}
+					const sandboxId = params.sandboxId;
+					const projectId = params.projectId;
+					const maxExcerpt = Number(params.maxExcerpt || 4000);
+
+					const res = await fetch('/api/tools/summarize-files', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ paths, sandboxId, projectId, maxExcerpt })
+					});
+
+					if (!res.ok) {
+						const err = await res.json();
+						return { success: false, message: err.message || 'Summarize failed' };
+					}
+
+					const payload = await res.json();
+					return { success: true, message: 'Summaries generated', data: payload.data };
+				} catch (error) {
+					return {
+						success: false,
+						message: error instanceof Error ? error.message : 'Unknown error'
+					};
+				}
+			}
+		});
 	}
 
 	/**
@@ -258,7 +441,7 @@ class ToolManager {
 
 			const result = await response.json();
 
-			return {
+			const returnPayload: any = {
 				success: true,
 				message: `File ${params.operation} operation completed successfully`,
 				data: {
@@ -266,9 +449,12 @@ class ToolManager {
 					content: params.operation === 'read' ? result.data?.content : params.content,
 					size: result.data?.size,
 					lastModified: result.data?.lastModified,
-					metadata: result.data?.metadata
+					metadata: result.data?.metadata,
+					previousContent: result.data?.previousContent
 				}
 			};
+
+			return returnPayload as any;
 		} catch (error) {
 			return {
 				success: false,

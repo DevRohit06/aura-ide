@@ -144,12 +144,29 @@ export class FileOperationsAPIClient {
 	 * Make HTTP request to the API
 	 */
 	private async makeRequest(request: FileOperationRequest): Promise<FileOperationResponse> {
+		const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
+		console.log('🚀 [FileOpsAPI] Starting API request', {
+			requestId,
+			url: this.baseUrl,
+			operation: request.operation,
+			path: request.path,
+			projectId: request.projectId,
+			sandboxId: request.sandboxId,
+			hasContent: !!request.content,
+			contentLength: request.content?.length || 0,
+			metadata: request.metadata,
+			timestamp: new Date().toISOString()
+		});
+
 		try {
-			console.log('🚀 Making API request:', {
-				url: this.baseUrl,
-				operation: request.operation,
-				path: request.path,
-				hasContent: !!request.content
+			const startTime = Date.now();
+
+			console.log('📡 [FileOpsAPI] Making HTTP request', {
+				requestId,
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				bodySize: JSON.stringify(request).length
 			});
 
 			const response = await fetch(this.baseUrl, {
@@ -160,19 +177,67 @@ export class FileOperationsAPIClient {
 				body: JSON.stringify(request)
 			});
 
-			console.log('📡 API Response status:', response.status, response.statusText);
+			const requestTime = Date.now() - startTime;
+
+			console.log('📡 [FileOpsAPI] HTTP response received', {
+				requestId,
+				status: response.status,
+				statusText: response.statusText,
+				ok: response.ok,
+				headers: Object.fromEntries(response.headers.entries()),
+				requestTime,
+				timestamp: new Date().toISOString()
+			});
 
 			if (!response.ok) {
-				const errorData = await response.json().catch(() => ({}));
-				console.error('❌ API Error response:', errorData);
+				let errorData;
+				try {
+					errorData = await response.json();
+					console.error('❌ [FileOpsAPI] Error response body', {
+						requestId,
+						errorData,
+						status: response.status
+					});
+				} catch (jsonError) {
+					console.error('❌ [FileOpsAPI] Failed to parse error response', {
+						requestId,
+						jsonError: jsonError instanceof Error ? jsonError.message : String(jsonError),
+						status: response.status
+					});
+					errorData = {};
+				}
+
 				throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
 			}
 
 			const responseData = await response.json();
-			console.log('✅ API Response data:', responseData);
+
+			console.log('✅ [FileOpsAPI] Successful response received', {
+				requestId,
+				success: responseData.success,
+				message: responseData.message,
+				hasData: !!responseData.data,
+				dataKeys: responseData.data ? Object.keys(responseData.data) : [],
+				error: responseData.error,
+				totalTime: Date.now() - startTime,
+				timestamp: new Date().toISOString()
+			});
+
 			return responseData;
 		} catch (error) {
-			console.error('❌ API Request failed:', error);
+			console.error('❌ [FileOpsAPI] Request failed with exception', {
+				requestId,
+				error: error instanceof Error ? error.message : String(error),
+				stack: error instanceof Error ? error.stack : undefined,
+				request: {
+					operation: request.operation,
+					path: request.path,
+					projectId: request.projectId,
+					sandboxId: request.sandboxId
+				},
+				timestamp: new Date().toISOString()
+			});
+
 			return {
 				success: false,
 				message: 'Request failed',
