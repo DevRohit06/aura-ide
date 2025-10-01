@@ -22,7 +22,7 @@ Aura IDE is a modern, cloud-based integrated development environment built with 
 
 - **CodeMirror 6** - Advanced code editor with syntax highlighting
 - **Live Previews** - Instant application preview with automatic reloading
-- **Terminal Access** - Integrated WebSocket-based terminal sessions
+- **Terminal Access** - Integrated terminal sessions with real-time streaming
 - **Project Templates** - Quick start with popular frameworks and configurations
 
 ### 🔧 Technology Stack
@@ -162,7 +162,7 @@ src/
 - **Better Auth** for authentication with MongoDB adapter
 - **MongoDB** for data persistence
 - **Helicone** as AI gateway proxy
-- **WebSocket** connections for real-time features
+- **Server-Sent Events (SSE)** connections for real-time features
 
 ### Sandbox Integration
 
