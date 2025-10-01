@@ -1,219 +1,53 @@
-# Aura IDE - GitHub Copilot Instructions
-
-## Project Overview
-
-Aura IDE is a cloud-based integrated development environment built with SvelteKit 5, featuring AI-powered code assistance, real-time collaboration, and integrated sandbox execution. The project uses modern web technologies with MongoDB for data persistence and includes a comprehensive sandbox integration for code execution via Daytona and E2B providers.
-
-## Architecture & Technology Stack
-
-### Frontend Stack
-
-- **SvelteKit 5** with TypeScript - File-based routing in `src/routes/`
-- **Shadcn-Svelte** - UI components in `src/lib/components/ui/`
-- **Tailwind CSS 4.0** - Styling with `@tailwindcss/vite` plugin
-- **CodeMirror 6** - Code editor integration
-- **Better Auth** - Authentication with MongoDB adapter
-
-### Backend Services
-
-- **MongoDB** - Primary database with Better Auth integration
-- **Helicone AI Gateway** - AI service proxy for OpenAI/Anthropic
-- **R2 Storage** - Cloudflare R2 for file storage (AWS SDK compatible)
-- **Sandbox Providers** - Daytona and E2B integration for code execution
-
-### Key Architecture Patterns
-
-#### Store-Based State Management
-
-Use modular Svelte stores pattern found in `src/lib/stores/`:
-
-```typescript
-// Individual feature stores with actions
-export const filesStore = writable<Map<string, File>>(new Map());
-export const fileActions = {
-	create: (file: File) => {
-		/* implementation */
-	},
-	update: (id: string, changes: Partial<File>) => {
-		/* implementation */
-	}
-};
-
-// Re-export from src/lib/stores/editor.ts for consumer convenience
-export { filesStore, fileActions } from './files.store.js';
-```
-
-#### Type-First Development
-
-All interfaces defined in `src/lib/types/` with strict typing:
-
-- `files.ts` - File system and project types
-- `editor-state.ts` - Editor state management
-- `sandbox.ts` - Sandbox execution types
-
-#### Service Layer Architecture
-
-Services in `src/lib/services/` follow dependency injection pattern:
-
-- MongoDB services use singleton pattern with `getDb()` method
-- Authentication via `src/lib/auth.ts` with Better Auth configuration
-- External integrations (R2, Daytona, E2B) with fallback mocks
-
-## Development Workflow
-
-### Scripts & Commands
-
-```bash
-# Development with hot reload
-npm run dev                    # Start SvelteKit dev server (port 5173)
-
-# Code quality
-npm run check                  # TypeScript + Svelte check
-npm run lint                   # Prettier + ESLint
-npm run format                 # Auto-format code
-
-# Testing
-npm run test                   # Run Vitest unit tests
-npm run test:daytona          # Test Daytona sandbox connectivity
-
-# Build & Preview
-npm run build                  # Production build
-npm run preview               # Preview production build
-```
-
-### Environment Configuration
-
-Set up environment variables in root `.env`:
-
-```bash
-# Database
-DATABASE_URL=mongodb://localhost:27017/aura-dev
-
-# Authentication
-BETTER_AUTH_SECRET=your-secret-key
-GOOGLE_CLIENT_ID=your-google-client-id
-GITHUB_CLIENT_ID=your-github-client-id
-
-# AI Services
-HELICONE_API_KEY=your-helicone-key
-OPENAI_API_KEY=your-openai-key
-
-# Sandbox Providers
-DAYTONA_API_KEY=your-daytona-key
-E2B_API_KEY=your-e2b-key
-
-# R2 Storage
-R2_ACCESS_KEY_ID=your-r2-access-key
-R2_SECRET_ACCESS_KEY=your-r2-secret
-R2_BUCKET_NAME=your-bucket-name
-```
-
-## Project-Specific Patterns
-
-### Component Organization
-
-- **UI Components**: `src/lib/components/ui/` - Shadcn-Svelte components with consistent naming
-- **Shared Components**: `src/lib/components/shared/` - App-specific reusable components
-- **Feature Components**: `src/lib/components/editor/` - Domain-specific components
-
-### Svelte 5 Patterns
-
-Uses modern Svelte 5 syntax throughout:
-
-```svelte
-<script lang="ts">
-	// Use $state for reactive variables
-	let count = $state(0);
-
-	// Use $props() for component props with TypeScript
-	let { projectId, onSave }: { projectId: string; onSave: () => void } = $props();
-
-	// Use $derived for computed values
-	let doubleCount = $derived(count * 2);
-</script>
-```
-
-### File System Abstractions
-
-Project uses comprehensive file system types in `src/lib/types/files.ts`:
-
-- `FileSystemItem` - Base interface for files/directories
-- `File` extends with content, language detection, metadata
-- `Directory` extends with children and expansion state
-- Rich metadata tracking: bookmarks, breakpoints, cursors, search history
-
-### MongoDB Integration
-
-Database services follow consistent patterns:
-
-```typescript
-class SomeService {
-	private static db: Db | null = null;
-
-	static async getDb(): Promise<Db> {
-		if (!this.db) {
-			const client = new MongoClient(connectionString);
-			this.db = client.db(dbName);
-		}
-		return this.db;
-	}
-
-	static async createRecord(data: Omit<Record, 'id' | 'created_at'>): Promise<Record> {
-		const now = new Date();
-		const doc = { ...data, created_at: now, updated_at: now };
-		const result = await this.getDb().collection('records').insertOne(doc);
-		return { id: result.insertedId.toString(), ...doc };
-	}
-}
-```
-
-## Integration Guidelines
-
-### Shadcn-Svelte Components
-
-Before creating new components, check `@ieedan/shadcn-svelte-extras` via jsrepo. Use pinned version from `jsrepo.json`:
-
-```bash
-# Fetch component from jsrepo
-jsrepo get @ieedan/shadcn-svelte-extras@1.0.0/ts/math
-```
-
-### Authentication Flow
-
-Uses Better Auth with MongoDB adapter. Session available via:
-
-- Server-side: `event.locals.session` and `event.locals.user`
-- Client-side: Import from `$lib/auth.js`
-
-### API Routes
-
-Follow SvelteKit conventions:
-
-- `src/routes/api/auth/[...all]/+server.ts` - Better Auth handler
-- API endpoints use `RequestHandler` type with proper HTTP methods
-
-### Sandbox Integration
-
-Currently integrating comprehensive sandbox system:
-
-- Project templates from StackBlitz
-- File storage via R2
-- Code execution via Daytona/E2B
-- Session management with resource tracking
-
-## Code Style & Conventions
-
-- **TypeScript**: Strict mode enabled, prefer interfaces over types
-- **Imports**: Use `@/` alias for `src/lib/` paths (configured in `svelte.config.js`)
-- **File naming**: kebab-case for files, PascalCase for components
-- **Store actions**: Group related mutations in action objects
-- **Error handling**: Use proper TypeScript error types, avoid generic `any`
-
-## Testing & Quality
-
-- **Unit Tests**: Vitest with jsdom for DOM testing
-- **Type Checking**: `svelte-check` for Svelte component type validation
-- **Linting**: ESLint + Prettier with Svelte-specific rules
-- **Package Manager**: pnpm for dependency management
-
-This codebase emphasizes type safety, modular architecture, and modern Svelte patterns while integrating complex cloud services for a comprehensive IDE experience.
+````instructions
+# Aura IDE - GitHub Copilot Instructions (Concise)
+
+Goal: Help AI coding agents be immediately productive in this repository by listing the architecture, important workflows, conventions, and precise file examples.
+
+1. Big picture
+   - Frontend: SvelteKit 5 + TypeScript (routes in `src/routes/`) with component UI in `src/lib/components/`.
+   - Backend/services: Node + MongoDB; service layer under `src/lib/services/` (e.g., `r2-*`, `sandbox/*`, `llm/*`).
+   - Sandboxes & storage: Multi-provider sandboxes (Daytona and E2B) and Cloudflare R2 for persistent project storage.
+
+2. Quick developer workflows
+   - Start Dev: `npm run dev` (or `pnpm install && pnpm dev`). See `package.json` scripts.
+   - Run unit tests: `npm run test` (runs Vitest). Daytona-specific tests: `npm run test:daytona`.
+   - Manage DB: `npm run db:init|db:reset|db:stats|db:health` (scripts/database.js).
+
+3. Key integration points (where to look for impactful changes)
+   - LLMs & Helicone: `src/lib/services/llm/llm.service.ts` and `src/lib/config/helicone.config.ts` — Helicone is used as a gateway; set HELICONE_* env vars (see `src/app.d.ts`).
+   - Sandbox adapters: `src/lib/services/sandbox/daytona.service.ts` and E2B adapters in `src/lib/services/sandbox/` — they create sandboxes, upload files, and expose terminal/workspace operations.
+   - R2 storage: `src/lib/services/r2-storage.service.ts`, `r2-file-sync.service.ts`, and `r2-backup.service.ts` — use these for uploads, downloads, versioning.
+   - Auth: `src/lib/auth.ts`, `src/lib/auth.client.ts`, and `src/hooks.server.ts` — Better Auth with MongoDB adapter; session available on `event.locals`.
+   - Real-time: `src/routes/api/ws/+server.ts` — WebSocket handlers for terminals, file watches and cursor sync.
+
+4. Project conventions an AI must follow
+   - Use TypeScript with strict types; prefer interfaces in `src/lib/types/`.
+   - Imports use `@/` alias for `src/lib/` configured in `svelte.config.js` (use `$lib/...` within SvelteKit files).
+   - Files: kebab-case for filenames, PascalCase for components.
+   - Stores: grouped actions (e.g., `filesStore` + `fileActions`) under `src/lib/stores/`.
+
+5. Actionable examples to copy/paste
+   - Create a Daytona sandbox: see `DaytonaService.createSandbox` and usage in `src/lib/services/workspace-context.service.ts` (syncDaytonaWorkspace).
+   - Upload project to R2: see `ProjectInitializationService.uploadToR2Storage` and `R2StorageService.uploadProject`.
+   - WebSocket terminal creation: follow `src/routes/api/ws/+server.ts` message shape — requires `sandboxId` and `shell`.
+
+6. Tests & mocking
+   - Unit tests use Vitest; many sandbox tests mock the provider SDKs (e.g., `vi.mock('$lib/services/daytona.service')`). Inspect `tests/unit/services/*.test.ts` to emulate patterns.
+
+7. Environment & secrets
+   - Main envs: DATABASE_URL, DAYTONA_API_KEY, E2B_API_KEY, HELICONE_API_KEY, OPENAI/ANTHROPIC keys, R2_* vars. Types referenced in `src/app.d.ts`.
+   - For local dev, copy `.env.example` to `.env` and set provider keys; many services throw if keys are missing (DaytonaService constructor).
+
+8. When making changes
+   - Run `npm run check` to run Svelte checks and TypeScript.
+   - Add a unit test when changing service behavior; follow existing vi.mock patterns for provider SDKs.
+   - Keep code in `src/lib/services/` pure and add integration docs under `docs/` when adding new external integrations.
+
+9. Helpful file pointers
+   - Architecture & docs: `docs/README.md`, `docs/sandbox-integration-plan.md`
+   - Sandbox code: `src/lib/services/sandbox/` and `src/routes/api/ws/+server.ts`
+   - R2 code: `src/lib/services/r2-storage.service.ts`
+   - LLM code: `src/lib/services/llm/llm.service.ts`
+
+Please review this condensed guidance — what sections need more detail (e.g., deployment, rate-limits, or preferred test fixtures)?
+````
