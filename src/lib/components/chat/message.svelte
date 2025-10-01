@@ -341,6 +341,12 @@
 				</Badge>
 			{/if}
 
+			{#if message.metadata?.hasToolCalls && message.metadata?.toolCallCount}
+				<Badge variant="secondary" class="ml-2 text-xs">
+					🔧 {message.metadata.toolCallCount} tool{message.metadata.toolCallCount > 1 ? 's' : ''}
+				</Badge>
+			{/if}
+
 			<span class="text-xs text-muted-foreground">
 				{formatTime(message.timestamp)}
 			</span>
@@ -361,6 +367,78 @@
 		{:else}
 			<div class="space-y-4 text-sm leading-relaxed">
 				<Markdown content={message.content} messageId={message.id} data={{}} id={message.id} />
+
+				<!-- Tool Calls Display -->
+				{#if message.metadata?.toolCalls && message.metadata.toolCalls.length > 0}
+					<div class="mt-3 border-t pt-3">
+						<div class="mb-2 flex items-center gap-2">
+							<span class="text-xs font-medium text-muted-foreground">Tool Calls</span>
+							<Badge variant="secondary" class="text-xs">
+								{message.metadata.toolCalls.length}
+							</Badge>
+						</div>
+						<div class="space-y-2">
+							{#each message.metadata.toolCalls as toolCall}
+								<div class="rounded border bg-muted/50 p-2 text-xs">
+									<div class="mb-1 flex items-center gap-2">
+										<span class="font-medium">{toolCall.name}</span>
+										{#if toolCall.id}
+											<span class="font-mono text-muted-foreground">{toolCall.id}</span>
+										{/if}
+									</div>
+									{#if Object.keys(toolCall.arguments || {}).length > 0}
+										<details class="mt-1">
+											<summary class="cursor-pointer text-muted-foreground hover:text-foreground">
+												Parameters
+											</summary>
+											<pre
+												class="mt-1 overflow-x-auto rounded bg-background p-1 text-xs">{JSON.stringify(
+													toolCall.arguments,
+													null,
+													2
+												)}</pre>
+										</details>
+									{/if}
+								</div>
+							{/each}
+						</div>
+					</div>
+				{/if}
+
+				<!-- Tool Results Display -->
+				{#if message.metadata?.toolResults && message.metadata.toolResults.length > 0}
+					<div class="mt-3 border-t pt-3">
+						<div class="mb-2 flex items-center gap-2">
+							<span class="text-xs font-medium text-muted-foreground">Tool Results</span>
+							<Badge variant="secondary" class="text-xs">
+								{message.metadata.toolResults.length}
+							</Badge>
+						</div>
+						<div class="space-y-2">
+							{#each message.metadata.toolResults as result}
+								<div
+									class="rounded border p-2 text-xs {result.success
+										? 'border-green-200 bg-green-50'
+										: 'border-red-200 bg-red-50'}"
+								>
+									<div class="mb-1 flex items-center gap-2">
+										<span class={result.success ? 'text-green-700' : 'text-red-700'}>
+											{result.success ? '✅' : '❌'}
+										</span>
+										{#if result.tool_name}
+											<span class="font-medium">{result.tool_name}</span>
+										{:else if result.tool_call_id}
+											<span class="font-mono text-muted-foreground">{result.tool_call_id}</span>
+										{/if}
+									</div>
+									<div class={result.success ? 'text-green-800' : 'text-red-800'}>
+										{result.message}
+									</div>
+								</div>
+							{/each}
+						</div>
+					</div>
+				{/if}
 
 				<!-- Agent Interrupt Review -->
 				{#if message.agentInterrupt}

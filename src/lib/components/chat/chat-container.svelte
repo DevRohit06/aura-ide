@@ -19,7 +19,7 @@
 		agentInterrupt?: {
 			toolCalls: Array<{
 				name: string;
-				parameters: Record<string, any>;
+				args: Record<string, any>;
 				id?: string;
 			}>;
 			stateSnapshot?: {

@@ -7,6 +7,15 @@
 		DropdownMenuItem,
 		DropdownMenuTrigger
 	} from '$lib/components/ui/dropdown-menu';
+	import { sseService, type SSEEvent } from '$lib/services/sse.service';
+	import {
+		agentActions,
+		agentStatusDisplay,
+		isAgentAvailable,
+		isAgentBusy,
+		pendingToolsCount,
+		queuedMessagesCount
+	} from '$lib/stores/agent-state.store';
 	import {
 		chatThreadsActions,
 		chatThreadsStore,
@@ -17,7 +26,7 @@
 	import { chatFileContext } from '@/stores/editor';
 	import { selectedModelStore } from '@/stores/model';
 	import { currentSandboxId } from '@/stores/sandbox.store';
-	import { History, MessageSquare, MoreHorizontal, Plus } from 'lucide-svelte';
+	import { AlertCircle, History, MessageSquare, MoreHorizontal, Plus } from 'lucide-svelte';
 	import { createEventDispatcher, tick } from 'svelte';
 	import ChatContainer from './chat-container.svelte';
 	import ChatInput from './chat-input.svelte';
@@ -38,7 +47,7 @@
 		agentInterrupt?: {
 			toolCalls: Array<{
 				name: string;
-				parameters: Record<string, any>;
+				args: Record<string, any>;
 				id?: string;
 			}>;
 			stateSnapshot?: {
@@ -142,15 +151,32 @@
 	$effect(() => {
 		if (selectedThread?.messages) {
 			try {
-				const msgs = selectedThread.messages.map((m: ChatMessage) => ({
-					id: m.id,
-					content: m.content,
-					role: (m.role === 'system' ? 'assistant' : m.role) as 'user' | 'assistant',
-					timestamp: new Date(m.timestamp),
-					isLoading: false,
-					metadata: m.metadata,
-					agentInterrupt: m.metadata?.agentInterrupt
-				}));
+				const msgs = selectedThread.messages.map((m: ChatMessage) => {
+					const msg = {
+						id: m.id,
+						content: m.content,
+						role: (m.role === 'system' ? 'assistant' : m.role) as 'user' | 'assistant',
+						timestamp: new Date(m.timestamp),
+						isLoading: false,
+						metadata: m.metadata,
+						agentInterrupt: undefined as any
+					};
+
+					// Transform agentInterrupt if it exists - convert parameters to args
+					if (m.metadata?.agentInterrupt) {
+						msg.agentInterrupt = {
+							...m.metadata.agentInterrupt,
+							toolCalls:
+								m.metadata.agentInterrupt.toolCalls?.map((tool: any) => ({
+									name: tool.name,
+									args: tool.parameters || tool.args || {},
+									id: tool.id
+								})) || []
+						};
+					}
+
+					return msg;
+				});
 				threadMessages = msgs;
 			} catch (err) {
 				console.error('ThreadMessagesMappingError', err);
@@ -239,49 +265,181 @@
 				loadedThreadIds.add(threadId);
 			} else {
 				console.error(`❌ Failed to load messages: ${response.status}`);
-				errorMessage = 'Failed to load messages';
 			}
 		} catch (err) {
-			console.error('Failed to load thread messages:', err);
-			errorMessage = 'Failed to load messages';
+			console.error('Failed to load thread messages from DB:', err);
 		}
 	}
 
-	// Helper to safely format updatedAt timestamps
-	function formatUpdatedAt(ts?: string) {
-		if (!ts) return '';
-		try {
-			const d = new Date(ts);
-			if (isNaN(d.getTime())) return '';
-			return d.toLocaleString();
-		} catch (err) {
-			return '';
-		}
-	}
+	async function handleSend(
+		event: CustomEvent<{ content: string; includeCodeContext?: boolean; codeQuery?: string }>
+	) {
+		const payload = event.detail;
+		let threadId: string;
 
-	async function createNewThread() {
-		if (!projectId || isCreatingThread) return;
-		isCreatingThread = true;
+		// Check if agent is available
+		if (!$isAgentAvailable && $isAgentBusy) {
+			// Queue the message if agent is busy
+			const messageId = agentActions.queueMessage(payload.content, selectedThread?.id || '');
+			errorMessage = null;
+			return;
+		}
+
+		if (!selectedThread) {
+			// Create new thread for first message (will be created by API)
+			threadId = '';
+		} else {
+			// Use existing thread
+			threadId = selectedThread.id;
+			agentActions.setActiveThread(threadId);
+		}
+
+		// Add user message immediately to UI
+		if (threadId) {
+			chatThreadsActions.addMessage(projectId, threadId, 'user', payload.content);
+		}
+
+		// Set agent status to thinking
+		agentActions.setStatus('thinking', 'Processing your message...');
+		isLoadingMessages = true;
+		errorMessage = null;
+
+		const startTime = Date.now();
+		let assistantContent = '';
+		let streamingMessageId: string | null = null;
+
 		try {
-			const response = await fetch('/api/chat/threads', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					title: `Thread ${new Date().toLocaleString()}`,
-					projectId
-				})
+			// Set up SSE event handlers
+			const unsubscribeSSE = sseService.subscribeAll((event: SSEEvent) => {
+				switch (event.type) {
+					case 'start':
+						agentActions.setStatus('thinking', 'Agent started processing...');
+						break;
+
+					case 'thinking':
+						agentActions.setStatus('thinking', event.data.message || 'Agent is thinking...');
+						break;
+
+					case 'tool_call':
+						agentActions.setStatus('executing', 'Executing tools...');
+						agentActions.addExecutingTool('tool', event.data.toolCalls?.[0]?.name || 'tool');
+						break;
+
+					case 'content':
+						if (!streamingMessageId && event.data.chunk) {
+							// Create streaming assistant message
+							streamingMessageId = `stream-${Date.now()}`;
+							assistantContent = event.data.chunk;
+							if (threadId) {
+								chatThreadsActions.addMessage(projectId, threadId, 'assistant', assistantContent, {
+									messageId: streamingMessageId,
+									isStreaming: true
+								});
+							}
+						} else if (streamingMessageId && event.data.chunk) {
+							// Update streaming content
+							assistantContent += event.data.chunk;
+							if (threadId) {
+								chatThreadsActions.updateMessage(
+									projectId,
+									threadId,
+									streamingMessageId,
+									assistantContent
+								);
+							}
+						}
+						break;
+
+					case 'complete':
+						const responseTime = Date.now() - startTime;
+						agentActions.recordResponseTime(responseTime);
+						agentActions.setStatus('idle');
+
+						// Update threadId if new thread was created
+						if (event.data.threadId && !threadId) {
+							threadId = event.data.threadId;
+							agentActions.setActiveThread(threadId);
+							loadThreadsFromDB().then(() => {
+								chatThreadsActions.selectThread(projectId, threadId);
+								loadThreadMessages(threadId, true);
+							});
+						} else if (threadId) {
+							// Reload messages to get final version from DB
+							loadThreadMessages(threadId, true);
+						}
+
+						// Mark streaming as complete
+						if (streamingMessageId && threadId) {
+							chatThreadsActions.updateMessage(
+								projectId,
+								threadId,
+								streamingMessageId,
+								assistantContent,
+								{
+									isStreaming: false
+								}
+							);
+						}
+
+						isLoadingMessages = false;
+						unsubscribeSSE();
+						break;
+
+					case 'error':
+						agentActions.setError(`Agent error: ${event.data.error}`);
+						if (threadId && event.data.error) {
+							chatThreadsActions.addMessage(
+								projectId,
+								threadId,
+								'assistant',
+								`Error: ${event.data.error}`
+							);
+						}
+						isLoadingMessages = false;
+						unsubscribeSSE();
+						break;
+				}
 			});
 
-			if (response.ok) {
-				const data = await response.json();
-				await loadThreadsFromDB();
-				chatThreadsActions.selectThread(projectId, data.thread.id);
-			} else {
-				errorMessage = 'Failed to create thread';
+			// Send message via SSE stream
+			await sseService.streamMessage({
+				message: payload.content,
+				threadId: threadId || undefined,
+				projectId,
+				sandboxId: project?.sandboxId || currentSandboxIdValue,
+				sandboxType: project?.sandboxProvider,
+				modelName: selectedModel,
+				includeCodeContext: payload.includeCodeContext,
+				codeQuery: payload.codeQuery,
+				currentFile: $chatFileContext.isActive ? $chatFileContext.filePath : null
+			});
+		} catch (err) {
+			console.error('Failed to send message via SSE:', err);
+			agentActions.setError(
+				`Network error: ${err instanceof Error ? err.message : 'Unknown error'}`
+			);
+			if (threadId) {
+				chatThreadsActions.addMessage(
+					projectId,
+					threadId,
+					'assistant',
+					`Error: ${err instanceof Error ? err.message : 'Network error'}`
+				);
 			}
+			isLoadingMessages = false;
+		}
+	}
+
+	// Create new thread
+	async function createNewThread() {
+		if (isCreatingThread) return;
+		isCreatingThread = true;
+		try {
+			const threadId = chatThreadsActions.createThread(projectId, 'New Thread');
+			chatThreadsActions.selectThread(projectId, threadId);
 		} catch (err) {
 			console.error('Failed to create thread:', err);
-			errorMessage = 'Failed to create thread';
+			errorMessage = 'Failed to create new thread';
 		} finally {
 			isCreatingThread = false;
 		}
@@ -291,92 +449,27 @@
 		chatThreadsActions.selectThread(projectId, threadId);
 	}
 
-	async function handleSend(
-		event: CustomEvent<{ content: string; includeCodeContext?: boolean; codeQuery?: string }>
-	) {
-		const payload = event.detail;
-		let threadId: string;
-
-		if (!selectedThread) {
-			// Create new thread for first message (will be created by API)
-			threadId = '';
-		} else {
-			// Use existing thread
-			threadId = selectedThread.id;
-		}
-
-		// Add user message immediately to UI
-		if (threadId) {
-			chatThreadsActions.addMessage(projectId, threadId, 'user', payload.content);
-		}
-
-		isLoadingMessages = true;
-		errorMessage = null;
-
-		try {
-			const res = await fetch('/api/agent', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					message: payload.content,
-					threadId: threadId || undefined,
-					projectId,
-					sandboxId: project?.sandboxId || currentSandboxIdValue,
-					sandboxType: project?.sandboxProvider,
-					modelName: selectedModel,
-					includeCodeContext: payload.includeCodeContext,
-					codeQuery: payload.codeQuery,
-					currentFile: $chatFileContext.isActive ? $chatFileContext.filePath : null
-				})
-			});
-			const json = await res.json();
-
-			// Update threadId if new thread was created
-			if (json.threadId && !threadId) {
-				threadId = json.threadId;
-				await loadThreadsFromDB();
-				chatThreadsActions.selectThread(projectId, threadId);
-				// Load messages from DB to get both user and assistant messages
-				await loadThreadMessages(threadId, true);
-			} else if (json.threadId) {
-				// Existing thread - reload messages from DB to get the assistant response
-				await loadThreadMessages(json.threadId, true);
-			}
-
-			// Handle interrupts
-			if (json.interrupt && threadId) {
-				const interruptMessage = {
-					id: `interrupt-${Date.now()}`,
-					content: 'Agent requested human review for the following actions:',
-					role: 'assistant' as const,
-					timestamp: new Date(),
-					isLoading: false,
-					agentInterrupt: {
-						toolCalls: Array.isArray(json.data?.toolCalls) ? json.data.toolCalls : [],
-						stateSnapshot: json.data?.stateSnapshot || {},
-						reason:
-							json.data?.reason || 'Agent requires approval for potentially destructive actions'
-					}
-				};
-				chatThreadsActions.addMessage(projectId, threadId, 'assistant', interruptMessage.content, {
-					agentInterrupt: interruptMessage.agentInterrupt
-				});
-			} else if (!json.success && json.error && threadId) {
-				chatThreadsActions.addMessage(projectId, threadId, 'assistant', `Error: ${json.error}`);
-			}
-		} catch (err) {
-			console.error('Failed to send message:', err);
-			errorMessage = 'Failed to send message';
-			if (threadId) {
-				chatThreadsActions.addMessage(projectId, threadId, 'assistant', 'Failed to get response');
-			}
-		} finally {
-			isLoadingMessages = false;
-		}
-	}
-
 	function handleVoice() {
 		console.log('Voice input - TODO: Implement voice recording');
+	}
+
+	function formatUpdatedAt(dateString: string): string {
+		try {
+			const date = new Date(dateString);
+			const now = new Date();
+			const diffMs = now.getTime() - date.getTime();
+			const diffMins = Math.floor(diffMs / (1000 * 60));
+			const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+			const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+			if (diffMins < 1) return 'Just now';
+			if (diffMins < 60) return `${diffMins}m ago`;
+			if (diffHours < 24) return `${diffHours}h ago`;
+			if (diffDays < 7) return `${diffDays}d ago`;
+			return date.toLocaleDateString();
+		} catch {
+			return '—';
+		}
 	}
 
 	async function handleInterruptDecision(event: CustomEvent) {
@@ -489,39 +582,65 @@
 	}
 
 	async function deleteThread(threadId: string) {
-		const ok = await showConfirm('Delete thread', 'Are you sure you want to delete this thread?');
+		const ok = await showConfirm('Delete Thread', 'Are you sure you want to delete this thread?');
 		if (!ok) return;
 		chatThreadsActions.deleteThread(projectId, threadId);
 	}
 </script>
 
-<div class="flex h-full w-full flex-col border-l bg-background">
-	<!-- Header -->
-	<div class="flex items-center justify-between border-b px-3 py-2">
-		<div class="flex items-center gap-2">
-			<div class="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
-				<MessageSquare size={16} class="text-primary" />
+<div class="flex h-full flex-col">
+	<div class="flex items-center justify-between border-b p-4">
+		<div class="flex items-center gap-3">
+			<div class="flex min-w-0 flex-1 flex-col gap-1">
+				<div
+					class="flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1 text-xs dark:bg-gray-800"
+				>
+					{#if $agentStatusDisplay.icon === 'thinking' || $agentStatusDisplay.icon === 'executing'}
+						<div class="h-2 w-2 animate-pulse rounded-full bg-blue-500"></div>
+					{:else if $agentStatusDisplay.icon === 'ready'}
+						<div class="h-2 w-2 rounded-full bg-green-500"></div>
+					{:else if $agentStatusDisplay.icon === 'error'}
+						<AlertCircle size={8} class="text-red-500" />
+					{:else if $agentStatusDisplay.icon === 'connecting'}
+						<div
+							class="h-2 w-2 animate-spin rounded-full border border-yellow-500 border-t-transparent"
+						></div>
+					{:else}
+						<div class="h-2 w-2 rounded-full bg-gray-400"></div>
+					{/if}
+					<span class="{$agentStatusDisplay.color} font-medium">{$agentStatusDisplay.text}</span>
+				</div>
 			</div>
-			<div>
-				<h3 class="text-sm font-semibold">Aura Chat</h3>
-				{#if selectedThread}
-					<p class="max-w-32 truncate text-xs text-muted-foreground" title={selectedThread.title}>
-						{selectedThread.title}
-					</p>
-				{/if}
-				{#if $chatFileContext.isActive}
-					<p class="max-w-32 truncate text-xs text-blue-600" title={$chatFileContext.filePath}>
-						📄 {$chatFileContext.fileName}
-					</p>
-				{/if}
-			</div>
+			{#if selectedThread}
+				<p class="max-w-32 truncate text-xs text-muted-foreground" title={selectedThread.title}>
+					{selectedThread.title}
+				</p>
+			{/if}
+			{#if $chatFileContext.isActive}
+				<p class="max-w-32 truncate text-xs text-blue-600" title={$chatFileContext.filePath}>
+					📄 {$chatFileContext.fileName}
+				</p>
+			{/if}
+			<!-- Active Tools Indicator -->
+			{#if $pendingToolsCount > 0}
+				<div class="flex items-center gap-1 text-xs text-purple-600">
+					<div class="h-2 w-2 animate-pulse rounded-full bg-purple-500"></div>
+					<span>{$pendingToolsCount} tool{$pendingToolsCount !== 1 ? 's' : ''} running</span>
+				</div>
+			{/if}
+			<!-- Queued Messages Indicator -->
+			{#if $queuedMessagesCount > 0}
+				<div class="flex items-center gap-1 text-xs text-orange-600">
+					<span>{$queuedMessagesCount} message{$queuedMessagesCount !== 1 ? 's' : ''} queued</span>
+				</div>
+			{/if}
 		</div>
 
-		<div class="flex items-center gap-1">
+		<div class="flex items-center gap-2">
 			<!-- New thread button -->
 			<Button
 				variant="ghost"
-				size="icon"
+				size="sm"
 				class="h-7 w-7"
 				disabled={isCreatingThread}
 				title="New chat"
@@ -529,27 +648,33 @@
 			>
 				{#if isCreatingThread}
 					<div
-						class="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
+						class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
 					></div>
 				{:else}
-					<Plus size={14} />
+					<Plus class="h-4 w-4" />
 				{/if}
 			</Button>
 
 			<!-- Thread history dropdown -->
 			<DropdownMenu bind:open={showThreadHistory}>
 				<DropdownMenuTrigger>
-					<History size={14} />
+					<Button variant="ghost" size="sm" class="h-7 w-7" title="Thread history">
+						<History class="h-4 w-4" />
+					</Button>
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="end" class="max-h-96 w-80 overflow-y-auto">
 					{#each threads as t}
 						<DropdownMenuItem onclick={() => selectThread(t.id)}>
 							<div class="flex w-full items-center justify-between">
-								<div class="truncate">{t.title}</div>
+								<span class="truncate">{t.title}</span>
 								<small class="text-xs text-muted-foreground"
 									>{formatUpdatedAt(t.updatedAt) || '—'}</small
 								>
 							</div>
+						</DropdownMenuItem>
+					{:else}
+						<DropdownMenuItem disabled>
+							<span class="text-xs text-muted-foreground">No threads yet</span>
 						</DropdownMenuItem>
 					{/each}
 				</DropdownMenuContent>
@@ -558,12 +683,15 @@
 			<!-- More options -->
 			<DropdownMenu>
 				<DropdownMenuTrigger>
-					<MoreHorizontal size={14} />
+					<Button variant="ghost" size="sm" class="h-7 w-7">
+						<MoreHorizontal class="h-4 w-4" />
+					</Button>
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="end">
 					<DropdownMenuItem onclick={() => dispatch('close')}>
 						<div class="flex items-center gap-2">
-							<span class="text-sm">Close chat</span>
+							<MessageSquare class="h-4 w-4" />
+							Close Chat
 						</div>
 					</DropdownMenuItem>
 				</DropdownMenuContent>
@@ -578,29 +706,38 @@
 		</div>
 	{/if}
 
-	<!-- Threads list and messages -->
-	<div class="flex flex-1 flex-col overflow-hidden">
-		<!-- Chat messages -->
-		<div class="flex-1 overflow-hidden">
+	<!-- Chat content -->
+	<div class="flex-1 overflow-hidden">
+		{#if selectedThread}
 			<ChatContainer
 				messages={threadMessages}
-				isLoading={isLoadingMessages || threadMessages.some((m) => m.isLoading)}
+				isLoading={isLoadingMessages || threadMessages.some((m: any) => m.isLoading)}
 				on:approveInterrupt={handleInterruptDecision}
 				on:rejectInterrupt={handleInterruptDecision}
 				on:modifyInterrupt={handleInterruptDecision}
 			/>
-		</div>
-
-		<!-- Chat input -->
-		<ChatInput on:send={handleSend} on:voice={handleVoice} />
+		{:else}
+			<div class="flex h-full items-center justify-center p-8 text-center">
+				<div class="max-w-sm">
+					<MessageSquare class="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
+					<h3 class="mb-2 text-lg font-medium">Start a conversation</h3>
+					<p class="text-sm text-muted-foreground">
+						Send a message to begin chatting with the AI assistant.
+					</p>
+				</div>
+			</div>
+		{/if}
 	</div>
 
-	<!-- Confirm modal component -->
-	<ConfirmModal
-		bind:open={confirmOpen}
-		title={confirmTitle}
-		description={confirmBody}
-		on:confirm={handleModalConfirm}
-		on:cancel={handleModalCancel}
-	/>
+	<!-- Chat input -->
+	<ChatInput on:send={handleSend} on:voice={handleVoice} />
 </div>
+
+<!-- Confirm Modal -->
+<ConfirmModal
+	bind:open={confirmOpen}
+	title={confirmTitle}
+	description={confirmBody}
+	on:confirm={handleModalConfirm}
+	on:cancel={handleModalCancel}
+/>
