@@ -12,38 +12,74 @@
 	let { currentView, searchQuery = '', project }: Props = $props();
 </script>
 
-<div class="flex h-full flex-1 flex-col">
+<div class="flex h-full w-full flex-col bg-sidebar">
 	{#if currentView === 'explorer'}
 		<FileExplorer {project} {searchQuery} />
 	{:else if currentView === 'search'}
-		<div class="p-4">
-			<h2 class="mb-4 font-semibold">Search</h2>
-			<p class="text-sm text-muted-foreground">Global search functionality would go here</p>
+		<div class="flex h-full flex-col">
+			<div class="border-b border-border p-3">
+				<h2 class="text-sm font-semibold tracking-wide text-sidebar-foreground uppercase">
+					Search
+				</h2>
+			</div>
+			<div class="flex-1 p-4">
+				<p class="text-sm text-muted-foreground">Global search functionality would go here</p>
+			</div>
 		</div>
 	{:else if currentView === 'vector-indexing'}
-		<div class="p-4">
-			<h2 class="mb-4 font-semibold">Vector Indexing</h2>
-			<VectorDbStatus {project} />
+		<div class="flex h-full flex-col">
+			<div class="border-b border-border p-3">
+				<h2 class="text-sm font-semibold tracking-wide text-sidebar-foreground uppercase">
+					Vector Indexing
+				</h2>
+			</div>
+			<div class="flex-1 p-4">
+				<VectorDbStatus {project} />
+			</div>
 		</div>
 	{:else if currentView === 'source-control'}
-		<div class="p-4">
-			<h2 class="mb-4 font-semibold">Source Control</h2>
-			<p class="text-sm text-muted-foreground">Git integration would go here</p>
+		<div class="flex h-full flex-col">
+			<div class="border-b border-border p-3">
+				<h2 class="text-sm font-semibold tracking-wide text-sidebar-foreground uppercase">
+					Source Control
+				</h2>
+			</div>
+			<div class="flex-1 p-4">
+				<p class="text-sm text-muted-foreground">Git integration would go here</p>
+			</div>
 		</div>
 	{:else if currentView === 'debug'}
-		<div class="p-4">
-			<h2 class="mb-4 font-semibold">Run and Debug</h2>
-			<p class="text-sm text-muted-foreground">Debug functionality would go here</p>
+		<div class="flex h-full flex-col">
+			<div class="border-b border-border p-3">
+				<h2 class="text-sm font-semibold tracking-wide text-sidebar-foreground uppercase">
+					Run and Debug
+				</h2>
+			</div>
+			<div class="flex-1 p-4">
+				<p class="text-sm text-muted-foreground">Debug functionality would go here</p>
+			</div>
 		</div>
 	{:else if currentView === 'extensions'}
-		<div class="p-4">
-			<h2 class="mb-4 font-semibold">Extensions</h2>
-			<p class="text-sm text-muted-foreground">Extensions management would go here</p>
+		<div class="flex h-full flex-col">
+			<div class="border-b border-border p-3">
+				<h2 class="text-sm font-semibold tracking-wide text-sidebar-foreground uppercase">
+					Extensions
+				</h2>
+			</div>
+			<div class="flex-1 p-4">
+				<p class="text-sm text-muted-foreground">Extensions management would go here</p>
+			</div>
 		</div>
 	{:else}
-		<div class="p-4">
-			<h2 class="mb-4 font-semibold">Unknown View</h2>
-			<p class="text-sm text-muted-foreground">View not implemented yet...</p>
+		<div class="flex h-full flex-col">
+			<div class="border-b border-border p-3">
+				<h2 class="text-sm font-semibold tracking-wide text-sidebar-foreground uppercase">
+					Unknown View
+				</h2>
+			</div>
+			<div class="flex-1 p-4">
+				<p class="text-sm text-muted-foreground">View not implemented yet...</p>
+			</div>
 		</div>
 	{/if}
 </div>
