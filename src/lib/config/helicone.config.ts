@@ -1,4 +1,7 @@
 // config/helicone.config.ts
+
+import { env } from '$env/dynamic/private';
+
 export interface HeliconeConfig {
 	apiKey: string;
 	baseUrl: string;
@@ -28,6 +31,12 @@ export class HeliconeConfigManager {
 
 	private constructor() {
 		this.config = this.loadConfig();
+		// Ensure Helicone API key is present - Langraph currently requires Helicone for all provider traffic
+		if (!this.config.apiKey) {
+			throw new Error(
+				'HELICONE_API_KEY environment variable is required. Langraph only supports providers via Helicone.'
+			);
+		}
 	}
 
 	static getInstance(): HeliconeConfigManager {
@@ -38,26 +47,27 @@ export class HeliconeConfigManager {
 	}
 
 	private loadConfig(): HeliconeConfig {
+		const apiKey = env.HELICONE_API_KEY || '';
 		return {
-			apiKey: process.env.HELICONE_API_KEY!,
-			baseUrl: process.env.HELICONE_BASE_URL || 'https://oai.helicone.ai/v1',
+			apiKey,
+			baseUrl: env.HELICONE_BASE_URL || 'https://oai.helicone.ai/v1',
 			caching: {
-				enabled: process.env.HELICONE_CACHE_ENABLED === 'true',
-				ttl: parseInt(process.env.HELICONE_CACHE_TTL || '3600'),
-				bucketMaxSize: parseInt(process.env.HELICONE_CACHE_BUCKET_SIZE || '3')
+				enabled: env.HELICONE_CACHE_ENABLED === 'true',
+				ttl: parseInt(env.HELICONE_CACHE_TTL || '3600'),
+				bucketMaxSize: parseInt(env.HELICONE_CACHE_BUCKET_SIZE || '3')
 			},
 			routing: {
-				strategy: (process.env.HELICONE_ROUTING_STRATEGY as any) || 'latency',
-				fallbackProviders: (process.env.HELICONE_FALLBACK_PROVIDERS || '').split(',')
+				strategy: (env.HELICONE_ROUTING_STRATEGY as any) || 'latency',
+				fallbackProviders: (env.HELICONE_FALLBACK_PROVIDERS || '').split(',')
 			},
 			rateLimit: {
-				requestsPerMinute: parseInt(process.env.HELICONE_RATE_LIMIT_RPM || '1000'),
-				tokensPerMinute: parseInt(process.env.HELICONE_RATE_LIMIT_TPM || ''),
-				costPerMinute: parseFloat(process.env.HELICONE_RATE_LIMIT_COST || '')
+				requestsPerMinute: parseInt(env.HELICONE_RATE_LIMIT_RPM || '1000'),
+				tokensPerMinute: parseInt(env.HELICONE_RATE_LIMIT_TPM || ''),
+				costPerMinute: parseFloat(env.HELICONE_RATE_LIMIT_COST || '')
 			},
 			observability: {
-				sessionTracking: process.env.HELICONE_SESSION_TRACKING === 'true',
-				customProperties: JSON.parse(process.env.HELICONE_CUSTOM_PROPERTIES || '{}')
+				sessionTracking: env.HELICONE_SESSION_TRACKING === 'true',
+				customProperties: JSON.parse(env.HELICONE_CUSTOM_PROPERTIES || '{}')
 			}
 		};
 	}
