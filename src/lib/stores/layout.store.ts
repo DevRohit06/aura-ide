@@ -1,5 +1,6 @@
-import { writable, get } from 'svelte/store';
 import type { EditorLayout } from '@/types/editor-state';
+import { get, writable } from 'svelte/store';
+import { sidebarPanelActions } from './sidebar-panels.store';
 
 // Default layout state
 const defaultLayout: EditorLayout = {
@@ -28,6 +29,8 @@ export const layoutActions = {
 			...state,
 			sidebarVisible: !state.sidebarVisible
 		}));
+		// Also toggle the sidebar panel store for consistency
+		sidebarPanelActions.toggleLeftSidebar();
 	},
 
 	setSidebarWidth: (width: number) => {

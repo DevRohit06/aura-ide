@@ -42,6 +42,21 @@ export interface PanelState {
 	debugConsole: boolean;
 }
 
+export interface SidebarPanelState {
+	// Left sidebar views
+	explorer: boolean;
+	search: boolean;
+	'source-control': boolean;
+	debug: boolean;
+	extensions: boolean;
+	'vector-indexing': boolean;
+	
+	// Panel visibility
+	leftSidebarVisible: boolean;
+	rightSidebarVisible: boolean;
+	terminalVisible: boolean;
+}
+
 export interface EditorSettings {
 	theme: 'light' | 'dark' | 'system';
 	fontSize: number;

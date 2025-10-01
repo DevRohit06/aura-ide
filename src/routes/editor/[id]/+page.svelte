@@ -11,6 +11,7 @@
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import { projectActions } from '$lib/stores/current-project.store.js';
 	import { activeFileId, fileActions, filesStore } from '$lib/stores/editor.js';
+	import { sidebarPanelActions, sidebarPanelsStore } from '$lib/stores/sidebar-panels.store';
 	import { createBreadcrumbs } from '$lib/utils/file-tree';
 	import { onMount } from 'svelte';
 	// Icons
@@ -47,6 +48,9 @@
 	let currentFile = $derived($activeFileId ? $filesStore.get($activeFileId) : null);
 	let breadcrumbs = $derived(currentFile ? createBreadcrumbs(currentFile.path) : []);
 
+	// Subscribe to sidebar store for pane visibility
+	let sidebarState = $state(sidebarPanelsStore);
+
 	// Project data (derived from page `data` prop)
 	let project = $derived(pageData.project);
 	let setupStatus = $derived(pageData.setupStatus);
@@ -57,7 +61,9 @@
 	// Loading state for initialization
 	let initProgress = $state(0);
 	let initStatus = $state('Initializing...');
-	let initSteps = $state<Array<{ name: string; status: 'pending' | 'loading' | 'complete' | 'error'; message?: string }>>([
+	let initSteps = $state<
+		Array<{ name: string; status: 'pending' | 'loading' | 'complete' | 'error'; message?: string }>
+	>([
 		{ name: 'Loading project', status: 'loading' },
 		{ name: 'Starting sandbox', status: 'pending' },
 		{ name: 'Loading files', status: 'pending' },
@@ -71,14 +77,25 @@
 	// Command palette state
 	let commandPaletteOpen = $state(false);
 
-	// Keyboard event handling
-	function handleKeydown(event: KeyboardEvent) {
+	// Merged keyboard event handling
+	function handleKeydownMerged(event: KeyboardEvent) {
 		const { key } = event;
 		const cmdKey = event.ctrlKey || event.metaKey;
 		const shiftKey = event.shiftKey;
 
+		// Panel toggle shortcuts
+		if (cmdKey && key === 'b') {
+			event.preventDefault();
+			sidebarPanelActions.toggleLeftSidebar();
+		} else if (cmdKey && key === '`') {
+			event.preventDefault();
+			sidebarPanelActions.toggleTerminal();
+		} else if (cmdKey && event.shiftKey && key === 'E') {
+			event.preventDefault();
+			sidebarPanelActions.toggleRightSidebar();
+		}
 		// Command Palette shortcuts
-		if ((cmdKey && shiftKey && key === 'P') || key === 'F1' || (cmdKey && key === 'k')) {
+		else if ((cmdKey && shiftKey && key === 'P') || key === 'F1' || (cmdKey && key === 'k')) {
 			event.preventDefault();
 			commandPaletteOpen = true;
 		}
@@ -192,7 +209,7 @@
 			if (browser) {
 				window.addEventListener('beforeunload', handleBeforeUnload);
 				window.addEventListener('unload', handleBeforeUnload);
-				window.addEventListener('keydown', handleKeydown);
+				window.addEventListener('keydown', handleKeydownMerged);
 			}
 
 			// Kick off background indexing (non-blocking). Use actual project id when possible.
@@ -217,7 +234,7 @@
 			if (browser) {
 				window.removeEventListener('beforeunload', handleBeforeUnload);
 				window.removeEventListener('unload', handleBeforeUnload);
-				window.removeEventListener('keydown', handleKeydown);
+				window.removeEventListener('keydown', handleKeydownMerged);
 			}
 		};
 	});
@@ -237,6 +254,8 @@
 <svelte:head>
 	<title>{project ? `${project.name} - Aura Editor` : 'Loading - Aura Editor'}</title>
 </svelte:head>
+
+<svelte:window on:keydown={handleKeydownMerged} />
 
 {#if isProjectError}
 	<div class="flex h-screen items-center justify-center p-4">
@@ -286,21 +305,45 @@
 			<!-- Steps -->
 			<div class="space-y-3">
 				{#each initSteps as step}
-					<div class="flex items-center gap-3 rounded-lg border p-3 {step.status === 'complete' ? 'bg-green-50 dark:bg-green-950/20' : step.status === 'loading' ? 'bg-blue-50 dark:bg-blue-950/20' : step.status === 'error' ? 'bg-red-50 dark:bg-red-950/20' : ''}">
+					<div
+						class="flex items-center gap-3 rounded-lg border p-3 {step.status === 'complete'
+							? 'bg-green-50 dark:bg-green-950/20'
+							: step.status === 'loading'
+								? 'bg-blue-50 dark:bg-blue-950/20'
+								: step.status === 'error'
+									? 'bg-red-50 dark:bg-red-950/20'
+									: ''}"
+					>
 						<!-- Status Icon -->
 						<div class="flex-shrink-0">
 							{#if step.status === 'complete'}
-								<div class="flex h-6 w-6 items-center justify-center rounded-full bg-green-500 text-white">
+								<div
+									class="flex h-6 w-6 items-center justify-center rounded-full bg-green-500 text-white"
+								>
 									<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M5 13l4 4L19 7"
+										></path>
 									</svg>
 								</div>
 							{:else if step.status === 'loading'}
-								<div class="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+								<div
+									class="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent"
+								></div>
 							{:else if step.status === 'error'}
-								<div class="flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-white">
+								<div
+									class="flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-white"
+								>
 									<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M6 18L18 6M6 6l12 12"
+										></path>
 									</svg>
 								</div>
 							{:else}
@@ -345,7 +388,7 @@
 	<Resizable.PaneGroup {onLayoutChange} direction="horizontal" class="max-h-dvh overflow-hidden">
 		<Sidebar.Provider>
 			<Resizable.Pane
-				collapsible
+				collapsible={!$sidebarState.panels.leftSidebarVisible}
 				defaultSize={data.layout && typeof data.layout[0] === 'number' ? data.layout[0] : 20}
 				maxSize={20}
 				minSize={20}
@@ -363,9 +406,11 @@
 					class="max-h-dvh overflow-hidden"
 				>
 					<Resizable.Pane
-						defaultSize={data.verticalLayout && typeof data.verticalLayout[0] === 'number'
-							? data.verticalLayout[0]
-							: 80}
+						defaultSize={$sidebarState.panels.terminalVisible
+							? data.verticalLayout && typeof data.verticalLayout[0] === 'number'
+								? data.verticalLayout[0]
+								: 80
+							: 100}
 						class="flex h-full flex-col"
 					>
 						<!-- File Tabs -->
@@ -397,6 +442,7 @@
 					</Resizable.Pane>
 					<Resizable.Handle />
 					<Resizable.Pane
+						collapsible={!$sidebarState.panels.terminalVisible}
 						defaultSize={data.verticalLayout && typeof data.verticalLayout[1] === 'number'
 							? data.verticalLayout[1]
 							: 20}
@@ -407,7 +453,7 @@
 			</Resizable.Pane>
 			<Resizable.Handle />
 			<Resizable.Pane
-				collapsible
+				collapsible={!$sidebarState.panels.rightSidebarVisible}
 				defaultSize={data.layout && typeof data.layout[2] === 'number' ? data.layout[2] : 20}
 				maxSize={40}
 				minSize={20}

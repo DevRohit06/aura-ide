@@ -1,6 +1,6 @@
 <script lang="ts">
+	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
-	import * as Card from '$lib/components/ui/card/index.js';
 	import { Progress } from '$lib/components/ui/progress/index.js';
 	import {
 		forceReindexAllFiles,
@@ -108,101 +108,136 @@
 	});
 </script>
 
-<Card.Root class="w-full">
-	<Card.Header class="pb-3">
-		<Card.Title class="flex items-center gap-2 text-sm">
-			<svelte:component this={statusIcon} class="h-4 w-4 {statusColor}" />
-			Vector Database
-		</Card.Title>
-	</Card.Header>
-	<Card.Content class="space-y-3">
+<div class="space-y-4">
+	<!-- Header with Status Icon -->
+	<div class="flex items-center gap-2 border-b border-border pb-2">
+		<statusIcon class="h-4 w-4 {statusColor}"></statusIcon>
+		<span class="text-sm font-medium">Vector Database</span>
+		<Badge variant="outline" class="ml-auto text-xs">
+			{$indexerStatus.status || 'idle'}
+		</Badge>
+	</div>
+
+	<!-- Status List -->
+	<div class="space-y-3">
 		<!-- Connection Status -->
-		<div class="flex items-center justify-between text-xs">
-			<span class="text-muted-foreground">Connection:</span>
-			<span class={vectorDbStats?.connection === 'OK' ? 'text-green-500' : 'text-red-500'}>
+		<div class="flex items-center gap-3">
+			<div class="flex min-w-0 flex-1 items-center gap-2">
+				<div
+					class="h-2 w-2 rounded-full {vectorDbStats?.connection === 'OK'
+						? 'bg-green-500'
+						: 'bg-red-500'}"
+				></div>
+				<span class="text-sm text-muted-foreground">Connection</span>
+			</div>
+			<span
+				class="text-sm font-medium {vectorDbStats?.connection === 'OK'
+					? 'text-green-600'
+					: 'text-red-600'}"
+			>
 				{isLoadingStats ? 'Checking...' : vectorDbStats?.connection || 'Unknown'}
 			</span>
 		</div>
 
 		<!-- Document Count -->
-		<div class="flex items-center justify-between text-xs">
-			<span class="text-muted-foreground">Documents:</span>
-			<span>{isLoadingStats ? '...' : vectorDbStats?.totalDocuments || 0}</span>
+		<div class="flex items-center gap-3">
+			<div class="flex min-w-0 flex-1 items-center gap-2">
+				<DatabaseIcon class="h-3 w-3 text-muted-foreground" />
+				<span class="text-sm text-muted-foreground">Documents</span>
+			</div>
+			<span class="text-sm font-medium">
+				{isLoadingStats ? '...' : (vectorDbStats?.totalDocuments || 0).toLocaleString()}
+			</span>
 		</div>
 
-		<!-- Indexer Status -->
+		<!-- Indexing Progress -->
 		{#if $indexerStatus.status === 'indexing'}
 			<div class="space-y-2">
-				<div class="flex items-center justify-between text-xs">
-					<span class="text-muted-foreground">Indexing:</span>
-					<span>{$indexerStatus.indexed}/{$indexerStatus.pending}</span>
+				<div class="flex items-center gap-3">
+					<div class="flex min-w-0 flex-1 items-center gap-2">
+						<LoaderIcon class="h-3 w-3 animate-spin text-blue-500" />
+						<span class="text-sm text-muted-foreground">Progress</span>
+					</div>
+					<span class="text-sm font-medium">
+						{$indexerStatus.indexed}/{$indexerStatus.pending}
+					</span>
 				</div>
 				<Progress
 					value={$indexerStatus.pending > 0
 						? ($indexerStatus.indexed / $indexerStatus.pending) * 100
 						: 0}
-					class="h-1"
+					class="h-2"
 				/>
 			</div>
 		{/if}
 
 		<!-- Last Run -->
 		{#if $indexerStatus.lastRun}
-			<div class="flex items-center justify-between text-xs">
-				<span class="text-muted-foreground">Last indexed:</span>
-				<span class="text-xs">
+			<div class="flex items-center gap-3">
+				<div class="flex min-w-0 flex-1 items-center gap-2">
+					<div class="h-3 w-3 rounded-full bg-muted-foreground/30"></div>
+					<span class="text-sm text-muted-foreground">Last indexed</span>
+				</div>
+				<span class="text-sm font-medium">
 					{new Date($indexerStatus.lastRun).toLocaleTimeString()}
 				</span>
 			</div>
 		{/if}
 
 		<!-- Status Summary -->
-		<div class="text-xs">
-			{#if $indexerStatus.status === 'idle'}
-				<span class="text-muted-foreground">Ready to index</span>
-			{:else if $indexerStatus.status === 'indexing'}
-				<span class="text-blue-500">Indexing in progress...</span>
-			{:else if $indexerStatus.status === 'done'}
-				<span class="text-green-500">
-					{$indexerStatus.indexed} indexed, {$indexerStatus.failed} failed
-				</span>
-			{:else if $indexerStatus.status === 'error'}
-				<span class="text-red-500">Indexing error</span>
-			{/if}
-		</div>
-
-		<!-- Actions -->
-		<div class="flex gap-1">
-			<Button
-				size="sm"
-				variant="outline"
-				onclick={triggerReindexing}
-				disabled={$indexerStatus.status === 'indexing'}
-				class="flex-1 text-xs"
-			>
-				{#if $indexerStatus.status === 'indexing'}
-					<LoaderIcon class="mr-1 h-3 w-3 animate-spin" />
+		<div class="flex items-center gap-3">
+			<div class="flex min-w-0 flex-1 items-center gap-2">
+				<statusIcon class="h-3 w-3 {statusColor}"></statusIcon>
+				<span class="text-sm text-muted-foreground">Status</span>
+			</div>
+			<div class="text-sm font-medium">
+				{#if $indexerStatus.status === 'idle'}
+					<span class="text-muted-foreground">Ready</span>
+				{:else if $indexerStatus.status === 'indexing'}
+					<span class="text-blue-600">Indexing...</span>
+				{:else if $indexerStatus.status === 'done'}
+					<span class="text-green-600">
+						{$indexerStatus.indexed} indexed
+						{#if $indexerStatus.failed > 0}, {$indexerStatus.failed} failed{/if}
+					</span>
+				{:else if $indexerStatus.status === 'error'}
+					<span class="text-red-600">Error</span>
 				{/if}
-				Re-index
-			</Button>
-			<Button
-				size="sm"
-				variant="destructive"
-				onclick={forceReindexing}
-				disabled={$indexerStatus.status === 'indexing'}
-				class="text-xs"
-			>
-				Force
-			</Button>
-			<Button
-				size="sm"
-				variant="ghost"
-				onclick={loadVectorDbStats}
-				disabled={isLoadingStats}
-				class="text-xs"
-			>
-				↻
-			</Button>
+			</div>
 		</div>
-	</Card.Content>
-</Card.Root>
+	</div>
+
+	<!-- Actions -->
+	<div class="flex gap-2 border-t border-border pt-2">
+		<Button
+			size="sm"
+			variant="outline"
+			onclick={triggerReindexing}
+			disabled={$indexerStatus.status === 'indexing'}
+			class="flex-1 text-xs"
+		>
+			{#if $indexerStatus.status === 'indexing'}
+				<LoaderIcon class="mr-1 h-3 w-3 animate-spin" />
+			{/if}
+			Re-index
+		</Button>
+		<Button
+			size="sm"
+			variant="destructive"
+			onclick={forceReindexing}
+			disabled={$indexerStatus.status === 'indexing'}
+			class="text-xs"
+		>
+			Force
+		</Button>
+		<Button
+			size="sm"
+			variant="ghost"
+			onclick={loadVectorDbStats}
+			disabled={isLoadingStats}
+			class="h-8 w-8 p-0"
+		>
+			↻
+		</Button>
+	</div>
+</div>
