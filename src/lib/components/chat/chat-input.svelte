@@ -4,16 +4,17 @@
 	import { ArrowUp, Plus } from '@lucide/svelte';
 	import { createEventDispatcher } from 'svelte';
 	import CompactModelSelector from './compact-model-selector.svelte';
-	import FileContextIndicator from './file-context-indicator.svelte';
 
 	const dispatch = createEventDispatcher<{
-		send: { content: string };
+		send: { content: string; includeCodeContext?: boolean; codeQuery?: string };
 		attach: void;
 		voice: void;
 	}>();
 
 	// Model selection
 	let selectedModel = $state($selectedModelStore);
+
+	let { disabled = false }: { disabled?: boolean } = $props();
 
 	function handleModelChange(modelId: string) {
 		modelActions.setModel(modelId);
@@ -24,11 +25,15 @@
 	let textareaElement = $state<HTMLTextAreaElement>();
 	let isComposing = $state(false);
 
+	// New: include code context toggle and optional custom query
+	let includeCodeContext = $state(false);
+	let codeQuery = $state('');
+
 	function handleSend() {
 		const content = input.trim();
 		if (!content) return;
 
-		dispatch('send', { content });
+		dispatch('send', { content, includeCodeContext, codeQuery });
 		input = '';
 
 		// Reset textarea height
@@ -72,11 +77,6 @@
 </script>
 
 <div class="p-4">
-	<!-- File context indicator -->
-	<div class="mb-2 px-1">
-		<FileContextIndicator />
-	</div>
-
 	<!-- Modern input container -->
 	<div
 		class="relative rounded-xl border border-border/50 bg-muted/10 transition-all duration-200 focus-within:border-primary/30 focus-within:bg-background focus-within:shadow-sm"
@@ -96,6 +96,7 @@
 				variant="ghost"
 				size="icon"
 				class="h-8 w-8 shrink-0 rounded-lg transition-colors hover:bg-muted/80"
+				{disabled}
 				onclick={() => dispatch('attach')}
 				title="Attach file"
 			>
@@ -110,6 +111,7 @@
 					placeholder="How can I help you today?"
 					class="max-h-32 min-h-[24px] w-full resize-none border-0 bg-transparent py-1 text-sm leading-6 placeholder:text-muted-foreground/70 focus:outline-none"
 					rows={1}
+					{disabled}
 					onkeydown={handleKeyDown}
 					oninput={handleInput}
 					oncompositionstart={handleCompositionStart}
@@ -124,6 +126,7 @@
 					variant="ghost"
 					size="icon"
 					class="h-8 w-8 rounded-lg transition-colors hover:bg-muted/80"
+					{disabled}
 					onclick={() => dispatch('voice')}
 					title="Voice input"
 				>
@@ -134,7 +137,7 @@
 				<Button
 					size="icon"
 					class="h-8 w-8 rounded-lg bg-primary text-primary-foreground transition-all duration-200 hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-muted/50 disabled:text-muted-foreground"
-					disabled={!input.trim()}
+					disabled={disabled || !input.trim()}
 					onclick={handleSend}
 					title="Send message"
 				>
@@ -153,5 +156,22 @@
 		<span
 			><kbd class="rounded bg-muted/50 px-1.5 py-0.5 font-mono text-xs">⇧⏎</kbd> for new line</span
 		>
+	</div>
+
+	<!-- Add a small toggle and optional query input -->
+	<div class="mt-2 flex items-center gap-2 px-1">
+		<label class="flex items-center gap-2 text-sm">
+			<input type="checkbox" bind:checked={includeCodeContext} class="h-4 w-4" />
+			<span class="text-xs">Include repo code context</span>
+		</label>
+
+		{#if includeCodeContext}
+			<input
+				type="text"
+				placeholder="Optional: narrow context with a short query"
+				bind:value={codeQuery}
+				class="ml-2 w-full rounded border px-2 py-1 text-sm"
+			/>
+		{/if}
 	</div>
 </div>

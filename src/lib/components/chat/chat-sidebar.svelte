@@ -1,22 +1,28 @@
 <script lang="ts">
+	import ConfirmModal from '$lib/components/common/modals/confirm-modal.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import {
 		DropdownMenu,
 		DropdownMenuContent,
 		DropdownMenuItem,
-		DropdownMenuSeparator,
 		DropdownMenuTrigger
 	} from '$lib/components/ui/dropdown-menu';
+	import {
+		chatThreadsActions,
+		chatThreadsStore,
+		type ChatMessage,
+		type ChatThread
+	} from '$lib/stores/chatThreads';
 	import type { Project } from '$lib/types';
-	import { chatStore } from '@/stores/chat.svelte';
-	import { fileContext } from '@/stores/editor';
+	import { chatFileContext } from '@/stores/editor';
 	import { selectedModelStore } from '@/stores/model';
-	import { Edit3, History, MessageSquare, MoreHorizontal, Plus, Trash2 } from 'lucide-svelte';
-	import { createEventDispatcher, onMount, tick } from 'svelte';
+	import { currentSandboxId } from '@/stores/sandbox.store';
+	import { History, MessageSquare, MoreHorizontal, Plus } from 'lucide-svelte';
+	import { createEventDispatcher, tick } from 'svelte';
 	import ChatContainer from './chat-container.svelte';
 	import ChatInput from './chat-input.svelte';
 
-	// UI Message type for ChatContainer
+	// UI Message type for ChatContainer (match ChatContainer MessageType)
 	interface UIMessage {
 		id: string;
 		content: string;
@@ -28,297 +34,426 @@
 			filePath?: string;
 			language?: string;
 		};
+		metadata?: any;
+		agentInterrupt?: {
+			toolCalls: Array<{
+				name: string;
+				parameters: Record<string, any>;
+				id?: string;
+			}>;
+			stateSnapshot?: {
+				currentFile?: string | null;
+				sandboxId?: string | null;
+				fileContent?: string | null;
+			};
+			reason?: string;
+		};
 	}
 
-	// Props
 	interface Props {
 		project?: Project;
-		chatThreads?: any[];
-		recentMessages?: any[];
 	}
 
-	let { project = undefined, chatThreads = [], recentMessages = [] }: Props = $props();
+	let { project = undefined }: Props = $props();
 
 	const dispatch = createEventDispatcher<{
 		close: void;
 	}>();
 
-	// Thread-based state
+	// Reactive state
+	let projectId = $state(project?.id ?? 'default');
+	let threads = $state<ChatThread[]>([]);
+	let selectedThread = $state<ChatThread | null>(null);
 	let threadMessages = $state<UIMessage[]>([]);
 	let isLoadingMessages = $state(false);
-
-	// UI state
 	let showThreadHistory = $state(false);
 	let isCreatingThread = $state(false);
 	let editingThreadId = $state<string | null>(null);
 	let editingThreadName = $state('');
+	let errorMessage = $state<string | null>(null);
 
-	// Reactive references to store state
-	const activeThread = $derived(chatStore.activeThread);
-	const activeThreadId = $derived(chatStore.activeThreadId);
-	const currentFileContext = $derived($fileContext);
+	let confirmOpen = $state(false);
+	let confirmTitle = $state('Confirm');
+	let confirmBody = $state('Are you sure?');
+	let confirmResolve: ((value: boolean) => void) | null = null;
 
-	// Model selection - use store subscription for Svelte 4 stores
 	let selectedModel = $state($selectedModelStore);
+	let currentSandboxIdValue = $state($currentSandboxId);
+	let hasLoadedInitially = $state(false);
+	let previousSelectedThreadId = $state<string | null>(null);
+	let loadedThreadIds = $state<Set<string>>(new Set());
 
-	// Load messages when active thread changes
+	// Reactive: Load threads on mount and when project changes
 	$effect(() => {
-		if (activeThreadId) {
-			loadThreadMessages(activeThreadId);
+		const newProjectId = project?.id ?? 'default';
+
+		// Update projectId if changed
+		if (projectId !== newProjectId) {
+			projectId = newProjectId;
+			hasLoadedInitially = false; // Reset for new project
+			loadedThreadIds.clear(); // Clear loaded threads for new project
+			previousSelectedThreadId = null; // Reset selected thread tracking
+		}
+
+		// Load threads on initial mount or when project changes
+		if (!hasLoadedInitially) {
+			hasLoadedInitially = true;
+			loadThreadsFromDB().then(() => {
+				// Auto-select the most recent thread if none selected
+				if (!selectedThread && threads.length > 0) {
+					chatThreadsActions.selectThread(projectId, threads[0].id);
+				}
+			});
 		}
 	});
 
-	// Initialize chat store with loaded data
-	onMount(() => {
-		// Set project context in chat store
-		if (project?.id) {
-			chatStore.setProjectContext(project.id);
-		}
+	// Reactive: Subscribe to store changes
+	$effect(() => {
+		const unsubscribe = chatThreadsStore.subscribe((store) => {
+			const projectThreads = store[projectId] ?? [];
+			threads = projectThreads;
 
-		if (chatThreads.length > 0) {
-			// Update the store's threads with the loaded data
-			chatStore.threads = chatThreads;
+			// Update selected thread
+			const newSelected = projectThreads.find((t) => t.selected) ?? null;
+			const newSelectedId = newSelected?.id || null;
 
-			// Set the most recent thread as active if no active thread
-			if (!chatStore.activeThreadId && chatThreads.length > 0) {
-				chatStore.activeThreadId = chatThreads[0].id;
+			if (newSelectedId !== previousSelectedThreadId) {
+				selectedThread = newSelected;
+				previousSelectedThreadId = newSelectedId;
+
+				// Load messages for newly selected thread if needed and not already loaded
+				if (
+					newSelected &&
+					newSelected.messages.length === 0 &&
+					!isLoadingMessages &&
+					!loadedThreadIds.has(newSelected.id)
+				) {
+					loadThreadMessages(newSelected.id);
+				}
+			} else {
+				selectedThread = newSelected;
 			}
-		}
+		});
 
-		// Initialize with recent messages if available
-		if (recentMessages.length > 0) {
-			threadMessages = recentMessages.map((msg) => ({
-				id: msg.id,
-				content: msg.content,
-				role: msg.role === 'system' ? 'assistant' : (msg.role as 'user' | 'assistant'),
-				timestamp: new Date(msg.timestamp),
-				isLoading: false,
-				fileContext: msg.fileContext
-			}));
+		return () => unsubscribe();
+	});
+
+	// Reactive: Map messages when selectedThread changes
+	$effect(() => {
+		if (selectedThread?.messages) {
+			try {
+				const msgs = selectedThread.messages.map((m: ChatMessage) => ({
+					id: m.id,
+					content: m.content,
+					role: (m.role === 'system' ? 'assistant' : m.role) as 'user' | 'assistant',
+					timestamp: new Date(m.timestamp),
+					isLoading: false,
+					metadata: m.metadata,
+					agentInterrupt: m.metadata?.agentInterrupt
+				}));
+				threadMessages = msgs;
+			} catch (err) {
+				console.error('ThreadMessagesMappingError', err);
+				threadMessages = [];
+			}
+		} else {
+			threadMessages = [];
 		}
 	});
 
-	async function loadThreadMessages(threadId: string) {
-		if (!threadId) return;
-
-		isLoadingMessages = true;
+	// Load threads from MongoDB
+	async function loadThreadsFromDB() {
 		try {
-			const messages = await chatStore.getThreadMessages(threadId);
-			threadMessages = messages.map((msg) => ({
-				id: msg.id,
-				content: msg.content,
-				role: msg.role === 'system' ? 'assistant' : (msg.role as 'user' | 'assistant'),
-				timestamp: new Date(msg.timestamp),
-				isLoading: false,
-				fileContext: msg.fileContext
-			}));
-		} catch (error) {
-			console.error('Failed to load thread messages:', error);
-		} finally {
-			isLoadingMessages = false;
+			errorMessage = null;
+			const response = await fetch(`/api/chat/threads?projectId=${projectId}`);
+			if (response.ok) {
+				const data = await response.json();
+				if (data.threads && Array.isArray(data.threads)) {
+					// Sort by updatedAt descending (most recent first)
+					const sortedThreads = data.threads.sort(
+						(a: any, b: any) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+					);
+
+					const convertedThreads = sortedThreads.map((t: any) => ({
+						id: t.id,
+						title: t.title,
+						projectId: t.projectId,
+						messages: [],
+						createdAt: t.createdAt,
+						updatedAt: t.updatedAt,
+						selected: false
+					}));
+					chatThreadsStore.update((store) => {
+						store[projectId] = convertedThreads;
+						return { ...store };
+					});
+				}
+			} else {
+				errorMessage = 'Failed to load chat threads';
+			}
+		} catch (err) {
+			console.error('Failed to load threads from DB:', err);
+			errorMessage = 'Failed to load chat threads';
 		}
 	}
 
-	async function handleSendMessage(event: CustomEvent<{ content: string }>) {
-		const { content } = event.detail;
-
-		if (!project?.id) {
-			console.error('No project context available');
+	// Load messages for a thread from MongoDB
+	async function loadThreadMessages(threadId: string, force = false) {
+		// Don't block if force is true (for refreshing after send)
+		if (!force && isLoadingMessages) {
+			console.log('⏸️ Skipping loadThreadMessages - already loading');
 			return;
 		}
 
+		console.log(`📥 Loading messages for thread ${threadId} (force: ${force})`);
 		try {
-			// Ensure we have an active thread or create one
-			let threadId = chatStore.activeThreadId;
-			if (!threadId) {
-				// Create a new thread for this project
-				threadId = await chatStore.createThread(
-					`Chat ${new Date().toLocaleTimeString()}`,
-					'Chat session created ' + new Date().toLocaleString(),
-					project.id
-				);
-			}
-
-			// Prepare file context metadata
-			const fileContextMetadata =
-				currentFileContext.isAttached && currentFileContext.file
-					? {
-							fileContext: {
-								fileName: currentFileContext.file.name,
-								filePath: currentFileContext.file.path,
-								language: currentFileContext.file.language
-							},
-							context: currentFileContext.context
+			const response = await fetch(`/api/chat/threads/${threadId}/messages`);
+			if (response.ok) {
+				const data = await response.json();
+				console.log(`✅ Loaded ${data.messages?.length || 0} messages from DB`);
+				if (data.messages && Array.isArray(data.messages)) {
+					chatThreadsStore.update((store) => {
+						const list = store[projectId] ?? [];
+						const threadIndex = list.findIndex((t) => t.id === threadId);
+						if (threadIndex > -1) {
+							list[threadIndex].messages = data.messages.map((m: any) => ({
+								id: m.id,
+								role: m.role,
+								content: m.content,
+								timestamp: m.timestamp,
+								metadata: m.metadata
+							}));
+							// Update the thread's updatedAt to reflect latest activity
+							list[threadIndex].updatedAt = new Date().toISOString();
+							console.log(
+								`📝 Updated thread ${threadId} with ${list[threadIndex].messages.length} messages`
+							);
+						} else {
+							console.warn(`⚠️ Thread ${threadId} not found in store`);
 						}
-					: undefined;
-
-			// Add user message to thread
-			const messageId = await chatStore.addMessageToThread(
-				threadId,
-				content,
-				'user',
-				fileContextMetadata?.fileContext,
-				fileContextMetadata
-			);
-
-			// Add user message to UI immediately
-			const userMessage: UIMessage = {
-				id: messageId,
-				content,
-				role: 'user',
-				timestamp: new Date(),
-				isLoading: false,
-				fileContext: fileContextMetadata?.fileContext
-			};
-			threadMessages = [...threadMessages, userMessage];
-
-			// Add loading assistant message
-			const loadingMessageId = crypto.randomUUID();
-			const loadingMessage: UIMessage = {
-				id: loadingMessageId,
-				content: '',
-				role: 'assistant',
-				timestamp: new Date(),
-				isLoading: true
-			};
-			threadMessages = [...threadMessages, loadingMessage];
-
-			// Send to AI and get response with file context
-			const response = await fetch('/api/chat/completion', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					threadId,
-					content,
-					model: selectedModel,
-					enableTools: true,
-					fileContext: fileContextMetadata?.fileContext,
-					contextVariables: fileContextMetadata?.context,
-					projectId: project.id
-				})
-			});
-
-			if (!response.ok) {
-				throw new Error('Failed to get AI response');
+						store[projectId] = list;
+						return { ...store };
+					});
+				}
+				// Mark as loaded regardless of message count
+				loadedThreadIds.add(threadId);
+			} else {
+				console.error(`❌ Failed to load messages: ${response.status}`);
+				errorMessage = 'Failed to load messages';
 			}
-
-			const responseData = await response.json();
-
-			// Add assistant response to thread
-			await chatStore.addMessageToThread(threadId, responseData.content, 'assistant');
-
-			// Update loading message with response
-			threadMessages = threadMessages.map((msg) =>
-				msg.id === loadingMessageId
-					? { ...msg, content: responseData.content, isLoading: false }
-					: msg
-			);
-		} catch (error) {
-			console.error('Failed to send message:', error);
-			// Remove loading message on error
-			threadMessages = threadMessages.filter((msg) => !msg.isLoading);
+		} catch (err) {
+			console.error('Failed to load thread messages:', err);
+			errorMessage = 'Failed to load messages';
 		}
 	}
 
-	function handleAttach() {
-		console.log('File attachment - TODO: Implement file upload');
+	// Helper to safely format updatedAt timestamps
+	function formatUpdatedAt(ts?: string) {
+		if (!ts) return '';
+		try {
+			const d = new Date(ts);
+			if (isNaN(d.getTime())) return '';
+			return d.toLocaleString();
+		} catch (err) {
+			return '';
+		}
+	}
+
+	async function createNewThread() {
+		if (!projectId || isCreatingThread) return;
+		isCreatingThread = true;
+		try {
+			const response = await fetch('/api/chat/threads', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					title: `Thread ${new Date().toLocaleString()}`,
+					projectId
+				})
+			});
+
+			if (response.ok) {
+				const data = await response.json();
+				await loadThreadsFromDB();
+				chatThreadsActions.selectThread(projectId, data.thread.id);
+			} else {
+				errorMessage = 'Failed to create thread';
+			}
+		} catch (err) {
+			console.error('Failed to create thread:', err);
+			errorMessage = 'Failed to create thread';
+		} finally {
+			isCreatingThread = false;
+		}
+	}
+
+	function selectThread(threadId: string) {
+		chatThreadsActions.selectThread(projectId, threadId);
+	}
+
+	async function handleSend(
+		event: CustomEvent<{ content: string; includeCodeContext?: boolean; codeQuery?: string }>
+	) {
+		const payload = event.detail;
+		let threadId: string;
+
+		if (!selectedThread) {
+			// Create new thread for first message (will be created by API)
+			threadId = '';
+		} else {
+			// Use existing thread
+			threadId = selectedThread.id;
+		}
+
+		// Add user message immediately to UI
+		if (threadId) {
+			chatThreadsActions.addMessage(projectId, threadId, 'user', payload.content);
+		}
+
+		isLoadingMessages = true;
+		errorMessage = null;
+
+		try {
+			const res = await fetch('/api/agent', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					message: payload.content,
+					threadId: threadId || undefined,
+					projectId,
+					sandboxId: project?.sandboxId || currentSandboxIdValue,
+					sandboxType: project?.sandboxProvider,
+					modelName: selectedModel,
+					includeCodeContext: payload.includeCodeContext,
+					codeQuery: payload.codeQuery,
+					currentFile: $chatFileContext.isActive ? $chatFileContext.filePath : null
+				})
+			});
+			const json = await res.json();
+
+			// Update threadId if new thread was created
+			if (json.threadId && !threadId) {
+				threadId = json.threadId;
+				await loadThreadsFromDB();
+				chatThreadsActions.selectThread(projectId, threadId);
+				// Load messages from DB to get both user and assistant messages
+				await loadThreadMessages(threadId, true);
+			} else if (json.threadId) {
+				// Existing thread - reload messages from DB to get the assistant response
+				await loadThreadMessages(json.threadId, true);
+			}
+
+			// Handle interrupts
+			if (json.interrupt && threadId) {
+				const interruptMessage = {
+					id: `interrupt-${Date.now()}`,
+					content: 'Agent requested human review for the following actions:',
+					role: 'assistant' as const,
+					timestamp: new Date(),
+					isLoading: false,
+					agentInterrupt: {
+						toolCalls: Array.isArray(json.data?.toolCalls) ? json.data.toolCalls : [],
+						stateSnapshot: json.data?.stateSnapshot || {},
+						reason:
+							json.data?.reason || 'Agent requires approval for potentially destructive actions'
+					}
+				};
+				chatThreadsActions.addMessage(projectId, threadId, 'assistant', interruptMessage.content, {
+					agentInterrupt: interruptMessage.agentInterrupt
+				});
+			} else if (!json.success && json.error && threadId) {
+				chatThreadsActions.addMessage(projectId, threadId, 'assistant', `Error: ${json.error}`);
+			}
+		} catch (err) {
+			console.error('Failed to send message:', err);
+			errorMessage = 'Failed to send message';
+			if (threadId) {
+				chatThreadsActions.addMessage(projectId, threadId, 'assistant', 'Failed to get response');
+			}
+		} finally {
+			isLoadingMessages = false;
+		}
 	}
 
 	function handleVoice() {
 		console.log('Voice input - TODO: Implement voice recording');
 	}
 
-	async function createNewThread() {
-		if (!project?.id || isCreatingThread) return;
+	async function handleInterruptDecision(event: CustomEvent) {
+		const eventType = event.type;
+		let action: string;
+		let payload: any = {};
 
-		isCreatingThread = true;
-		try {
-			const threadName = `Chat ${new Date().toLocaleTimeString()}`;
-			const threadId = await chatStore.createThread(
-				threadName,
-				'New chat session created',
-				project.id
-			);
-
-			// Switch to the new thread
-			chatStore.activeThreadId = threadId;
-			threadMessages = [];
-			showThreadHistory = false;
-		} catch (error) {
-			console.error('Failed to create new thread:', error);
-		} finally {
-			isCreatingThread = false;
-		}
-	}
-
-	async function switchToThread(threadId: string) {
-		if (threadId === activeThreadId) {
-			showThreadHistory = false;
-			return;
+		switch (eventType) {
+			case 'approveInterrupt':
+				action = 'approve';
+				payload.toolCalls = event.detail.toolCalls;
+				break;
+			case 'rejectInterrupt':
+				action = 'reject';
+				break;
+			case 'modifyInterrupt':
+				action = 'modify';
+				payload.edits = event.detail.edits;
+				break;
+			default:
+				return;
 		}
 
-		chatStore.activeThreadId = threadId;
-		showThreadHistory = false;
-		await loadThreadMessages(threadId);
-	}
-
-	async function deleteThread(threadId: string, event?: Event) {
-		if (event) {
-			event.stopPropagation();
-		}
-
-		if (!confirm('Are you sure you want to delete this chat thread?')) {
-			return;
-		}
+		if (!selectedThread) return;
 
 		try {
-			await chatStore.deleteThread(threadId);
+			const res = await fetch('/api/agent', {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					threadId: selectedThread.id,
+					projectId,
+					action,
+					...payload,
+					newModelName: selectedModel
+				})
+			});
 
-			// If we deleted the active thread, switch to another or create new
-			if (threadId === activeThreadId) {
-				const remainingThreads = chatStore.threads.filter((t) => t.id !== threadId);
-				if (remainingThreads.length > 0) {
-					chatStore.activeThreadId = remainingThreads[0].id;
-					await loadThreadMessages(remainingThreads[0].id);
-				} else {
-					// No threads left, create a new one
-					await createNewThread();
-				}
+			const json = await res.json();
+
+			if (json.response) {
+				chatThreadsActions.addMessage(projectId, selectedThread.id, 'assistant', json.response);
 			}
-		} catch (error) {
-			console.error('Failed to delete thread:', error);
+
+			if (json.success && json.applied && json.applied.length > 0) {
+				const appliedSummary = json.applied
+					.map((edit: any) => `${edit.success ? '✓' : '✗'} ${edit.filePath}`)
+					.join('\n');
+				chatThreadsActions.addMessage(
+					projectId,
+					selectedThread.id,
+					'system',
+					`Applied changes:\n${appliedSummary}`
+				);
+			}
+		} catch (err) {
+			console.error('Failed to process interrupt decision:', err);
+			chatThreadsActions.addMessage(
+				projectId,
+				selectedThread.id,
+				'assistant',
+				'Failed to process interrupt decision'
+			);
 		}
 	}
 
-	async function startEditingThread(threadId: string, currentName: string, event?: Event) {
-		if (event) {
-			event.stopPropagation();
-		}
-
+	function startEditingThread(threadId: string, currentName: string, event?: Event) {
+		if (event) event.stopPropagation();
 		editingThreadId = threadId;
 		editingThreadName = currentName;
-
-		// Focus the input after DOM update
-		await tick();
-		const input = document.querySelector(`[data-thread-input="${threadId}"]`) as HTMLInputElement;
-		if (input) {
-			input.focus();
-			input.select();
-		}
-	}
-
-	async function saveThreadName(threadId: string) {
-		if (!editingThreadName.trim()) {
-			cancelEditingThread();
-			return;
-		}
-
-		try {
-			await chatStore.updateThread(threadId, { title: editingThreadName.trim() });
-			cancelEditingThread();
-		} catch (error) {
-			console.error('Failed to update thread name:', error);
-		}
+		tick().then(() => {
+			const input = document.querySelector(`[data-thread-input="${threadId}"]`) as HTMLInputElement;
+			if (input) {
+				input.focus();
+				input.select();
+			}
+		});
 	}
 
 	function cancelEditingThread() {
@@ -326,16 +461,37 @@
 		editingThreadName = '';
 	}
 
-	function handleThreadInputKeydown(event: KeyboardEvent, threadId: string) {
-		if (event.key === 'Enter') {
-			saveThreadName(threadId);
-		} else if (event.key === 'Escape') {
-			cancelEditingThread();
-		}
+	function saveThreadName(threadId: string) {
+		if (!threadId) return;
+		chatThreadsActions.renameThread(projectId, threadId, editingThreadName || 'Untitled');
+		cancelEditingThread();
 	}
 
-	function clearChat() {
-		createNewThread();
+	function showConfirm(title: string, body: string) {
+		confirmTitle = title;
+		confirmBody = body;
+		confirmOpen = true;
+		return new Promise<boolean>((resolve) => {
+			confirmResolve = resolve;
+		});
+	}
+
+	function handleModalConfirm() {
+		confirmOpen = false;
+		if (confirmResolve) confirmResolve(true);
+		confirmResolve = null;
+	}
+
+	function handleModalCancel() {
+		confirmOpen = false;
+		if (confirmResolve) confirmResolve(false);
+		confirmResolve = null;
+	}
+
+	async function deleteThread(threadId: string) {
+		const ok = await showConfirm('Delete thread', 'Are you sure you want to delete this thread?');
+		if (!ok) return;
+		chatThreadsActions.deleteThread(projectId, threadId);
 	}
 </script>
 
@@ -348,9 +504,14 @@
 			</div>
 			<div>
 				<h3 class="text-sm font-semibold">Aura Chat</h3>
-				{#if activeThread}
-					<p class="max-w-32 truncate text-xs text-muted-foreground" title={activeThread.title}>
-						{activeThread.title}
+				{#if selectedThread}
+					<p class="max-w-32 truncate text-xs text-muted-foreground" title={selectedThread.title}>
+						{selectedThread.title}
+					</p>
+				{/if}
+				{#if $chatFileContext.isActive}
+					<p class="max-w-32 truncate text-xs text-blue-600" title={$chatFileContext.filePath}>
+						📄 {$chatFileContext.fileName}
 					</p>
 				{/if}
 			</div>
@@ -362,9 +523,9 @@
 				variant="ghost"
 				size="icon"
 				class="h-7 w-7"
-				onclick={createNewThread}
 				disabled={isCreatingThread}
 				title="New chat"
+				onclick={createNewThread}
 			>
 				{#if isCreatingThread}
 					<div
@@ -381,68 +542,16 @@
 					<History size={14} />
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="end" class="max-h-96 w-80 overflow-y-auto">
-					{#if chatStore.threads.length === 0}
-						<div class="px-2 py-4 text-center text-sm text-muted-foreground">
-							No chat threads yet
-						</div>
-					{:else}
-						{#each chatStore.threads as thread (thread.id)}
-							<DropdownMenuItem
-								class="flex cursor-pointer items-center gap-2 px-2 py-2 {thread.id ===
-								activeThreadId
-									? 'bg-accent'
-									: ''}"
-								onclick={() => switchToThread(thread.id)}
-							>
-								<div class="min-w-0 flex-1">
-									{#if editingThreadId === thread.id}
-										<input
-											type="text"
-											bind:value={editingThreadName}
-											onkeydown={(e) => handleThreadInputKeydown(e, thread.id)}
-											onblur={() => saveThreadName(thread.id)}
-											data-thread-input={thread.id}
-											class="w-full border-none bg-transparent text-sm outline-none"
-											onclick={(e) => e.stopPropagation()}
-										/>
-									{:else}
-										<div class="truncate text-sm font-medium" title={thread.title}>
-											{thread.title}
-										</div>
-										<div class="truncate text-xs text-muted-foreground" title={thread.description}>
-											{thread.description || 'No description'}
-										</div>
-									{/if}
-								</div>
-
-								{#if editingThreadId !== thread.id}
-									<div class="flex items-center gap-1">
-										<Button
-											variant="ghost"
-											size="icon"
-											class="h-6 w-6 opacity-0 group-hover:opacity-100 hover:bg-muted"
-											onclick={(e) => startEditingThread(thread.id, thread.title, e)}
-											title="Rename"
-										>
-											<Edit3 size={12} />
-										</Button>
-										<Button
-											variant="ghost"
-											size="icon"
-											class="h-6 w-6 opacity-0 group-hover:opacity-100 hover:bg-destructive hover:text-destructive-foreground"
-											onclick={(e) => deleteThread(thread.id, e)}
-											title="Delete"
-										>
-											<Trash2 size={12} />
-										</Button>
-									</div>
-								{/if}
-							</DropdownMenuItem>
-							{#if thread.id !== chatStore.threads[chatStore.threads.length - 1]?.id}
-								<DropdownMenuSeparator />
-							{/if}
-						{/each}
-					{/if}
+					{#each threads as t}
+						<DropdownMenuItem onclick={() => selectThread(t.id)}>
+							<div class="flex w-full items-center justify-between">
+								<div class="truncate">{t.title}</div>
+								<small class="text-xs text-muted-foreground"
+									>{formatUpdatedAt(t.updatedAt) || '—'}</small
+								>
+							</div>
+						</DropdownMenuItem>
+					{/each}
 				</DropdownMenuContent>
 			</DropdownMenu>
 
@@ -457,39 +566,41 @@
 							<span class="text-sm">Close chat</span>
 						</div>
 					</DropdownMenuItem>
-					{#if activeThread}
-						<DropdownMenuSeparator />
-						<DropdownMenuItem
-							onclick={() => startEditingThread(activeThread.id, activeThread.title)}
-						>
-							<div class="flex items-center gap-2">
-								<Edit3 size={14} />
-								<span class="text-sm">Rename current chat</span>
-							</div>
-						</DropdownMenuItem>
-						<DropdownMenuItem
-							class="text-destructive hover:bg-destructive hover:text-destructive-foreground"
-							onclick={() => deleteThread(activeThread.id)}
-						>
-							<div class="flex items-center gap-2">
-								<Trash2 size={14} />
-								<span class="text-sm">Delete current chat</span>
-							</div>
-						</DropdownMenuItem>
-					{/if}
 				</DropdownMenuContent>
 			</DropdownMenu>
 		</div>
 	</div>
 
-	<!-- Chat messages -->
-	<div class="flex-1 overflow-hidden">
-		<ChatContainer
-			messages={threadMessages}
-			isLoading={isLoadingMessages || threadMessages.some((m) => m.isLoading)}
-		/>
+	<!-- Error message -->
+	{#if errorMessage}
+		<div class="border-b border-red-200 bg-red-50 px-3 py-2">
+			<p class="text-xs text-red-600">{errorMessage}</p>
+		</div>
+	{/if}
+
+	<!-- Threads list and messages -->
+	<div class="flex flex-1 flex-col overflow-hidden">
+		<!-- Chat messages -->
+		<div class="flex-1 overflow-hidden">
+			<ChatContainer
+				messages={threadMessages}
+				isLoading={isLoadingMessages || threadMessages.some((m) => m.isLoading)}
+				on:approveInterrupt={handleInterruptDecision}
+				on:rejectInterrupt={handleInterruptDecision}
+				on:modifyInterrupt={handleInterruptDecision}
+			/>
+		</div>
+
+		<!-- Chat input -->
+		<ChatInput on:send={handleSend} on:voice={handleVoice} />
 	</div>
 
-	<!-- Chat input -->
-	<ChatInput on:send={handleSendMessage} on:attach={handleAttach} on:voice={handleVoice} />
+	<!-- Confirm modal component -->
+	<ConfirmModal
+		bind:open={confirmOpen}
+		title={confirmTitle}
+		description={confirmBody}
+		on:confirm={handleModalConfirm}
+		on:cancel={handleModalCancel}
+	/>
 </div>

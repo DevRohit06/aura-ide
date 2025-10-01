@@ -1,19 +1,33 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
 	import { ChevronDown } from '@lucide/svelte';
-	import { onMount, tick } from 'svelte';
+	import { createEventDispatcher, onMount, tick } from 'svelte';
 	import Message from './message.svelte';
 
 	interface MessageType {
 		id: string;
 		content: string;
-		role: 'user' | 'assistant';
+		role: 'user' | 'assistant' | 'system';
 		timestamp: Date;
 		isLoading?: boolean;
 		fileContext?: {
 			fileName?: string;
 			filePath?: string;
 			language?: string;
+		};
+		metadata?: any;
+		agentInterrupt?: {
+			toolCalls: Array<{
+				name: string;
+				parameters: Record<string, any>;
+				id?: string;
+			}>;
+			stateSnapshot?: {
+				currentFile?: string | null;
+				sandboxId?: string | null;
+				fileContent?: string | null;
+			};
+			reason?: string;
 		};
 	}
 
@@ -23,6 +37,13 @@
 	}
 
 	let { messages = [], isLoading = false }: Props = $props();
+
+	// Forward interrupt events from Message components
+	const dispatch = createEventDispatcher<{
+		approveInterrupt: { toolCalls: any[] };
+		rejectInterrupt: void;
+		modifyInterrupt: { edits: Array<{ filePath: string; content: string }> };
+	}>();
 
 	let scrollContainer = $state<HTMLDivElement>();
 	let shouldAutoScroll = $state(true);
@@ -140,7 +161,13 @@
 			{:else}
 				<div class="space-y-1">
 					{#each messages as message, index (message.id)}
-						<Message {message} isLast={index === messages.length - 1} />
+						<Message
+							{message}
+							isLast={index === messages.length - 1}
+							on:approveInterrupt={(e) => dispatch('approveInterrupt', e.detail)}
+							on:rejectInterrupt={() => dispatch('rejectInterrupt')}
+							on:modifyInterrupt={(e) => dispatch('modifyInterrupt', e.detail)}
+						/>
 					{/each}
 				</div>
 
