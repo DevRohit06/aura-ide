@@ -11,6 +11,48 @@ import { tools } from './tools';
 // Simple tool node that exposes the tools
 const toolNode = new ToolNode(tools as any);
 
+// Wrapper to preserve tool execution results
+async function toolsNode(state: typeof AgentState.State) {
+	logger.info('Tools node executing tool calls...');
+
+	try {
+		// Execute tools using the ToolNode
+		const result = await toolNode.invoke(state as any);
+
+		// Log tool execution results for debugging
+		if (result.messages && Array.isArray(result.messages)) {
+			const toolMessages = result.messages.filter((msg: any) => msg.tool_call_id);
+			logger.info(`Tool execution completed. ${toolMessages.length} tool messages generated.`);
+
+			// Log tool results for debugging
+			toolMessages.forEach((msg: any, index: number) => {
+				logger.info(`Tool result ${index + 1}:`, {
+					tool_call_id: msg.tool_call_id,
+					content_type: typeof msg.content,
+					content_preview:
+						typeof msg.content === 'string'
+							? msg.content.slice(0, 100) + (msg.content.length > 100 ? '...' : '')
+							: JSON.stringify(msg.content).slice(0, 100) + '...'
+				});
+			});
+		}
+
+		return result;
+	} catch (error) {
+		logger.error('Tool execution error:', error);
+		// Return error message as tool result
+		return {
+			messages: [
+				{
+					content: `Tool execution failed: ${error instanceof Error ? error.message : String(error)}`,
+					tool_call_id: 'error',
+					type: 'tool'
+				}
+			]
+		};
+	}
+}
+
 async function agentNode(state: typeof AgentState.State) {
 	const systemPrompt = `You are an expert coding assistant with access to sandboxes, semantic search and web search. Current file: ${state.currentFile || 'None'}\n\nCurrent Sandbox: ${state.sandboxId ? `ID: ${state.sandboxId}, Type: ${state.sandboxType || 'unknown'}` : 'None'}\n\nCurrent Model: ${state.modelConfig?.provider || 'openai'}/${state.modelConfig?.model || 'gpt-4o'}`;
 
@@ -206,7 +248,7 @@ function shouldContinue(state: typeof AgentState.State) {
 const workflow = new StateGraph(AgentState)
 	.addNode('agent', agentNode)
 	.addNode('review', humanReviewNode)
-	.addNode('tools', toolNode)
+	.addNode('tools', toolsNode)
 	.addEdge('__start__', 'agent')
 	.addConditionalEdges('agent', shouldContinue)
 	.addEdge('tools', 'agent');
