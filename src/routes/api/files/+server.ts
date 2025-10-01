@@ -1,4 +1,5 @@
 import { auth } from '$lib/auth';
+import { listFiles as listFilesService } from '$lib/services/files-list.service';
 import { filesService } from '$lib/services/files.service';
 import { r2StorageService } from '$lib/services/r2-storage.service';
 import { SandboxManager } from '$lib/services/sandbox/sandbox-manager';
@@ -13,6 +14,8 @@ export interface FileOperationRequest {
 	content?: string;
 	newPath?: string;
 	metadata?: Record<string, any>;
+	// optional provider hint
+	sandboxProvider?: 'daytona' | 'e2b';
 }
 
 export interface FileOperationResponse {
@@ -142,7 +145,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				break;
 
 			case 'list':
-				result = await listFiles({ projectId, sandboxId, path: resolvedPath });
+				result = await listFilesService({ projectId, sandboxId, path: resolvedPath });
 				break;
 
 			default:
@@ -233,7 +236,34 @@ async function createFile({
 		try {
 			const sandboxManager = SandboxManager.getInstance();
 			await sandboxManager.writeFile(sandboxId, path, content, { encoding: 'utf-8' });
-			results.sandbox = { success: true };
+			// Read back to verify
+			try {
+				const verification = await sandboxManager.readFile(sandboxId, path, { encoding: 'utf-8' });
+				if (verification) {
+					results.sandbox = {
+						success: true,
+						verification: {
+							sandboxRead: true,
+							size: verification.size,
+							contentSnippet: verification.content?.slice(0, 2000)
+						}
+					};
+				} else {
+					results.sandbox = {
+						success: true,
+						verification: { sandboxRead: false, error: 'File not found in sandbox after write' }
+					};
+				}
+			} catch (verErr) {
+				console.warn('Failed to verify file in sandbox after write:', verErr);
+				results.sandbox = {
+					success: true,
+					verification: {
+						sandboxRead: false,
+						error: verErr instanceof Error ? verErr.message : String(verErr)
+					}
+				};
+			}
 		} catch (error) {
 			console.warn('Failed to create file in sandbox:', error);
 			results.sandbox = { error: error instanceof Error ? error.message : 'Unknown error' };
@@ -272,7 +302,8 @@ async function readFile({
 		try {
 			const fileData = await r2StorageService.downloadFile(`projects/${projectId}/${path}`);
 			if (fileData) {
-				return { content: fileData.toString('utf-8'), source: 'r2' };
+				const cont = typeof fileData === 'string' ? fileData : fileData.toString('utf-8');
+				return { content: cont, source: 'r2' };
 			}
 		} catch (error) {
 			console.warn('Failed to read from R2:', error);
@@ -309,6 +340,19 @@ async function updateFile({
 
 	// Update in database
 	try {
+		// Capture previous content for history/diff
+		let previousContent: string | null = null;
+		try {
+			const existing = await filesService.getFileByPath(path);
+			if (existing && existing.type === 'file') {
+				previousContent = (existing as any).content || null;
+				// create history entry
+				await filesService.createFileHistory(existing as any);
+			}
+		} catch (err) {
+			console.warn('Failed to capture previous file content for history:', err);
+		}
+
 		const file = await filesService.updateFileByPath(path, {
 			content,
 			modifiedAt: now,
@@ -318,7 +362,7 @@ async function updateFile({
 				size: content.length
 			}
 		});
-		results.database = file;
+		results.database = { ...file, previousContent };
 	} catch (error) {
 		console.warn('Failed to update file in database:', error);
 		results.database = { error: error instanceof Error ? error.message : 'Unknown error' };
@@ -347,7 +391,34 @@ async function updateFile({
 		try {
 			const sandboxManager = SandboxManager.getInstance();
 			await sandboxManager.writeFile(sandboxId, path, content, { encoding: 'utf-8' });
-			results.sandbox = { success: true };
+			// Read back to verify
+			try {
+				const verification = await sandboxManager.readFile(sandboxId, path, { encoding: 'utf-8' });
+				if (verification) {
+					results.sandbox = {
+						success: true,
+						verification: {
+							sandboxRead: true,
+							size: verification.size,
+							contentSnippet: verification.content?.slice(0, 2000)
+						}
+					};
+				} else {
+					results.sandbox = {
+						success: true,
+						verification: { sandboxRead: false, error: 'File not found in sandbox after write' }
+					};
+				}
+			} catch (verErr) {
+				console.warn('Failed to verify file in sandbox after write:', verErr);
+				results.sandbox = {
+					success: true,
+					verification: {
+						sandboxRead: false,
+						error: verErr instanceof Error ? verErr.message : String(verErr)
+					}
+				};
+			}
 		} catch (error) {
 			console.warn('Failed to update file in sandbox:', error);
 			results.sandbox = { error: error instanceof Error ? error.message : 'Unknown error' };
@@ -416,13 +487,19 @@ async function renameFile({
 }) {
 	// Read the file content first
 	const fileData = await readFile({ projectId, sandboxId, path });
+	const fileContent =
+		typeof fileData.content === 'string'
+			? fileData.content
+			: fileData.content
+				? String(fileData.content)
+				: '';
 
 	// Create the file with new path
 	const createResult = await createFile({
 		projectId,
 		sandboxId,
 		path: newPath,
-		content: fileData.content
+		content: fileContent
 	});
 
 	// Delete the old file
@@ -447,95 +524,6 @@ async function moveFile({
 }) {
 	// Same as rename for now, but could be optimized for different directories
 	return await renameFile({ projectId, sandboxId, path, newPath });
-}
-
-async function listFiles({
-	projectId,
-	sandboxId,
-	path = '/workspace'
-}: {
-	projectId?: string;
-	sandboxId?: string;
-	path?: string;
-}) {
-	const results: any = {};
-
-	// Determine provider from project
-	let provider: 'daytona' | 'e2b' | undefined;
-	if (sandboxId) {
-		try {
-			const { DatabaseService } = await import('$lib/services/database.service.js');
-			const project = await DatabaseService.findProjectBySandboxId(sandboxId);
-			provider = project?.sandboxProvider as 'daytona' | 'e2b' | undefined;
-		} catch (error) {
-			console.warn('Failed to determine provider:', error);
-		}
-	}
-
-	// List files based on provider
-	if (provider === 'daytona' && sandboxId) {
-		// For Daytona sandboxes, list from sandbox only
-		try {
-			const { DaytonaService } = await import('$lib/services/sandbox/daytona.service.js');
-			const daytonaService = DaytonaService.getInstance();
-			const files = await daytonaService.listFiles(sandboxId, path);
-			results.files = files;
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-			console.warn('Failed to list files from Daytona sandbox:', error);
-			// If sandbox not found, assume no files (sandbox may not exist or be stopped)
-			if (errorMessage.includes('Sandbox not found')) {
-				results.files = [];
-			} else {
-				results.files = { error: errorMessage };
-			}
-		}
-	} else if (provider === 'e2b' && projectId) {
-		// For E2B sandboxes, list from R2 only
-		try {
-			const files = await r2StorageService.listFiles({
-				prefix: `projects/${projectId}/`
-			});
-			results.files = files;
-		} catch (error) {
-			console.warn('Failed to list files from R2:', error);
-			results.files = { error: error instanceof Error ? error.message : 'Unknown error' };
-		}
-	} else if (sandboxId) {
-		// Fallback: try sandbox first, then R2
-		try {
-			const sandboxManager = SandboxManager.getInstance();
-			const files = await sandboxManager.listFiles(sandboxId, path, { provider });
-			results.files = files;
-		} catch (error) {
-			console.warn('Failed to list files from sandbox:', error);
-			results.files = { error: error instanceof Error ? error.message : 'Unknown error' };
-		}
-	} else if (projectId) {
-		// No sandbox, list from R2
-		try {
-			const files = await r2StorageService.listFiles({
-				prefix: `projects/${projectId}/`
-			});
-			results.files = files;
-		} catch (error) {
-			console.warn('Failed to list files from R2:', error);
-			results.files = { error: error instanceof Error ? error.message : 'Unknown error' };
-		}
-	} else {
-		results.files = [];
-	}
-
-	// List from database (always include)
-	try {
-		const files = await filesService.getFilesByParentPath(path);
-		results.database = files;
-	} catch (error) {
-		console.warn('Failed to list files from database:', error);
-		results.database = { error: error instanceof Error ? error.message : 'Unknown error' };
-	}
-
-	return results;
 }
 
 // Utility functions
