@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { initializeApp } from '$lib/app-init.js';
 	import favicon from '$lib/assets/favicon.svg';
 	import SettingsInitializer from '$lib/components/shared/settings-initializer.svelte';
 	import { Toaster } from '$lib/components/ui/sonner/index.js';
@@ -11,6 +12,7 @@
 	let { children } = $props();
 
 	let loading = $state(true);
+	let appHealthy = $state(true);
 
 	// Initialize theme system
 	initializeTheme();
@@ -19,7 +21,35 @@
 	cleanupFileStorage();
 
 	onMount(async () => {
-		loading = false;
+		try {
+			// Initialize comprehensive error handling and validation
+			initializeApp({
+				enableGlobalErrorHandler: true,
+				enableHttpInterceptor: true,
+				httpInterceptorConfig: {
+					enableLogging: import.meta.env.DEV,
+					defaultTimeout: 30000,
+					retryAttempts: 2
+				}
+			});
+
+			// Perform app health check
+			const { performAppHealthCheck } = await import('$lib/app-init.js');
+			const healthCheck = await performAppHealthCheck();
+
+			if (healthCheck.status === 'unhealthy') {
+				console.error('App health check failed:', healthCheck.checks);
+				appHealthy = false;
+			} else if (healthCheck.status === 'degraded') {
+				console.warn('App health check degraded:', healthCheck.checks);
+			}
+
+			loading = false;
+		} catch (error) {
+			console.error('Failed to initialize app:', error);
+			appHealthy = false;
+			loading = false;
+		}
 	});
 </script>
 
@@ -33,10 +63,29 @@
 	>
 		<div class="loader"></div>
 	</div>
+{:else if !appHealthy}
+	<div
+		class="fixed inset-0 z-50 flex h-dvh w-dvw items-center justify-center bg-background dark:bg-black"
+	>
+		<div class="max-w-md space-y-4 text-center">
+			<div class="text-6xl">⚠️</div>
+			<h1 class="text-2xl font-bold text-foreground">App Initialization Failed</h1>
+			<p class="text-muted-foreground">
+				The application failed to initialize properly. Please refresh the page or contact support if
+				the problem persists.
+			</p>
+			<button
+				onclick={() => window.location.reload()}
+				class="rounded-md bg-primary px-4 py-2 text-primary-foreground transition-colors hover:bg-primary/90"
+			>
+				Refresh Page
+			</button>
+		</div>
+	</div>
 {:else}
 	<ModeWatcher />
 	<SettingsInitializer />
-	<Toaster />
+	<Toaster richColors position="top-right" />
 	{@render children?.()}
 {/if}
 

@@ -18,9 +18,29 @@
 	import { Skeleton } from '$lib/components/ui/skeleton/index.js';
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
 	import { isAuthenticated, user } from '$lib/stores/auth';
-	import { ArrowLeft, CheckCircle, Rocket, Settings } from 'lucide-svelte';
+	import { AlertCircleIcon, ArrowLeft, CheckCircle, Rocket, Settings } from 'lucide-svelte';
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
+	// Import validation utilities
+	import {
+		ApiError,
+		handleFormSubmission,
+		logError,
+		showErrorToast,
+		type ValidationError
+	} from '$lib/utils/error-handling';
+	import {
+		createDebouncedValidator,
+		FORM_STATES,
+		type FormState
+	} from '$lib/utils/form-validation';
+	import {
+		checkProjectNameAvailability,
+		getStepValidation,
+		validateProjectNameFormat,
+		validateProjectSetup,
+		type ProjectSetupData
+	} from '$lib/validations/project.validation';
 
 	let currentStep = $state(1);
 	let projectName = $state('');
@@ -45,6 +65,39 @@
 		message: string;
 		details?: any;
 	} | null>(null);
+
+	// Form validation state
+	let formState: FormState = $state(FORM_STATES.IDLE);
+	let projectNameCheckState = $state<'idle' | 'checking' | 'available' | 'unavailable'>('idle');
+	let projectNameAvailabilityMessage = $state('');
+
+	// Simple validation state
+	let validationErrors = $state<ValidationError[]>([]);
+	let touchedFields = $state(new Set<string>());
+
+	// Debounced validations
+	const debouncedProjectNameValidation = createDebouncedValidator(async () => {
+		if (projectName.trim()) {
+			const formatValidation = validateProjectNameFormat(projectName);
+			if (formatValidation.isValid) {
+				projectNameCheckState = 'checking';
+				try {
+					const availability = await checkProjectNameAvailability(projectName);
+					projectNameCheckState = availability.isAvailable ? 'available' : 'unavailable';
+					projectNameAvailabilityMessage = availability.message || '';
+				} catch (error) {
+					projectNameCheckState = 'idle';
+					projectNameAvailabilityMessage = 'Unable to check availability';
+				}
+			} else {
+				projectNameCheckState = 'idle';
+				projectNameAvailabilityMessage = formatValidation.errors[0] || '';
+			}
+		} else {
+			projectNameCheckState = 'idle';
+			projectNameAvailabilityMessage = '';
+		}
+	}, 800);
 
 	// Package manager display names
 	const packageManagerOptions = [
@@ -83,46 +136,60 @@
 		return option?.label || value;
 	}
 
-	// Pure validation function (no state mutation)
-	function isProjectNameValid(name: string) {
-		const trimmedName = name.trim();
-		if (!trimmedName) return false;
-		if (trimmedName.length < 2) return false;
-		if (!/^[a-zA-Z0-9-_]+$/.test(trimmedName)) return false;
-		return true;
-	}
-
-	// Validate project name and set error message (for onblur)
-	function validateProjectName(name: string) {
-		// This function is only for triggering validation on blur
-		// The actual validation logic is in isProjectNameValid
-		return isProjectNameValid(name);
-	}
-
-	// Computed values for better UX
+	// Enhanced validation with real-time feedback
 	const isStepValid = $derived(() => {
-		switch (currentStep) {
-			case 1:
-				return isProjectNameValid(projectName);
-			case 2:
-				return framework.length > 0;
-			case 3:
-				return sandboxProvider.length > 0;
-			case 4:
-				return true; // Configuration is optional
-			default:
-				return false;
-		}
+		const currentData = getCurrentStepData();
+		const validation = getStepValidation(currentStep, currentData);
+		return validation.isValid && (currentStep !== 1 || projectNameCheckState === 'available');
 	});
 
-	// Reactive error message for project name
+	const getCurrentStepData = () => {
+		switch (currentStep) {
+			case 1:
+				return { name: projectName, description: projectDescription };
+			case 2:
+				return { framework };
+			case 3:
+				return { sandboxProvider };
+			case 4:
+				return {
+					configuration: {
+						typescript,
+						eslint,
+						prettier,
+						tailwindcss,
+						packageManager,
+						additionalDependencies: additionalDependencies
+							.split(',')
+							.map((dep) => dep.trim())
+							.filter((dep) => dep.length > 0)
+					}
+				};
+			default:
+				return {};
+		}
+	};
+
+	// Enhanced error messages
 	const projectNameErrorMessage = $derived(() => {
-		const name = projectName.trim();
-		if (!name) return 'Project name is required';
-		if (name.length < 2) return 'Project name must be at least 2 characters';
-		if (!/^[a-zA-Z0-9-_]+$/.test(name))
-			return 'Project name can only contain letters, numbers, hyphens, and underscores';
+		if (!projectName.trim()) return '';
+
+		const formatValidation = validateProjectNameFormat(projectName);
+		if (!formatValidation.isValid) {
+			return formatValidation.errors[0] || 'Invalid project name';
+		}
+
+		if (projectNameCheckState === 'unavailable') {
+			return projectNameAvailabilityMessage || 'This project name is not available';
+		}
+
 		return '';
+	});
+
+	const currentStepErrors = $derived(() => {
+		const currentData = getCurrentStepData();
+		const validation = getStepValidation(currentStep, currentData);
+		return validation.errors;
 	});
 
 	// Redirect if not authenticated
@@ -172,18 +239,64 @@
 		}
 	}
 
+	// Input handlers with validation
+	function handleProjectNameInput(event: Event): void {
+		const target = event.target as HTMLInputElement;
+		projectName = target.value;
+		debouncedProjectNameValidation();
+	}
+
+	function handleProjectNameBlur(): void {
+		if (projectName.trim()) {
+			const formatValidation = validateProjectNameFormat(projectName);
+			if (!formatValidation.isValid) {
+				projectNameAvailabilityMessage = formatValidation.errors[0] || 'Invalid project name';
+				projectNameCheckState = 'unavailable';
+			}
+		}
+	}
+
 	async function createProject() {
-		if (!projectName.trim()) {
-			toast.error('Please enter a project name');
+		if (formState === FORM_STATES.SUBMITTING) return;
+
+		// Final validation
+		const projectData: ProjectSetupData = {
+			name: projectName.trim(),
+			description: projectDescription.trim() || undefined,
+			framework,
+			sandboxProvider: sandboxProvider as 'daytona' | 'e2b',
+			configuration: {
+				typescript,
+				eslint,
+				prettier,
+				tailwindcss,
+				packageManager: packageManager as 'npm' | 'yarn' | 'pnpm' | 'bun',
+				additionalDependencies: additionalDependencies
+					.split(',')
+					.map((dep) => dep.trim())
+					.filter((dep) => dep.length > 0)
+			}
+		};
+
+		const validation = validateProjectSetup(projectData);
+		if (!validation.success) {
+			formState = FORM_STATES.ERROR;
+			showErrorToast('Please fix all validation errors before creating the project.');
 			return;
 		}
 
 		if (!$user) {
-			toast.error('You must be logged in to create a project');
+			showErrorToast('You must be logged in to create a project');
 			goto('/auth/login');
 			return;
 		}
 
+		if (projectNameCheckState !== 'available') {
+			showErrorToast('Please choose an available project name');
+			return;
+		}
+
+		formState = FORM_STATES.SUBMITTING;
 		creating = true;
 		projectId = null;
 		currentStatus = {
@@ -193,46 +306,65 @@
 			details: {}
 		};
 
-		try {
-			const response = await fetch('/api/projects', {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify({
-					name: projectName.trim(),
-					description: projectDescription.trim() || undefined,
-					framework,
-					sandboxProvider,
-					configuration: {
-						typescript,
-						eslint,
-						prettier,
-						tailwindcss,
-						packageManager,
-						additionalDependencies: additionalDependencies
-							.split(',')
-							.map((dep) => dep.trim())
-							.filter((dep) => dep.length > 0)
+		const result = await handleFormSubmission(
+			async () => {
+				try {
+					const response = await fetch('/api/projects', {
+						method: 'POST',
+						headers: {
+							'Content-Type': 'application/json'
+						},
+						body: JSON.stringify(projectData)
+					});
+
+					if (!response.ok) {
+						let errorData: any = {};
+						try {
+							errorData = await response.json();
+						} catch {
+							// If we can't parse the response, use a generic error
+						}
+
+						throw new ApiError({
+							message: errorData.message || errorData.error || 'Failed to create project',
+							statusCode: response.status,
+							code: errorData.code || `HTTP_${response.status}`,
+							details: errorData.details || {}
+						});
 					}
-				})
-			});
 
-			const result = await response.json();
+					const result = await response.json();
+					projectId = result.project?.id;
 
-			if (response.ok) {
-				projectId = result.project.id;
-				// Start polling for status
-				startStatusPolling();
-			} else {
-				toast.error(result.message || 'Failed to create project');
-				creating = false;
+					if (!projectId) {
+						throw new ApiError({
+							message: 'Project created but no ID returned',
+							statusCode: 500,
+							code: 'MISSING_PROJECT_ID'
+						});
+					}
+
+					return result;
+				} catch (error) {
+					logError(error, 'Project Creation');
+					throw error;
+				}
+			},
+			{
+				loadingMessage: 'Creating your project...',
+				onSuccess: (result) => {
+					formState = FORM_STATES.SUCCESS;
+					// Start polling for status
+					startStatusPolling();
+				},
+				onError: (error) => {
+					formState = FORM_STATES.ERROR;
+					creating = false;
+					logError(error, 'Project Creation Form');
+				},
+				suppressErrorToast: false
 			}
-		} catch (error) {
-			console.error('Error creating project:', error);
-			toast.error('Network error. Please try again.');
-			creating = false;
-		}
+		);
 	}
 
 	function startStatusPolling() {
@@ -373,7 +505,7 @@
 	});
 
 	// Get visible phases for carousel (current + next few)
-	const visiblePhases = $derived(() => {
+	const visiblePhases = $derived.by(() => {
 		const phases = getCarouselPhases(sandboxProvider);
 		const currentIdx = currentPhaseIndex();
 		const startIdx = Math.max(0, currentIdx - 1);
@@ -491,21 +623,71 @@
 						</CardDescription>
 					</CardHeader>
 					<CardContent class="space-y-6">
+						{#if currentStepErrors().length > 0}
+							<div
+								class="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+							>
+								<AlertCircleIcon class="h-4 w-4 flex-shrink-0" />
+								<div>
+									<p class="font-medium">Please fix the following errors:</p>
+									<ul class="mt-1 list-inside list-disc space-y-1">
+										{#each currentStepErrors() as error}
+											<li>{error}</li>
+										{/each}
+									</ul>
+								</div>
+							</div>
+						{/if}
+
 						<div class="space-y-2">
 							<Label for="projectName">Project Name *</Label>
-							<Input
-								id="projectName"
-								bind:value={projectName}
-								placeholder="my-awesome-app"
-								required
-								class={projectNameErrorMessage()
-									? 'border-destructive focus-visible:ring-destructive'
-									: ''}
-								onblur={() => validateProjectName(projectName)}
-							/>
+							<div class="relative">
+								<Input
+									id="projectName"
+									bind:value={projectName}
+									placeholder="my-awesome-app"
+									required
+									class={projectNameErrorMessage()
+										? 'border-destructive focus-visible:ring-destructive'
+										: projectNameCheckState === 'available'
+											? 'border-green-500 focus-visible:ring-green-500'
+											: ''}
+									oninput={handleProjectNameInput}
+									onblur={handleProjectNameBlur}
+									disabled={formState === FORM_STATES.SUBMITTING}
+								/>
+								{#if projectNameCheckState === 'checking'}
+									<div class="absolute top-3 right-3">
+										<div
+											class="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent"
+										></div>
+									</div>
+								{:else if projectNameCheckState === 'available'}
+									<CheckCircle class="absolute top-3 right-3 h-4 w-4 text-green-500" />
+								{:else if projectNameCheckState === 'unavailable'}
+									<AlertCircleIcon class="absolute top-3 right-3 h-4 w-4 text-destructive" />
+								{/if}
+							</div>
 							{#if projectNameErrorMessage()}
-								<p class="text-sm text-destructive">{projectNameErrorMessage()}</p>
+								<p class="flex items-center gap-1 text-sm text-destructive">
+									<AlertCircleIcon class="h-3 w-3" />
+									{projectNameErrorMessage()}
+								</p>
+							{:else if projectNameCheckState === 'available'}
+								<p class="flex items-center gap-1 text-sm text-green-600">
+									<CheckCircle class="h-3 w-3" />
+									This project name is available
+								</p>
+							{:else if projectNameAvailabilityMessage && projectNameCheckState === 'unavailable'}
+								<p class="flex items-center gap-1 text-sm text-destructive">
+									<AlertCircleIcon class="h-3 w-3" />
+									{projectNameAvailabilityMessage}
+								</p>
 							{/if}
+							<p class="text-xs text-muted-foreground">
+								Project name must be 2-50 characters and can only contain letters, numbers, hyphens,
+								and underscores
+							</p>
 						</div>
 						<div class="space-y-2">
 							<Label for="projectDescription">Description</Label>
@@ -514,12 +696,20 @@
 								bind:value={projectDescription}
 								placeholder="A brief description of your project"
 								rows={3}
+								maxlength={500}
+								disabled={formState === FORM_STATES.SUBMITTING}
 							/>
-							<p class="text-xs text-muted-foreground">
-								Optional but helpful for team collaboration
-							</p>
+							<div class="flex justify-between text-xs text-muted-foreground">
+								<span>Optional but helpful for team collaboration</span>
+								<span>{projectDescription.length}/500</span>
+							</div>
 						</div>
-						<Button onclick={nextStep} disabled={!isStepValid()} class="w-full" size="lg">
+						<Button
+							onclick={nextStep}
+							disabled={!isStepValid() || formState === FORM_STATES.SUBMITTING}
+							class="w-full"
+							size="lg"
+						>
 							Continue
 							<ArrowLeft class="ml-2 h-4 w-4 rotate-180" />
 						</Button>
@@ -714,18 +904,31 @@
 								id="additionalDeps"
 								bind:value={additionalDependencies}
 								placeholder="lodash, axios, uuid (comma-separated)"
+								disabled={formState === FORM_STATES.SUBMITTING}
+								maxlength={500}
 							/>
-							<p class="text-xs text-muted-foreground">Enter package names separated by commas</p>
+							<div class="flex justify-between text-xs text-muted-foreground">
+								<span>Enter package names separated by commas (max 20 packages)</span>
+								<span>{additionalDependencies.split(',').filter((d) => d.trim()).length}/20</span>
+							</div>
 						</div>
 
 						<Separator />
 
-						<Button onclick={createProject} disabled={creating} class="w-full" size="lg">
-							{#if creating}
+						<Button
+							onclick={createProject}
+							disabled={creating || formState === FORM_STATES.SUBMITTING || !isStepValid()}
+							class="w-full"
+							size="lg"
+						>
+							{#if creating || formState === FORM_STATES.SUBMITTING}
 								<div
 									class="mr-2 h-4 w-4 animate-spin rounded-full border-b-2 border-background"
 								></div>
 								Creating Project...
+							{:else if formState === FORM_STATES.SUCCESS}
+								<CheckCircle class="mr-2 h-4 w-4" />
+								Project Created!
 							{:else}
 								<Rocket class="mr-2 h-4 w-4" />
 								Create Project
