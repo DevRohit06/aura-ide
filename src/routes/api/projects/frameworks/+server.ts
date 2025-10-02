@@ -1,4 +1,4 @@
-import { stackblitzTemplates, templateCategories } from '$lib/config/template.config.js';
+import { stackblitzTemplates, templateCategories } from '$lib/config/template.config.ts';
 import { json, type RequestHandler } from '@sveltejs/kit';
 
 export const GET: RequestHandler = async () => {

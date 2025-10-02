@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
+	import EmptyFileSate from '$lib/assets/file-not-opened.png?url';
 	import { onMount } from 'svelte';
 	// PaneForge
 	import { Pane } from 'paneforge';
@@ -14,6 +15,7 @@
 	import CommandPalette from '$lib/components/shared/command-palette.svelte';
 	import ComprehensiveSettingsDialog from '$lib/components/shared/comprehensive-settings-dialog.svelte';
 	import EnhancedSidebar from '$lib/components/shared/enhanced-sidebar.svelte';
+	import ProfileModal from '$lib/components/shared/profile-modal.svelte';
 	import ChatSidebar from '@/components/chat/chat-sidebar.svelte';
 	// UI Components
 	import * as Alert from '$lib/components/ui/alert/index.js';
@@ -81,6 +83,7 @@
 
 	// Project data (derived from page `data` prop)
 	let project = $derived(pageData.project);
+	let user = $derived(pageData.user);
 	let setupStatus = $derived(pageData.setupStatus);
 	let isProjectReady = $derived(project?.status === 'ready' && !pageData.isInitializing);
 	let isProjectInitializing = $derived(pageData.isInitializing === true);
@@ -107,6 +110,7 @@
 
 	// Settings dialog state
 	let settingsOpen = $state(false);
+	let profileOpen = $state(false);
 
 	// Merged keyboard event handling
 	function handleKeydownMerged(event: KeyboardEvent) {
@@ -372,6 +376,10 @@
 	function handleSettingsClick() {
 		settingsOpen = true;
 	}
+
+	function handleProfileClick() {
+		profileOpen = true;
+	}
 </script>
 
 <svelte:head>
@@ -510,13 +518,17 @@
 {:else if isProjectReady}
 	<div class="flex h-dvh flex-col overflow-hidden">
 		<!-- Top Menubar -->
-		<TopMenubar {project} />
+		<TopMenubar {project} onOpenCommandPalette={() => (commandPaletteOpen = true)} />
 
 		<!-- Main Content Area -->
 
 		<div class="flex h-full flex-1 overflow-hidden">
 			<!-- Activity Bar - Always Visible -->
-			<ActivityBar onSettingsClick={handleSettingsClick} />
+			<ActivityBar
+				onSettingsClick={handleSettingsClick}
+				onProfileClick={handleProfileClick}
+				{user}
+			/>
 			<!-- Main Layout -->
 			<Resizable.PaneGroup direction="horizontal" class=" flex-1">
 				<!-- Left Sidebar -->
@@ -562,7 +574,7 @@
 							{:else}
 								<div class="flex flex-1 items-center justify-center">
 									<div class="space-y-4 text-center">
-										<div class="text-6xl">📝</div>
+										<img src={EmptyFileSate} alt="Welcome" class="mx-auto size-86" />
 										<div>
 											<h2 class="mb-2 text-xl font-semibold">Welcome to {project.name}</h2>
 											<p class="text-muted-foreground">
@@ -635,6 +647,8 @@
 
 	<!-- Settings Dialog -->
 	<ComprehensiveSettingsDialog bind:open={settingsOpen} />
+	<!-- Profile Modal -->
+	<ProfileModal bind:open={profileOpen} {user} />
 	<CommandPalette bind:open={commandPaletteOpen} {project} />
 {:else}
 	<div class="flex h-screen items-center justify-center">

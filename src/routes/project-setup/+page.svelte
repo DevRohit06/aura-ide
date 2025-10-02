@@ -2,23 +2,15 @@
 	import { goto } from '$app/navigation';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
-	import {
-		Card,
-		CardContent,
-		CardDescription,
-		CardHeader,
-		CardTitle
-	} from '$lib/components/ui/card/index.js';
-	import { Checkbox } from '$lib/components/ui/checkbox/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Progress } from '$lib/components/ui/progress/index.js';
-	import * as Select from '$lib/components/ui/select/index.js';
-	import { Separator } from '$lib/components/ui/separator/index.js';
+	import { ProjectConfiguration } from '$lib/components/ui/project-configuration/index.js';
 	import { Skeleton } from '$lib/components/ui/skeleton/index.js';
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
 	import { isAuthenticated, user } from '$lib/stores/auth';
-	import { AlertCircleIcon, ArrowLeft, CheckCircle, Rocket, Settings } from 'lucide-svelte';
+	import { cn } from '$lib/utils';
+	import { ArrowLeft, CheckCircle, Rocket, Settings } from 'lucide-svelte';
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	// Import validation utilities
@@ -29,18 +21,15 @@
 		showErrorToast,
 		type ValidationError
 	} from '$lib/utils/error-handling';
+	import { FORM_STATES, type FormState } from '$lib/utils/form-validation';
 	import {
-		createDebouncedValidator,
-		FORM_STATES,
-		type FormState
-	} from '$lib/utils/form-validation';
-	import {
-		checkProjectNameAvailability,
 		getStepValidation,
 		validateProjectNameFormat,
 		validateProjectSetup,
 		type ProjectSetupData
 	} from '$lib/validations/project.validation';
+	import FrameworkIcon from '@/components/ui/framework-icon/framework-icon.svelte';
+	import { slide } from 'svelte/transition';
 
 	let currentStep = $state(1);
 	let projectName = $state('');
@@ -68,36 +57,41 @@
 
 	// Form validation state
 	let formState: FormState = $state(FORM_STATES.IDLE);
-	let projectNameCheckState = $state<'idle' | 'checking' | 'available' | 'unavailable'>('idle');
-	let projectNameAvailabilityMessage = $state('');
 
 	// Simple validation state
 	let validationErrors = $state<ValidationError[]>([]);
 	let touchedFields = $state(new Set<string>());
 
-	// Debounced validations
-	const debouncedProjectNameValidation = createDebouncedValidator(async () => {
-		if (projectName.trim()) {
-			const formatValidation = validateProjectNameFormat(projectName);
-			if (formatValidation.isValid) {
-				projectNameCheckState = 'checking';
-				try {
-					const availability = await checkProjectNameAvailability(projectName);
-					projectNameCheckState = availability.isAvailable ? 'available' : 'unavailable';
-					projectNameAvailabilityMessage = availability.message || '';
-				} catch (error) {
-					projectNameCheckState = 'idle';
-					projectNameAvailabilityMessage = 'Unable to check availability';
-				}
-			} else {
-				projectNameCheckState = 'idle';
-				projectNameAvailabilityMessage = formatValidation.errors[0] || '';
-			}
-		} else {
-			projectNameCheckState = 'idle';
-			projectNameAvailabilityMessage = '';
+	// Dynamic step information
+	const stepInfo = $derived(() => {
+		switch (currentStep) {
+			case 1:
+				return {
+					title: 'Project Details',
+					description: 'Please select the customer and confirm their details.'
+				};
+			case 2:
+				return {
+					title: 'Choose Framework',
+					description: 'Select the technology stack for your project.'
+				};
+			case 3:
+				return {
+					title: 'Development Environment',
+					description: 'Choose your preferred sandbox provider.'
+				};
+			case 4:
+				return {
+					title: 'Project Configuration',
+					description: 'Customize your development tools and dependencies.'
+				};
+			default:
+				return {
+					title: 'Create Project',
+					description: 'Setup your development environment'
+				};
 		}
-	}, 800);
+	});
 
 	// Package manager display names
 	const packageManagerOptions = [
@@ -140,7 +134,7 @@
 	const isStepValid = $derived(() => {
 		const currentData = getCurrentStepData();
 		const validation = getStepValidation(currentStep, currentData);
-		return validation.isValid && (currentStep !== 1 || projectNameCheckState === 'available');
+		return validation.isValid;
 	});
 
 	const getCurrentStepData = () => {
@@ -179,10 +173,6 @@
 			return formatValidation.errors[0] || 'Invalid project name';
 		}
 
-		if (projectNameCheckState === 'unavailable') {
-			return projectNameAvailabilityMessage || 'This project name is not available';
-		}
-
 		return '';
 	});
 
@@ -207,12 +197,80 @@
 			if (response.ok) {
 				const data = await response.json();
 				frameworks = data.frameworks || [];
+				console.log('Loaded frameworks:', frameworks.length, frameworks);
 			} else {
-				toast.error('Failed to load available frameworks');
+				console.error('Failed to fetch frameworks:', response.status, response.statusText);
+				// Fallback to basic frameworks if API fails
+				frameworks = [
+					{
+						id: 'react',
+						name: 'React',
+						description: 'A JavaScript library for building user interfaces',
+						version: '18.x',
+						category: 'frontend',
+						icon: 'react',
+						tags: ['javascript', 'typescript', 'frontend', 'spa'],
+						features: ['Hot Reload', 'Component-based', 'Virtual DOM', 'JSX'],
+						stackblitzId: 'react'
+					},
+					{
+						id: 'vue',
+						name: 'Vue.js',
+						description: 'The progressive JavaScript framework',
+						version: '3.x',
+						category: 'frontend',
+						icon: 'vue',
+						tags: ['javascript', 'typescript', 'frontend', 'spa'],
+						features: ['Reactive Data', 'Component-based', 'Template Syntax', 'Progressive'],
+						stackblitzId: 'vue'
+					},
+					{
+						id: 'svelte',
+						name: 'Svelte',
+						description: 'Cybernetically enhanced web apps',
+						version: '4.x',
+						category: 'frontend',
+						icon: 'svelte',
+						tags: ['javascript', 'typescript', 'frontend', 'spa'],
+						features: [
+							'No Virtual DOM',
+							'Compile-time Optimizations',
+							'Reactive',
+							'Small Bundle Size'
+						],
+						stackblitzId: 'svelte'
+					}
+				];
+				toast.error('Failed to load available frameworks, using defaults');
 			}
 		} catch (error) {
 			console.error('Error loading frameworks:', error);
-			toast.error('Network error while loading frameworks');
+			// Fallback to basic frameworks if network fails
+			frameworks = [
+				{
+					id: 'react',
+					name: 'React',
+					description: 'A JavaScript library for building user interfaces',
+					version: '18.x',
+					category: 'frontend',
+					icon: 'react',
+					tags: ['javascript', 'typescript', 'frontend', 'spa'],
+					features: ['Hot Reload', 'Component-based', 'Virtual DOM', 'JSX'],
+					stackblitzId: 'react'
+				},
+				{
+					id: 'vue',
+					name: 'Vue.js',
+					description: 'The progressive JavaScript framework',
+					version: '3.x',
+					category: 'frontend',
+					icon: 'vue',
+					tags: ['javascript', 'typescript', 'frontend', 'spa'],
+					features: ['Reactive Data', 'Component-based', 'Template Syntax', 'Progressive'],
+					stackblitzId: 'vue'
+				}
+			];
+			toast.error('Network error while loading frameworks, using defaults');
 		} finally {
 			loading = false;
 		}
@@ -223,6 +281,12 @@
 			currentStep--;
 		} else {
 			goto('/dashboard');
+		}
+	}
+
+	function handleStepClick(step: number) {
+		if (step < currentStep) {
+			currentStep = step;
 		}
 	}
 
@@ -243,17 +307,10 @@
 	function handleProjectNameInput(event: Event): void {
 		const target = event.target as HTMLInputElement;
 		projectName = target.value;
-		debouncedProjectNameValidation();
 	}
 
 	function handleProjectNameBlur(): void {
-		if (projectName.trim()) {
-			const formatValidation = validateProjectNameFormat(projectName);
-			if (!formatValidation.isValid) {
-				projectNameAvailabilityMessage = formatValidation.errors[0] || 'Invalid project name';
-				projectNameCheckState = 'unavailable';
-			}
-		}
+		// Project name validation is handled by the derived projectNameErrorMessage
 	}
 
 	async function createProject() {
@@ -288,11 +345,6 @@
 		if (!$user) {
 			showErrorToast('You must be logged in to create a project');
 			goto('/auth/login');
-			return;
-		}
-
-		if (projectNameCheckState !== 'available') {
-			showErrorToast('Please choose an available project name');
 			return;
 		}
 
@@ -537,570 +589,567 @@
 	];
 </script>
 
+<svelte:head>
+	<title>Project Setup - Aura</title>
+	<meta name="description" content="Set up your new project with Aura" />
+</svelte:head>
+
 <div class="min-h-screen bg-background">
-	<!-- Header -->
-	<header
-		class="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60"
-	>
-		<div class="container mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
-			<div class="flex items-center py-6">
-				<Button variant="ghost" size="sm" onclick={goBack} class="mr-4">
+	<!-- Modern Layout with Sidebar -->
+	<div class="flex h-screen">
+		<!-- Sidebar Navigation -->
+		<div class="flex w-64 flex-col border-r bg-background">
+			<!-- Header with Logo -->
+			<div class="border-b p-4">
+				<Button variant="ghost" onclick={goBack} class=" mb-4 justify-start text-muted-foreground">
 					<ArrowLeft class="mr-2 h-4 w-4" />
 					Back
 				</Button>
-				<div class="flex-1">
-					<h1 class="text-2xl font-bold">Create New Project</h1>
-					<p class="text-muted-foreground">Set up your new development environment</p>
+				<div class="flex items-center gap-3">
+					<img src="/aura.png" alt="Aura" class="h-8 w-8" />
+				</div>
+				<div class="mt-8">
+					{#key stepInfo()?.title}
+						<h1 transition:slide class="font-semibold text-foreground">{stepInfo().title}</h1>
+						<p transition:slide class="text-sm text-muted-foreground">{stepInfo().description}</p>
+					{/key}
 				</div>
 			</div>
-		</div>
-	</header>
 
-	<!-- Progress Section -->
-	<div class="container mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
-		<div class="mb-8">
-			<div class="mb-4">
-				<Progress value={getProgressValue()} class="h-2" />
-			</div>
-
-			<!-- Steps Navigation -->
-			<div class="grid grid-cols-1 gap-4 sm:grid-cols-4">
-				{#each steps as step}
-					{@const status = getStepStatus(step.number)}
-					<div class="flex items-center space-x-3">
-						<div
-							class={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium transition-colors ${
-								status === 'completed'
-									? 'bg-primary text-primary-foreground'
-									: status === 'current'
-										? 'bg-primary text-primary-foreground'
-										: 'bg-muted text-muted-foreground'
-							}`}
+			<!-- Simple Steps List -->
+			<div class="flex-grow p-4">
+				<div class="space-y-1">
+					{#each steps as step}
+						{@const status = getStepStatus(step.number)}
+						<button
+							class={cn(
+								'flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors',
+								status === 'current'
+									? 'bg-foreground text-background'
+									: status === 'completed'
+										? 'text-foreground hover:bg-muted/50'
+										: 'cursor-not-allowed text-muted-foreground'
+							)}
+							onclick={() => handleStepClick(step.number)}
+							disabled={step.number > currentStep}
 						>
-							{#if status === 'completed'}
-								<CheckCircle class="h-4 w-4" />
-							{:else}
-								{step.number}
-							{/if}
-						</div>
-						<div class="hidden sm:block">
-							<p
-								class={`text-sm font-medium ${status === 'current' ? 'text-foreground' : 'text-muted-foreground'}`}
-							>
-								{step.title}
-							</p>
-							<p class="text-xs text-muted-foreground">{step.description}</p>
-						</div>
-					</div>
-				{/each}
-			</div>
-		</div>
-
-		<!-- Step Content -->
-		<div class="mx-auto max-w-2xl">
-			{#if loading}
-				<Card>
-					<CardHeader>
-						<Skeleton class="h-6 w-3/4" />
-						<Skeleton class="h-4 w-1/2" />
-					</CardHeader>
-					<CardContent class="space-y-4">
-						<Skeleton class="h-10 w-full" />
-						<Skeleton class="h-20 w-full" />
-						<Skeleton class="h-10 w-full" />
-					</CardContent>
-				</Card>
-			{:else if currentStep === 1}
-				<!-- Step 1: Project Details -->
-				<Card>
-					<CardHeader>
-						<CardTitle class="flex items-center">
-							<Settings class="mr-2 h-5 w-5" />
-							Project Details
-						</CardTitle>
-						<CardDescription>
-							Let's start with the basic information about your project
-						</CardDescription>
-					</CardHeader>
-					<CardContent class="space-y-6">
-						{#if currentStepErrors().length > 0}
 							<div
-								class="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+								class={cn(
+									'flex h-5 w-5 items-center justify-center rounded-full text-xs',
+									status === 'current'
+										? 'bg-background text-foreground'
+										: status === 'completed'
+											? 'bg-foreground text-background'
+											: 'bg-muted text-muted-foreground'
+								)}
 							>
-								<AlertCircleIcon class="h-4 w-4 flex-shrink-0" />
-								<div>
-									<p class="font-medium">Please fix the following errors:</p>
-									<ul class="mt-1 list-inside list-disc space-y-1">
-										{#each currentStepErrors() as error}
-											<li>{error}</li>
-										{/each}
-									</ul>
-								</div>
-							</div>
-						{/if}
-
-						<div class="space-y-2">
-							<Label for="projectName">Project Name *</Label>
-							<div class="relative">
-								<Input
-									id="projectName"
-									bind:value={projectName}
-									placeholder="my-awesome-app"
-									required
-									class={projectNameErrorMessage()
-										? 'border-destructive focus-visible:ring-destructive'
-										: projectNameCheckState === 'available'
-											? 'border-green-500 focus-visible:ring-green-500'
-											: ''}
-									oninput={handleProjectNameInput}
-									onblur={handleProjectNameBlur}
-									disabled={formState === FORM_STATES.SUBMITTING}
-								/>
-								{#if projectNameCheckState === 'checking'}
-									<div class="absolute top-3 right-3">
-										<div
-											class="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent"
-										></div>
-									</div>
-								{:else if projectNameCheckState === 'available'}
-									<CheckCircle class="absolute top-3 right-3 h-4 w-4 text-green-500" />
-								{:else if projectNameCheckState === 'unavailable'}
-									<AlertCircleIcon class="absolute top-3 right-3 h-4 w-4 text-destructive" />
+								{#if status === 'completed'}
+									•
+								{:else}
+									{step.number}
 								{/if}
 							</div>
-							{#if projectNameErrorMessage()}
-								<p class="flex items-center gap-1 text-sm text-destructive">
-									<AlertCircleIcon class="h-3 w-3" />
-									{projectNameErrorMessage()}
-								</p>
-							{:else if projectNameCheckState === 'available'}
-								<p class="flex items-center gap-1 text-sm text-green-600">
-									<CheckCircle class="h-3 w-3" />
-									This project name is available
-								</p>
-							{:else if projectNameAvailabilityMessage && projectNameCheckState === 'unavailable'}
-								<p class="flex items-center gap-1 text-sm text-destructive">
-									<AlertCircleIcon class="h-3 w-3" />
-									{projectNameAvailabilityMessage}
-								</p>
-							{/if}
-							<p class="text-xs text-muted-foreground">
-								Project name must be 2-50 characters and can only contain letters, numbers, hyphens,
-								and underscores
-							</p>
-						</div>
-						<div class="space-y-2">
-							<Label for="projectDescription">Description</Label>
-							<Textarea
-								id="projectDescription"
-								bind:value={projectDescription}
-								placeholder="A brief description of your project"
-								rows={3}
-								maxlength={500}
-								disabled={formState === FORM_STATES.SUBMITTING}
-							/>
-							<div class="flex justify-between text-xs text-muted-foreground">
-								<span>Optional but helpful for team collaboration</span>
-								<span>{projectDescription.length}/500</span>
+
+							<span class="font-medium">{step.title}</span>
+						</button>
+					{/each}
+				</div>
+			</div>
+
+			<!-- Save & Close Button -->
+		</div>
+
+		<!-- Main Content Area -->
+		<div class="flex-1 overflow-auto">
+			<div class="flex min-h-full items-center justify-center p-6">
+				<div class="w-full max-w-4xl">
+					{#if loading}
+						<!-- Loading State -->
+						<div class="space-y-6">
+							<div class="space-y-2">
+								<Skeleton class="h-8 w-64" />
+								<Skeleton class="h-4 w-96" />
 							</div>
-						</div>
-						<Button
-							onclick={nextStep}
-							disabled={!isStepValid() || formState === FORM_STATES.SUBMITTING}
-							class="w-full"
-							size="lg"
-						>
-							Continue
-							<ArrowLeft class="ml-2 h-4 w-4 rotate-180" />
-						</Button>
-					</CardContent>
-				</Card>
-			{:else if currentStep === 2}
-				<!-- Step 2: Framework Selection -->
-				<Card>
-					<CardHeader>
-						<CardTitle class="flex items-center">
-							<Rocket class="mr-2 h-5 w-5" />
-							Choose Your Framework
-						</CardTitle>
-						<CardDescription>
-							Select the JavaScript framework you'd like to use for your project
-						</CardDescription>
-					</CardHeader>
-					<CardContent>
-						{#if frameworks.length === 0}
-							<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-								{#each Array(4) as _}
+							<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+								{#each Array(6) as _}
 									<Skeleton class="h-32 w-full" />
 								{/each}
 							</div>
-						{:else}
-							<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-								{#each frameworks as fw (fw.id)}
-									<Card
-										class="group cursor-pointer border-2 transition-all hover:border-primary hover:shadow-lg"
-										onclick={() => selectFramework(fw)}
-									>
-										<CardContent class="p-6">
-											<div class="mb-3 flex items-center justify-between">
-												<h3 class="text-lg font-semibold group-hover:text-primary">{fw.name}</h3>
-												<Badge variant="outline">{fw.version}</Badge>
-											</div>
-											<p class="text-sm text-muted-foreground">
-												{fw.description}
-											</p>
-										</CardContent>
-									</Card>
-								{/each}
-							</div>
-						{/if}
-					</CardContent>
-				</Card>
-			{:else if currentStep === 3}
-				<!-- Step 3: Sandbox Provider Selection -->
-				<Card>
-					<CardHeader>
-						<CardTitle class="flex items-center">
-							<Settings class="mr-2 h-5 w-5" />
-							Choose Sandbox Provider
-						</CardTitle>
-						<CardDescription>
-							Select the development environment that best fits your workflow
-						</CardDescription>
-					</CardHeader>
-					<CardContent>
-						<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-							{#each sandboxProviderOptions as provider (provider.value)}
-								<Card
-									class="group cursor-pointer border-2 transition-all hover:border-primary hover:shadow-lg {sandboxProvider ===
-									provider.value
-										? 'border-primary bg-primary/5'
-										: ''}"
-									onclick={() => (sandboxProvider = provider.value)}
-								>
-									<CardContent class="p-6">
-										<div class="mb-3 flex items-center justify-between">
-											<h3 class="text-lg font-semibold group-hover:text-primary">
-												{provider.label}
-											</h3>
-											{#if sandboxProvider === provider.value}
-												<CheckCircle class="h-5 w-5 text-primary" />
-											{/if}
-										</div>
-										<p class="mb-3 text-sm text-muted-foreground">
-											{provider.description}
+						</div>
+					{:else if currentStep === 1}
+						<!-- Step 1: Project Details -->
+						<div class="mx-auto max-w-2xl space-y-6">
+							<div class="space-y-6">
+								<div class="space-y-3">
+									<Label for="projectName" class="text-sm font-medium">Project Name *</Label>
+									<Input
+										id="projectName"
+										bind:value={projectName}
+										placeholder="my-awesome-app"
+										required
+										class={cn(
+											'h-12 text-base',
+											projectNameErrorMessage() ? 'border-red-500 focus-visible:ring-red-500' : ''
+										)}
+										oninput={handleProjectNameInput}
+										onblur={handleProjectNameBlur}
+										disabled={formState === FORM_STATES.SUBMITTING}
+									/>
+									{#if projectNameErrorMessage()}
+										<p class="text-sm text-red-600 dark:text-red-400">
+											{projectNameErrorMessage()}
 										</p>
-										<div class="flex flex-wrap gap-1">
-											{#each provider.features as feature}
-												<Badge variant="secondary" class="text-xs">{feature}</Badge>
-											{/each}
-										</div>
-									</CardContent>
-								</Card>
-							{/each}
-						</div>
-						<Button onclick={nextStep} disabled={!isStepValid()} class="mt-6 w-full" size="lg">
-							Continue
-							<ArrowLeft class="ml-2 h-4 w-4 rotate-180" />
-						</Button>
-					</CardContent>
-				</Card>
-			{:else if currentStep === 4}
-				<!-- Step 3: Configuration -->
-				<Card>
-					<CardHeader>
-						<CardTitle class="flex items-center">
-							<Settings class="mr-2 h-5 w-5" />
-							Project Configuration
-						</CardTitle>
-						<CardDescription>
-							Customize your project setup with additional tools and packages
-						</CardDescription>
-					</CardHeader>
-					<CardContent class="space-y-6">
-						<!-- Package Manager -->
-						<div class="space-y-2">
-							<Label for="packageManager">Package Manager</Label>
-							<Select.Root type="single" bind:value={packageManager}>
-								<Select.Trigger class="w-full">
-									{getPackageManagerLabel(packageManager)}
-								</Select.Trigger>
-								<Select.Content>
-									{#each packageManagerOptions as option}
-										<Select.Item value={option.value} label={option.label}>
-											<div class="flex flex-col">
-												<span class="font-medium">{option.label}</span>
-												<span class="text-xs text-muted-foreground">{option.description}</span>
-											</div>
-										</Select.Item>
-									{/each}
-								</Select.Content>
-							</Select.Root>
-						</div>
-
-						<Separator />
-
-						<!-- Development Tools -->
-						<div class="space-y-4">
-							<Label class="text-base font-medium">Development Tools</Label>
-							<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-								<div class="flex items-center space-x-3 rounded-lg border p-4">
-									<Checkbox bind:checked={typescript} id="typescript" />
-									<div class="grid gap-1.5 leading-none">
-										<Label
-											for="typescript"
-											class="text-sm leading-none font-medium peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-										>
-											TypeScript
-										</Label>
-										<p class="text-xs text-muted-foreground">Add type safety to your JavaScript</p>
-									</div>
-								</div>
-								<div class="flex items-center space-x-3 rounded-lg border p-4">
-									<Checkbox bind:checked={eslint} id="eslint" />
-									<div class="grid gap-1.5 leading-none">
-										<Label
-											for="eslint"
-											class="text-sm leading-none font-medium peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-										>
-											ESLint
-										</Label>
-										<p class="text-xs text-muted-foreground">Find and fix problems in your code</p>
-									</div>
-								</div>
-								<div class="flex items-center space-x-3 rounded-lg border p-4">
-									<Checkbox bind:checked={prettier} id="prettier" />
-									<div class="grid gap-1.5 leading-none">
-										<Label
-											for="prettier"
-											class="text-sm leading-none font-medium peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-										>
-											Prettier
-										</Label>
-										<p class="text-xs text-muted-foreground">Format your code automatically</p>
-									</div>
-								</div>
-								<div class="flex items-center space-x-3 rounded-lg border p-4">
-									<Checkbox bind:checked={tailwindcss} id="tailwindcss" />
-									<div class="grid gap-1.5 leading-none">
-										<Label
-											for="tailwindcss"
-											class="text-sm leading-none font-medium peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-										>
-											Tailwind CSS
-										</Label>
-										<p class="text-xs text-muted-foreground">Utility-first CSS framework</p>
-									</div>
-								</div>
-							</div>
-						</div>
-
-						<Separator />
-
-						<!-- Additional Dependencies -->
-						<div class="space-y-2">
-							<Label for="additionalDeps">Additional Dependencies</Label>
-							<Input
-								id="additionalDeps"
-								bind:value={additionalDependencies}
-								placeholder="lodash, axios, uuid (comma-separated)"
-								disabled={formState === FORM_STATES.SUBMITTING}
-								maxlength={500}
-							/>
-							<div class="flex justify-between text-xs text-muted-foreground">
-								<span>Enter package names separated by commas (max 20 packages)</span>
-								<span>{additionalDependencies.split(',').filter((d) => d.trim()).length}/20</span>
-							</div>
-						</div>
-
-						<Separator />
-
-						<Button
-							onclick={createProject}
-							disabled={creating || formState === FORM_STATES.SUBMITTING || !isStepValid()}
-							class="w-full"
-							size="lg"
-						>
-							{#if creating || formState === FORM_STATES.SUBMITTING}
-								<div
-									class="mr-2 h-4 w-4 animate-spin rounded-full border-b-2 border-background"
-								></div>
-								Creating Project...
-							{:else if formState === FORM_STATES.SUCCESS}
-								<CheckCircle class="mr-2 h-4 w-4" />
-								Project Created!
-							{:else}
-								<Rocket class="mr-2 h-4 w-4" />
-								Create Project
-							{/if}
-						</Button>
-					</CardContent>
-				</Card>
-			{/if}
-		</div>
-	</div>
-
-	<!-- Project Creation Status Modal -->
-	{#if creating && currentStatus}
-		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
-		>
-			<div class="w-full max-w-2xl space-y-8 rounded-lg bg-background p-8 shadow-2xl">
-				<!-- Header -->
-				<div class="space-y-2 text-center">
-					<h3 class="text-xl font-semibold">Creating Your Project</h3>
-					<p class="text-muted-foreground">
-						{sandboxProvider === 'daytona'
-							? 'Setting up your Daytona workspace'
-							: 'Initializing your E2B sandbox'}
-					</p>
-				</div>
-
-				<!-- Progress Carousel -->
-				<div class="space-y-6">
-					<!-- Phase Indicators -->
-					<div class="flex justify-center space-x-2">
-						{#each getCarouselPhases(sandboxProvider) as phase, index}
-							{@const isActive = index === currentPhaseIndex()}
-							{@const isCompleted = index < currentPhaseIndex()}
-							{@const isUpcoming = index > currentPhaseIndex()}
-							<div class="flex items-center">
-								<div
-									class={`flex h-3 w-3 items-center justify-center rounded-full transition-all duration-500 ${
-										isCompleted
-											? 'scale-110 bg-green-500'
-											: isActive
-												? 'scale-125 animate-pulse bg-primary'
-												: 'scale-100 bg-muted'
-									}`}
-								>
-									{#if isCompleted}
-										<div class="h-1.5 w-1.5 rounded-full bg-white"></div>
 									{/if}
 								</div>
-								{#if index < getCarouselPhases(sandboxProvider).length - 1}
-									<div
-										class={`h-0.5 w-8 transition-colors duration-500 ${
-											isCompleted ? 'bg-green-500' : 'bg-muted'
-										}`}
-									></div>
-								{/if}
-							</div>
-						{/each}
-					</div>
 
-					<!-- Current Phase Display -->
-					<div class="min-h-[120px] space-y-4 text-center">
-						{#each visiblePhases as phase, index}
-							{@const isCurrent = phase.id === currentStatus.phase}
-							{@const offset = index - 1}
-							<!-- Center current phase -->
-							<div
-								class="absolute inset-0 flex transform items-center justify-center transition-all duration-700 ease-in-out"
-								class:translate-x-0={offset === 0}
-								class:translate-x-[-100%]={offset === -1}
-								class:translate-x-[100%]={offset === 1}
-								class:opacity-100={offset === 0}
-								class:opacity-60={offset === -1 || offset === 1}
-								class:opacity-30={offset === -2 || offset === 2}
-								class:scale-100={offset === 0}
-								class:scale-90={offset !== 0}
-							>
-								<div class="space-y-3 text-center">
-									<div
-										class={`mx-auto flex h-16 w-16 items-center justify-center rounded-full transition-all duration-500 ${
-											isCurrent ? 'scale-110 bg-primary/10 shadow-lg' : 'bg-muted/50'
-										}`}
+								<div class="space-y-3">
+									<Label for="projectDescription" class="text-sm font-medium"
+										>Description (Optional)</Label
 									>
-										<phase.icon
-											class={`h-8 w-8 transition-all duration-500 ${
-												isCurrent ? `${phase.color} animate-pulse` : 'text-muted-foreground'
-											}`}
-										/>
-									</div>
-									<div class="space-y-1">
-										<h4
-											class={`text-lg font-semibold transition-colors duration-500 ${
-												isCurrent ? 'text-foreground' : 'text-muted-foreground'
-											}`}
-										>
-											{phase.title}
-										</h4>
-										<p
-											class={`text-sm transition-colors duration-500 ${
-												isCurrent ? 'text-muted-foreground' : 'text-muted-foreground/70'
-											}`}
-										>
-											{phase.description}
-										</p>
+									<Textarea
+										id="projectDescription"
+										bind:value={projectDescription}
+										placeholder="A brief description of your project"
+										rows={4}
+										maxlength={500}
+										class="text-base"
+										disabled={formState === FORM_STATES.SUBMITTING}
+									/>
+									<div class="text-right text-xs text-muted-foreground">
+										{projectDescription.length}/500
 									</div>
 								</div>
 							</div>
-						{/each}
-					</div>
-
-					<!-- Progress Bar -->
-					<div class="space-y-2">
-						<Progress value={currentStatus.progress} class="h-3" />
-						<div class="flex justify-between text-sm text-muted-foreground">
-							<span class="capitalize">{currentStatus.phase.replace('-', ' ')}</span>
-							<span>{Math.round(currentStatus.progress)}%</span>
+							<div class="flex justify-between">
+								{#if currentStep > 1}
+									<Button variant="outline" onclick={goBack}>
+										<ArrowLeft class="mr-2 h-4 w-4" />
+										Back
+									</Button>
+								{/if}
+								<Button
+									onclick={nextStep}
+									disabled={!isStepValid() || formState === FORM_STATES.SUBMITTING}
+									size="lg"
+									class="px-8"
+								>
+									Continue
+									<ArrowLeft class="ml-2 h-4 w-4 rotate-180" />
+								</Button>
+							</div>
 						</div>
-					</div>
-				</div>
+					{:else if currentStep === 2}
+						<!-- Step 2: Framework Selection -->
+						<div class="space-y-6">
+							{#if frameworks && frameworks.length > 0}
+								{@const popularFrameworks = frameworks.filter((fw) =>
+									['react', 'nextjs', 'vue', 'svelte', 'angular'].includes(fw.id)
+								)}
+								{@const otherFrameworks = frameworks.filter(
+									(fw) => !['react', 'nextjs', 'vue', 'svelte', 'angular'].includes(fw.id)
+								)}
 
-				<!-- Status Details -->
-				{#if currentStatus.details}
-					<div class="space-y-2 rounded-lg bg-muted/50 p-4 text-sm">
-						{#if currentStatus.details.filesDownloaded !== undefined}
-							<div class="flex justify-between">
-								<span>Files processed:</span>
-								<span class="font-medium">{currentStatus.details.filesDownloaded}</span>
+								<div class="space-y-6">
+									<!-- Popular Frameworks -->
+									{#if popularFrameworks.length > 0}
+										<div class="space-y-3">
+											<h3 class="text-lg font-semibold text-foreground">Popular Choices</h3>
+											<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+												{#each popularFrameworks as fw (fw.id)}
+													<button
+														class={cn(
+															'group relative rounded-lg border bg-card p-4 text-left transition-all hover:shadow-sm',
+															framework === fw.id
+																? 'border-primary shadow-sm ring-1 ring-primary/20'
+																: 'border-border hover:border-primary/50'
+														)}
+														onclick={() => selectFramework(fw)}
+													>
+														{#if framework === fw.id}
+															<div class="absolute top-4 right-4">
+																<div class="h-3 w-3 rounded-full bg-primary"></div>
+															</div>
+														{/if}
+
+														<div class="space-y-3">
+															<!-- Framework Icon -->
+															<div
+																class="flex h-10 w-10 items-center justify-center rounded-lg bg-muted/30"
+															>
+																<FrameworkIcon framework={fw.icon} class="h-6 w-6 text-primary" />
+															</div>
+
+															<!-- Framework Info -->
+															<div class="space-y-1">
+																<h4 class="font-semibold">{fw.name}</h4>
+																<p class="text-sm text-muted-foreground">
+																	{fw.description}
+																</p>
+															</div>
+														</div>
+													</button>
+												{/each}
+											</div>
+										</div>
+									{/if}
+
+									<!-- Other Frameworks -->
+									{#if otherFrameworks.length > 0}
+										<div class="space-y-3">
+											<h3 class="text-lg font-semibold text-foreground">More Options</h3>
+											<div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+												{#each otherFrameworks as fw (fw.id)}
+													<button
+														class={cn(
+															'flex items-center gap-3 rounded-lg border bg-card p-3 text-left transition-all hover:shadow-sm',
+															framework === fw.id
+																? 'border-primary bg-primary/5'
+																: 'border-border hover:border-primary/50'
+														)}
+														onclick={() => selectFramework(fw)}
+													>
+														<div
+															class="flex h-8 w-8 items-center justify-center rounded-lg bg-muted/30"
+														>
+															<FrameworkIcon framework={fw.icon} class="h-5 w-5 text-primary" />
+														</div>
+														<div class="min-w-0 flex-1">
+															<h4 class="truncate text-sm font-medium">{fw.name}</h4>
+															<p class="text-xs text-muted-foreground capitalize">{fw.category}</p>
+														</div>
+														{#if framework === fw.id}
+															<div class="h-2 w-2 rounded-full bg-primary"></div>
+														{/if}
+													</button>
+												{/each}
+											</div>
+										</div>
+									{/if}
+								</div>
+							{:else}
+								<div class="flex flex-col items-center justify-center py-12 text-center">
+									<div class="mb-4 text-6xl opacity-50">⚠️</div>
+									<h3 class="mb-2 text-lg font-semibold">No frameworks available</h3>
+									<p class="mb-4 text-sm text-muted-foreground">Please try refreshing the page.</p>
+									<Button onclick={() => window.location.reload()} variant="outline">
+										Refresh Page
+									</Button>
+								</div>
+							{/if}
+
+							<!-- Navigation Buttons for Step 2 -->
+							<div class="flex justify-between pt-6">
+								<Button variant="outline" onclick={goBack}>
+									<ArrowLeft class="mr-2 h-4 w-4" />
+									Back
+								</Button>
+								{#if framework}
+									<Button onclick={nextStep} size="lg" class="px-8">
+										Continue
+										<ArrowLeft class="ml-2 h-4 w-4 rotate-180" />
+									</Button>
+								{/if}
 							</div>
-						{/if}
-						{#if currentStatus.details.uploadProgress !== undefined}
-							<div class="flex justify-between">
-								<span>Upload progress:</span>
-								<span class="font-medium">{currentStatus.details.uploadProgress}%</span>
-							</div>
-						{/if}
-						{#if currentStatus.details.sandboxStatus}
-							<div class="space-y-1">
-								<span class="font-medium">Environment status:</span>
-								{#each Object.entries(currentStatus.details.sandboxStatus) as [provider, status]}
-									<div class="flex justify-between text-xs">
-										<span class="capitalize">{provider}:</span>
-										<Badge variant={status === 'ready' ? 'default' : 'secondary'} class="text-xs">
-											{status}
-										</Badge>
+						</div>
+					{:else if currentStep === 3}
+						<!-- Step 3: Sandbox Provider Selection -->
+						<div class="mx-auto max-w-2xl space-y-6">
+							<div class="grid gap-4 sm:grid-cols-2">
+								<!-- Daytona Provider -->
+								<button
+									class={cn(
+										'relative rounded-lg border p-6 text-left transition-all hover:shadow-md',
+										sandboxProvider === 'daytona'
+											? 'border-foreground bg-foreground/5 ring-1 ring-foreground/20'
+											: 'border-border hover:border-foreground/50'
+									)}
+									onclick={() => (sandboxProvider = 'daytona')}
+								>
+									{#if sandboxProvider === 'daytona'}
+										<div class="absolute top-4 right-4">
+											<div class="h-3 w-3 rounded-full bg-foreground"></div>
+										</div>
+									{/if}
+
+									<div class="space-y-4">
+										<div class="flex items-center gap-3">
+											<img
+												src="https://cdn-1.webcatalog.io/catalog/daytona/daytona-icon-filled-256.png?v=1721721896194"
+												alt="Daytona"
+												class="h-8 w-8 rounded"
+											/>
+											<h3 class="font-semibold">Daytona</h3>
+										</div>
+										<p class="text-sm text-muted-foreground">
+											Persistent sandbox with git operations and direct terminal access
+										</p>
+										<div class="flex flex-wrap gap-2">
+											<span class="rounded-full bg-muted px-2 py-1 text-xs">Persistent</span>
+											<span class="rounded-full bg-muted px-2 py-1 text-xs">Git Integration</span>
+											<span class="rounded-full bg-muted px-2 py-1 text-xs">SSH Access</span>
+										</div>
 									</div>
-								{/each}
-							</div>
-						{/if}
-					</div>
-				{/if}
+								</button>
 
-				<!-- Provider-specific footer message -->
-				<div class="border-t pt-4 text-center text-sm text-muted-foreground">
-					{#if sandboxProvider === 'daytona'}
-						{#if currentStatus.phase === 'creating-sandboxes'}
-							Setting up your persistent Daytona workspace with full git integration and terminal
-							access...
-						{:else if currentStatus.phase === 'ready'}
-							🎉 Your Daytona workspace is ready! Start coding with full development environment
-							access.
-						{/if}
-					{:else if sandboxProvider === 'e2b'}
-						{#if currentStatus.phase === 'uploading'}
-							Securely uploading your project to cloud storage for fast sandbox initialization...
-						{:else if currentStatus.phase === 'creating-sandboxes'}
-							Initializing your E2B sandbox with cloud-powered performance...
-						{:else if currentStatus.phase === 'ready'}
-							🚀 Your E2B sandbox is ready! Experience lightning-fast cloud development.
-						{/if}
+								<!-- E2B Provider -->
+								<button
+									class={cn(
+										'relative rounded-lg border p-6 text-left transition-all hover:shadow-md',
+										sandboxProvider === 'e2b'
+											? 'border-foreground bg-foreground/5 ring-1 ring-foreground/20'
+											: 'border-border hover:border-foreground/50'
+									)}
+									onclick={() => (sandboxProvider = 'e2b')}
+								>
+									{#if sandboxProvider === 'e2b'}
+										<div class="absolute top-4 right-4">
+											<div class="h-3 w-3 rounded-full bg-foreground"></div>
+										</div>
+									{/if}
+
+									<div class="space-y-4">
+										<div class="flex items-center gap-3">
+											<img
+												src="https://cdn-1.webcatalog.io/catalog/e2b/e2b-icon-filled-256.webp?v=1757567241849"
+												alt="E2B"
+												class="h-8 w-8 rounded"
+											/>
+											<h3 class="font-semibold">E2B</h3>
+										</div>
+										<p class="text-sm text-muted-foreground">
+											Cloud-based sandbox with R2 storage integration
+										</p>
+										<div class="flex flex-wrap gap-2">
+											<span class="rounded-full bg-muted px-2 py-1 text-xs">Cloud Storage</span>
+											<span class="rounded-full bg-muted px-2 py-1 text-xs">Fast Startup</span>
+											<span class="rounded-full bg-muted px-2 py-1 text-xs">API-driven</span>
+										</div>
+									</div>
+								</button>
+							</div>
+
+							<div class="flex justify-between pt-4">
+								<Button variant="outline" onclick={goBack}>
+									<ArrowLeft class="mr-2 h-4 w-4" />
+									Back
+								</Button>
+								<Button onclick={nextStep} disabled={!isStepValid()} size="lg" class="px-8">
+									Continue to Configuration
+									<ArrowLeft class="ml-2 h-4 w-4 rotate-180" />
+								</Button>
+							</div>
+						</div>
+					{:else if currentStep === 4}
+						<!-- Step 4: Configuration -->
+						<div class="space-y-6">
+							<ProjectConfiguration
+								{packageManager}
+								{typescript}
+								{eslint}
+								{prettier}
+								{tailwindcss}
+								{additionalDependencies}
+								onPackageManagerChange={(value) => (packageManager = value)}
+								onTypescriptChange={(value) => (typescript = value)}
+								onEslintChange={(value) => (eslint = value)}
+								onPrettierChange={(value) => (prettier = value)}
+								onTailwindChange={(value) => (tailwindcss = value)}
+								onDependenciesChange={(value) => (additionalDependencies = value)}
+							/>
+
+							<div class="flex justify-between pt-4">
+								<Button variant="outline" onclick={goBack}>
+									<ArrowLeft class="mr-2 h-4 w-4" />
+									Back
+								</Button>
+								<Button
+									onclick={createProject}
+									disabled={creating || formState === FORM_STATES.SUBMITTING || !isStepValid()}
+									size="lg"
+									class="px-8"
+								>
+									{#if creating || formState === FORM_STATES.SUBMITTING}
+										<div
+											class="mr-2 h-4 w-4 animate-spin rounded-full border-b-2 border-background"
+										></div>
+										Creating Project...
+									{:else if formState === FORM_STATES.SUCCESS}
+										<CheckCircle class="mr-2 h-4 w-4" />
+										Project Created!
+									{:else}
+										<Rocket class="mr-2 h-4 w-4" />
+										Create Project
+									{/if}
+								</Button>
+							</div>
+						</div>
 					{/if}
 				</div>
 			</div>
 		</div>
-	{/if}
+
+		<!-- Project Creation Status Modal -->
+		{#if creating && currentStatus}
+			<div
+				class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+			>
+				<div class="w-full max-w-2xl space-y-8 rounded-lg bg-background p-8 shadow-2xl">
+					<!-- Header -->
+					<div class="space-y-2 text-center">
+						<h3 class="text-xl font-semibold">Creating Your Project</h3>
+						<p class="text-muted-foreground">
+							{sandboxProvider === 'daytona'
+								? 'Setting up your Daytona workspace'
+								: 'Initializing your E2B sandbox'}
+						</p>
+					</div>
+
+					<!-- Progress Carousel -->
+					<div class="space-y-6">
+						<!-- Phase Indicators -->
+						<div class="flex justify-center space-x-2">
+							{#each getCarouselPhases(sandboxProvider) as phase, index}
+								{@const isActive = index === currentPhaseIndex()}
+								{@const isCompleted = index < currentPhaseIndex()}
+								{@const isUpcoming = index > currentPhaseIndex()}
+								<div class="flex items-center">
+									<div
+										class={`flex h-3 w-3 items-center justify-center rounded-full transition-all duration-500 ${
+											isCompleted
+												? 'scale-110 bg-green-500'
+												: isActive
+													? 'scale-125 animate-pulse bg-primary'
+													: 'scale-100 bg-muted'
+										}`}
+									>
+										{#if isCompleted}
+											<div class="h-1.5 w-1.5 rounded-full bg-white"></div>
+										{/if}
+									</div>
+									{#if index < getCarouselPhases(sandboxProvider).length - 1}
+										<div
+											class={`h-0.5 w-8 transition-colors duration-500 ${
+												isCompleted ? 'bg-green-500' : 'bg-muted'
+											}`}
+										></div>
+									{/if}
+								</div>
+							{/each}
+						</div>
+
+						<!-- Current Phase Display -->
+						<div class="min-h-[120px] space-y-4 text-center">
+							{#each visiblePhases as phase, index}
+								{@const isCurrent = phase.id === currentStatus.phase}
+								{@const offset = index - 1}
+								<!-- Center current phase -->
+								<div
+									class="absolute inset-0 flex transform items-center justify-center transition-all duration-700 ease-in-out"
+									class:translate-x-0={offset === 0}
+									class:translate-x-[-100%]={offset === -1}
+									class:translate-x-[100%]={offset === 1}
+									class:opacity-100={offset === 0}
+									class:opacity-60={offset === -1 || offset === 1}
+									class:opacity-30={offset === -2 || offset === 2}
+									class:scale-100={offset === 0}
+									class:scale-90={offset !== 0}
+								>
+									<div class="space-y-3 text-center">
+										<div
+											class={`mx-auto flex h-16 w-16 items-center justify-center rounded-full transition-all duration-500 ${
+												isCurrent ? 'scale-110 bg-primary/10 shadow-lg' : 'bg-muted/50'
+											}`}
+										>
+											<phase.icon
+												class={`h-8 w-8 transition-all duration-500 ${
+													isCurrent ? `${phase.color} animate-pulse` : 'text-muted-foreground'
+												}`}
+											/>
+										</div>
+										<div class="space-y-1">
+											<h4
+												class={`text-lg font-semibold transition-colors duration-500 ${
+													isCurrent ? 'text-foreground' : 'text-muted-foreground'
+												}`}
+											>
+												{phase.title}
+											</h4>
+											<p
+												class={`text-sm transition-colors duration-500 ${
+													isCurrent ? 'text-muted-foreground' : 'text-muted-foreground/70'
+												}`}
+											>
+												{phase.description}
+											</p>
+										</div>
+									</div>
+								</div>
+							{/each}
+						</div>
+
+						<!-- Progress Bar -->
+						<div class="space-y-2">
+							<Progress value={currentStatus.progress} class="h-3" />
+							<div class="flex justify-between text-sm text-muted-foreground">
+								<span class="capitalize">{currentStatus.phase.replace('-', ' ')}</span>
+								<span>{Math.round(currentStatus.progress)}%</span>
+							</div>
+						</div>
+					</div>
+
+					<!-- Status Details -->
+					{#if currentStatus.details}
+						<div class="space-y-2 rounded-lg bg-muted/50 p-4 text-sm">
+							{#if currentStatus.details.filesDownloaded !== undefined}
+								<div class="flex justify-between">
+									<span>Files processed:</span>
+									<span class="font-medium">{currentStatus.details.filesDownloaded}</span>
+								</div>
+							{/if}
+							{#if currentStatus.details.uploadProgress !== undefined}
+								<div class="flex justify-between">
+									<span>Upload progress:</span>
+									<span class="font-medium">{currentStatus.details.uploadProgress}%</span>
+								</div>
+							{/if}
+							{#if currentStatus.details.sandboxStatus}
+								<div class="space-y-1">
+									<span class="font-medium">Environment status:</span>
+									{#each Object.entries(currentStatus.details.sandboxStatus) as [provider, status]}
+										<div class="flex justify-between text-xs">
+											<span class="capitalize">{provider}:</span>
+											<Badge variant={status === 'ready' ? 'default' : 'secondary'} class="text-xs">
+												{status}
+											</Badge>
+										</div>
+									{/each}
+								</div>
+							{/if}
+						</div>
+					{/if}
+
+					<!-- Provider-specific footer message -->
+					<div class="border-t pt-4 text-center text-sm text-muted-foreground">
+						{#if sandboxProvider === 'daytona'}
+							{#if currentStatus.phase === 'creating-sandboxes'}
+								Setting up your persistent Daytona workspace with full git integration and terminal
+								access...
+							{:else if currentStatus.phase === 'ready'}
+								🎉 Your Daytona workspace is ready! Start coding with full development environment
+								access.
+							{/if}
+						{:else if sandboxProvider === 'e2b'}
+							{#if currentStatus.phase === 'uploading'}
+								Securely uploading your project to cloud storage for fast sandbox initialization...
+							{:else if currentStatus.phase === 'creating-sandboxes'}
+								Initializing your E2B sandbox with cloud-powered performance...
+							{:else if currentStatus.phase === 'ready'}
+								🚀 Your E2B sandbox is ready! Experience lightning-fast cloud development.
+							{/if}
+						{/if}
+					</div>
+				</div>
+			</div>
+		{/if}
+	</div>
 </div>

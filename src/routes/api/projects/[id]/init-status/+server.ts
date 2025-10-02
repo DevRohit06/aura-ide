@@ -1,7 +1,7 @@
-import { json } from '@sveltejs/kit';
-import type { RequestHandler } from './$types';
 import { DatabaseService } from '$lib/services/database.service';
 import { logger } from '$lib/utils/logger';
+import { json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
 
 // Store initialization status in memory (could be Redis in production)
 const initStatus = new Map<
@@ -82,33 +82,3 @@ export const GET: RequestHandler = async ({ params, locals }) => {
 		return json({ error: 'Failed to get status' }, { status: 500 });
 	}
 };
-
-// Helper to update status from other parts of the app
-export function updateInitStatus(
-	projectId: string,
-	update: Partial<typeof initStatus extends Map<string, infer T> ? T : never>
-) {
-	const current = initStatus.get(projectId) || {
-		progress: 0,
-		message: 'Initializing...',
-		complete: false,
-		steps: [
-			{ name: 'Loading project', status: 'pending' as const },
-			{ name: 'Starting sandbox', status: 'pending' as const },
-			{ name: 'Loading files', status: 'pending' as const },
-			{ name: 'Indexing workspace', status: 'pending' as const }
-		]
-	};
-
-	initStatus.set(projectId, { ...current, ...update });
-}
-
-// Clean up old statuses (call this periodically)
-export function cleanupInitStatus() {
-	const now = Date.now();
-	for (const [projectId, status] of initStatus.entries()) {
-		if (status.complete && now - (status as any).completedAt > 60000) {
-			initStatus.delete(projectId);
-		}
-	}
-}
