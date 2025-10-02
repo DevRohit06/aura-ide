@@ -1,4 +1,4 @@
-````instructions
+```instructions
 # Aura IDE - GitHub Copilot Instructions (Concise)
 
 Goal: Help AI coding agents be immediately productive in this repository by listing the architecture, important workflows, conventions, and precise file examples.
@@ -18,7 +18,7 @@ Goal: Help AI coding agents be immediately productive in this repository by list
    - Sandbox adapters: `src/lib/services/sandbox/daytona.service.ts` and E2B adapters in `src/lib/services/sandbox/` — they create sandboxes, upload files, and expose terminal/workspace operations.
    - R2 storage: `src/lib/services/r2-storage.service.ts`, `r2-file-sync.service.ts`, and `r2-backup.service.ts` — use these for uploads, downloads, versioning.
    - Auth: `src/lib/auth.ts`, `src/lib/auth.client.ts`, and `src/hooks.server.ts` — Better Auth with MongoDB adapter; session available on `event.locals`.
-   - Real-time: `src/routes/api/ws/+server.ts` — WebSocket handlers for terminals, file watches and cursor sync.
+   - Real-time: `src/routes/api/agent/stream/+server.ts` — SSE streaming for agent responses and real-time chat updates.
 
 4. Project conventions an AI must follow
    - Use TypeScript with strict types; prefer interfaces in `src/lib/types/`.
@@ -29,7 +29,7 @@ Goal: Help AI coding agents be immediately productive in this repository by list
 5. Actionable examples to copy/paste
    - Create a Daytona sandbox: see `DaytonaService.createSandbox` and usage in `src/lib/services/workspace-context.service.ts` (syncDaytonaWorkspace).
    - Upload project to R2: see `ProjectInitializationService.uploadToR2Storage` and `R2StorageService.uploadProject`.
-   - WebSocket terminal creation: follow `src/routes/api/ws/+server.ts` message shape — requires `sandboxId` and `shell`.
+   - SSE streaming setup: connect to `src/routes/api/agent/stream/+server.ts` for real-time agent responses — requires proper event handling in SSE service.
 
 6. Tests & mocking
    - Unit tests use Vitest; many sandbox tests mock the provider SDKs (e.g., `vi.mock('$lib/services/daytona.service')`). Inspect `tests/unit/services/*.test.ts` to emulate patterns.
@@ -50,4 +50,4 @@ Goal: Help AI coding agents be immediately productive in this repository by list
    - LLM code: `src/lib/services/llm/llm.service.ts`
 
 Please review this condensed guidance — what sections need more detail (e.g., deployment, rate-limits, or preferred test fixtures)?
-````
+```
