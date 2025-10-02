@@ -3,18 +3,21 @@
 ## Issues Fixed
 
 ### 1. **No Conversation History**
+
 - **Problem**: Agent received only the new message, not the full conversation history
 - **Solution**: Modified `/api/agent` endpoint to retrieve previous messages from MongoDB and convert them to LangChain messages before invoking the agent
 
 ### 2. **Messages Not Persisted**
+
 - **Problem**: Messages only stored in Svelte store (lost on refresh)
-- **Solution**: 
+- **Solution**:
   - All messages now saved to MongoDB via `DatabaseService.createChatMessage()`
   - User messages saved before agent invocation
   - Assistant responses saved after agent completes
   - Error messages also persisted
 
 ### 3. **Thread Management**
+
 - **Problem**: Threads not persisted across sessions
 - **Solution**:
   - Threads automatically created in MongoDB when first message is sent
@@ -22,6 +25,7 @@
   - Threads loaded from MongoDB on component mount
 
 ### 4. **Response Handling**
+
 - **Problem**: Poor error handling and no feedback on failures
 - **Solution**:
   - Errors saved as assistant messages in MongoDB
@@ -31,7 +35,9 @@
 ## Files Modified
 
 ### 1. `/src/routes/api/agent/+server.ts`
+
 **Changes**:
+
 - Added MongoDB imports (`DatabaseService`, `AIMessage`)
 - Modified `POST` handler:
   - Auto-create thread if none exists
@@ -49,7 +55,9 @@
   - Save interrupt errors to MongoDB
 
 ### 2. `/src/lib/components/chat/chat-sidebar.svelte`
+
 **Changes**:
+
 - Added `loadThreadsFromDB()` function to fetch threads from MongoDB
 - Added `loadThreadMessages()` function to fetch messages for a thread
 - Modified `$effect` to load threads when project changes
@@ -65,20 +73,24 @@
 ### 3. New API Endpoints Created
 
 #### `/src/routes/api/chat/threads/+server.ts`
+
 - **GET**: List threads for a user/project
 - **POST**: Create new thread manually
 
 #### `/src/routes/api/chat/threads/[threadId]/+server.ts`
+
 - **GET**: Get thread details
 - **PATCH**: Update thread (title, settings, etc.)
 - **DELETE**: Delete thread and all messages
 
 #### `/src/routes/api/chat/threads/[threadId]/messages/+server.ts`
+
 - **GET**: Get all messages for a thread (up to 100)
 
 ## Data Flow
 
 ### Sending a Message
+
 ```
 1. User types message in chat input
 2. Frontend calls POST /api/agent with message + threadId (or undefined)
@@ -97,6 +109,7 @@
 ```
 
 ### Loading Threads
+
 ```
 1. Component mounts or project changes
 2. Frontend calls GET /api/chat/threads?projectId=xxx
@@ -106,6 +119,7 @@
 ```
 
 ### Conversation History
+
 ```
 1. Agent receives messages array with full history
 2. LangGraph checkpointer stores state per thread_id
@@ -117,17 +131,20 @@
 ## MongoDB Collections Used
 
 ### `chat_threads`
+
 - Stores thread metadata (title, settings, participants, statistics)
 - Indexed by userId, projectId, updatedAt
 - Auto-updates lastMessageAt when messages added
 
 ### `chat_messages`
+
 - Stores all messages (user, assistant, system)
 - Indexed by threadId, timestamp
 - Includes metadata (model, tokens, file context)
 - Supports full-text search
 
 ### `checkpoints` (LangGraph)
+
 - Stores agent state snapshots
 - Managed by LangGraph's MemorySaver
 - Enables conversation continuity

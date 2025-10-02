@@ -1,5 +1,11 @@
 <script lang="ts">
-	import { activeFileId, filesStore, openFiles, tabActions, fileActions } from '$lib/stores/editor.js';
+	import {
+		activeFileId,
+		filesStore,
+		openFiles,
+		tabActions,
+		fileActions
+	} from '$lib/stores/editor.js';
 	import { fileStateActions } from '$lib/stores/file-states.store.js';
 	import type { Project } from '$lib/types';
 	import Icon from '@iconify/svelte';

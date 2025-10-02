@@ -48,38 +48,47 @@ This system creates an intelligent coding agent deployed as a SvelteKit server-s
 
 ### Prerequisites
 
-- Node.js 18+ 
+- Node.js 18+
 - Docker (for Qdrant)
 - SvelteKit project
 
 ### Create SvelteKit Project
-
 ```
+
 npm create svelte@latest coding-agent
 cd coding-agent
 npm install
+
 ```
 
 ### Install Dependencies
 
 ```
+
 # Core LangChain & LangGraph
+
 npm install @langchain/core @langchain/langgraph @langchain/openai @langchain/community
 
 # Vector Database
+
 npm install @langchain/qdrant @qdrant/js-client
 
 # Sandbox Runners
+
 npm install @e2b/code-interpreter
 
 # Search & Tools
+
 npm install @tavily/core
 
 # MCP SDK
+
 npm install @modelcontextprotocol/sdk
 
 # Utilities
+
 npm install zod
+
 ```
 
 ### Environment Variables
@@ -87,29 +96,37 @@ npm install zod
 Create `.env` file:
 
 ```
+
 # LLM API Keys
+
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 
 # Vector Database
+
 QDRANT_URL=http://localhost:6333
 QDRANT_API_KEY=your-qdrant-key
 
 # Sandbox Runners
-E2B_API_KEY=e2b_...
+
+E2B*API_KEY=e2b*...
 DAYTONA_API_KEY=your-daytona-key
 DAYTONA_URL=https://api.daytona.io
 
 # Search & Tools
+
 TAVILY_API_KEY=tvly-...
 
 # Optional: Morph for code editing
+
 MORPH_API_KEY=morph-...
 
 # LangSmith (optional debugging)
-LANGCHAIN_API_KEY=ls__...
+
+LANGCHAIN_API_KEY=ls\_\_...
 LANGCHAIN_TRACING_V2=true
 LANGCHAIN_PROJECT=CodingAgent
+
 ```
 
 ---
@@ -117,31 +134,33 @@ LANGCHAIN_PROJECT=CodingAgent
 ## Project Structure
 
 ```
+
 src/
 ├── routes/
-│   ├── api/
-│   │   ├── agent/
-│   │   │   └── +server.ts          # Main agent endpoint
-│   │   ├── sandbox/
-│   │   │   ├── create/+server.ts   # Create sandbox
-│   │   │   ├── execute/+server.ts  # Execute code
-│   │   │   └── files/+server.ts    # File operations
-│   │   └── interrupt/+server.ts    # Human-in-the-loop
-│   └── +page.svelte                 # UI
+│ ├── api/
+│ │ ├── agent/
+│ │ │ └── +server.ts # Main agent endpoint
+│ │ ├── sandbox/
+│ │ │ ├── create/+server.ts # Create sandbox
+│ │ │ ├── execute/+server.ts # Execute code
+│ │ │ └── files/+server.ts # File operations
+│ │ └── interrupt/+server.ts # Human-in-the-loop
+│ └── +page.svelte # UI
 ├── lib/
-│   ├── agent/
-│   │   ├── graph.ts                 # LangGraph definition
-│   │   ├── nodes.ts                 # Agent nodes
-│   │   ├── state.ts                 # State definition
-│   │   └── tools.ts                 # Tool definitions
-│   ├── sandbox/
-│   │   ├── daytona.ts               # Daytona integration
-│   │   └── e2b.ts                   # E2B integration
-│   ├── mcp/
-│   │   ├── client.ts                # MCP client
-│   │   └── servers.ts               # MCP server configs
-│   └── vector/
-│       └── qdrant.ts                # Qdrant setup
+│ ├── agent/
+│ │ ├── graph.ts # LangGraph definition
+│ │ ├── nodes.ts # Agent nodes
+│ │ ├── state.ts # State definition
+│ │ └── tools.ts # Tool definitions
+│ ├── sandbox/
+│ │ ├── daytona.ts # Daytona integration
+│ │ └── e2b.ts # E2B integration
+│ ├── mcp/
+│ │ ├── client.ts # MCP client
+│ │ └── servers.ts # MCP server configs
+│ └── vector/
+│ └── qdrant.ts # Qdrant setup
+
 ```
 
 ---
@@ -153,40 +172,42 @@ src/
 **File:** `src/lib/agent/state.ts`
 
 ```
+
 import { Annotation } from "@langchain/langgraph";
 import type { BaseMessage } from "@langchain/core/messages";
 
 export const AgentState = Annotation.Root({
-  messages: Annotation<BaseMessage[]>({
-    reducer: (x, y) => x.concat(y),
-  }),
-  currentFile: Annotation<string | null>({
-    reducer: (_, y) => y,
-  }),
-  fileContent: Annotation<string | null>({
-    reducer: (_, y) => y,
-  }),
-  sandboxId: Annotation<string | null>({
-    reducer: (_, y) => y,
-  }),
-  sandboxType: Annotation<"daytona" | "e2b">({
-    reducer: (_, y) => y,
-  }),
-  codeContext: Annotation<string[]>({
-    reducer: (x, y) => [...x, ...y],
-  }),
-  awaitingHumanInput: Annotation<boolean>({
-    reducer: (_, y) => y,
-  }),
-  useMorph: Annotation<boolean>({
-    reducer: (_, y) => y,
-  }),
-  terminalOutput: Annotation<string[]>({
-    reducer: (x, y) => [...x, ...y],
-  }),
+messages: Annotation<BaseMessage[]>({
+reducer: (x, y) => x.concat(y),
+}),
+currentFile: Annotation<string | null>({
+reducer: (_, y) => y,
+}),
+fileContent: Annotation<string | null>({
+reducer: (_, y) => y,
+}),
+sandboxId: Annotation<string | null>({
+reducer: (_, y) => y,
+}),
+sandboxType: Annotation<"daytona" | "e2b">({
+reducer: (_, y) => y,
+}),
+codeContext: Annotation<string[]>({
+reducer: (x, y) => [...x, ...y],
+}),
+awaitingHumanInput: Annotation<boolean>({
+reducer: (_, y) => y,
+}),
+useMorph: Annotation<boolean>({
+reducer: (_, y) => y,
+}),
+terminalOutput: Annotation<string[]>({
+reducer: (x, y) => [...x, ...y],
+}),
 });
 
 export type AgentStateType = typeof AgentState.State;
+
 ```
 
 ---
@@ -196,6 +217,7 @@ export type AgentStateType = typeof AgentState.State;
 **File:** `src/lib/agent/tools.ts`
 
 ```
+
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { tavily } from "@tavily/core";
@@ -205,34 +227,34 @@ import { TAVILY_API_KEY, QDRANT_URL } from "$env/static/private";
 
 // Web Search Tool
 export const webSearchTool = tool(
-  async ({ query }) => {
-    const tvly = tavily({ apiKey: TAVILY_API_KEY });
-    const response = await tvly.search(query, {
-      searchDepth: "advanced",
-      maxResults: 5,
-      includeAnswer: true,
-    });
-    return JSON.stringify({
-      answer: response.answer,
-      results: response.results,
-    });
-  },
-  {
-    name: "web_search",
-    description: "Search the web for documentation, examples, and solutions. Returns relevant content and an AI-generated answer.",
-    schema: z.object({
-      query: z.string().describe("The search query"),
-    }),
-  }
+async ({ query }) => {
+const tvly = tavily({ apiKey: TAVILY_API_KEY });
+const response = await tvly.search(query, {
+searchDepth: "advanced",
+maxResults: 5,
+includeAnswer: true,
+});
+return JSON.stringify({
+answer: response.answer,
+results: response.results,
+});
+},
+{
+name: "web_search",
+description: "Search the web for documentation, examples, and solutions. Returns relevant content and an AI-generated answer.",
+schema: z.object({
+query: z.string().describe("The search query"),
+}),
+}
 );
 
 // Code Search Tool (Qdrant)
 export const codeSearchTool = tool(
-  async ({ query, topK = 5 }) => {
-    const embeddings = new OpenAIEmbeddings({
-      model: "text-embedding-3-small",
-    });
-    
+async ({ query, topK = 5 }) => {
+const embeddings = new OpenAIEmbeddings({
+model: "text-embedding-3-small",
+});
+
     const vectorStore = await QdrantVectorStore.fromExistingCollection(
       embeddings,
       {
@@ -240,70 +262,71 @@ export const codeSearchTool = tool(
         collectionName: "code-context",
       }
     );
-    
+
     const results = await vectorStore.similaritySearch(query, topK);
     return results.map(r => ({
       content: r.pageContent,
       metadata: r.metadata,
     }));
-  },
-  {
-    name: "search_codebase",
-    description: "Search the codebase using semantic similarity to find relevant code snippets and files.",
-    schema: z.object({
-      query: z.string().describe("The semantic search query"),
-      topK: z.number().optional().describe("Number of results to return"),
-    }),
-  }
+
+},
+{
+name: "search_codebase",
+description: "Search the codebase using semantic similarity to find relevant code snippets and files.",
+schema: z.object({
+query: z.string().describe("The semantic search query"),
+topK: z.number().optional().describe("Number of results to return"),
+}),
+}
 );
 
 // File Read Tool
 export const readFileTool = tool(
-  async ({ filePath, sandboxId, sandboxType }) => {
-    const response = await fetch('/api/sandbox/files', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'read',
-        filePath,
-        sandboxId,
-        sandboxType,
-      }),
-    });
-    const data = await response.json();
-    return data.content;
-  },
-  {
-    name: "read_file",
-    description: "Read the contents of a file from the sandbox.",
-    schema: z.object({
-      filePath: z.string(),
-      sandboxId: z.string(),
-      sandboxType: z.enum(["daytona", "e2b"]),
-    }),
-  }
+async ({ filePath, sandboxId, sandboxType }) => {
+const response = await fetch('/api/sandbox/files', {
+method: 'POST',
+headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify({
+action: 'read',
+filePath,
+sandboxId,
+sandboxType,
+}),
+});
+const data = await response.json();
+return data.content;
+},
+{
+name: "read_file",
+description: "Read the contents of a file from the sandbox.",
+schema: z.object({
+filePath: z.string(),
+sandboxId: z.string(),
+sandboxType: z.enum(["daytona", "e2b"]),
+}),
+}
 );
 
 // File Write Tool
 export const writeFileTool = tool(
-  async ({ filePath, content, sandboxId, sandboxType, useMorph = false }) => {
-    if (useMorph) {
-      // Use Morph for intelligent code merging
-      const morphResponse = await fetch('https://api.morph.so/v1/edit', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.MORPH_API_KEY}`,
-        },
-        body: JSON.stringify({
-          target_file: filePath,
-          code_edit: content,
-          instructions: "Apply these changes to the file",
-        }),
-      });
-      content = (await morphResponse.json()).updatedContent;
-    }
-    
+async ({ filePath, content, sandboxId, sandboxType, useMorph = false }) => {
+if (useMorph) {
+// Use Morph for intelligent code merging
+const morphResponse = await fetch('https://api.morph.so/v1/edit', {
+method: 'POST',
+headers: {
+'Content-Type': 'application/json',
+'Authorization': `Bearer ${process.env.MORPH_API_KEY}`,
+},
+body: JSON.stringify({
+target_file: filePath,
+code_edit: content,
+instructions: "Apply these changes to the file",
+}),
+});
+content = (await morphResponse.json()).updatedContent;
+}
+
     const response = await fetch('/api/sandbox/files', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -316,83 +339,85 @@ export const writeFileTool = tool(
       }),
     });
     return await response.json();
-  },
-  {
-    name: "write_file",
-    description: "Write or update a file in the sandbox. Can use Morph for intelligent merging.",
-    schema: z.object({
-      filePath: z.string(),
-      content: z.string(),
-      sandboxId: z.string(),
-      sandboxType: z.enum(["daytona", "e2b"]),
-      useMorph: z.boolean().optional(),
-    }),
-  }
+
+},
+{
+name: "write_file",
+description: "Write or update a file in the sandbox. Can use Morph for intelligent merging.",
+schema: z.object({
+filePath: z.string(),
+content: z.string(),
+sandboxId: z.string(),
+sandboxType: z.enum(["daytona", "e2b"]),
+useMorph: z.boolean().optional(),
+}),
+}
 );
 
 // Execute Code Tool
 export const executeCodeTool = tool(
-  async ({ code, language, sandboxId, sandboxType }) => {
-    const response = await fetch('/api/sandbox/execute', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        code,
-        language,
-        sandboxId,
-        sandboxType,
-      }),
-    });
-    return await response.json();
-  },
-  {
-    name: "execute_code",
-    description: "Execute code in the sandbox and return the output.",
-    schema: z.object({
-      code: z.string(),
-      language: z.string(),
-      sandboxId: z.string(),
-      sandboxType: z.enum(["daytona", "e2b"]),
-    }),
-  }
+async ({ code, language, sandboxId, sandboxType }) => {
+const response = await fetch('/api/sandbox/execute', {
+method: 'POST',
+headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify({
+code,
+language,
+sandboxId,
+sandboxType,
+}),
+});
+return await response.json();
+},
+{
+name: "execute_code",
+description: "Execute code in the sandbox and return the output.",
+schema: z.object({
+code: z.string(),
+language: z.string(),
+sandboxId: z.string(),
+sandboxType: z.enum(["daytona", "e2b"]),
+}),
+}
 );
 
 // Terminal Command Tool
 export const terminalCommandTool = tool(
-  async ({ command, cwd, sandboxId, sandboxType }) => {
-    const response = await fetch('/api/sandbox/execute', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'command',
-        command,
-        cwd,
-        sandboxId,
-        sandboxType,
-      }),
-    });
-    return await response.json();
-  },
-  {
-    name: "run_terminal_command",
-    description: "Execute a shell command in the sandbox terminal.",
-    schema: z.object({
-      command: z.string(),
-      cwd: z.string().optional(),
-      sandboxId: z.string(),
-      sandboxType: z.enum(["daytona", "e2b"]),
-    }),
-  }
+async ({ command, cwd, sandboxId, sandboxType }) => {
+const response = await fetch('/api/sandbox/execute', {
+method: 'POST',
+headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify({
+type: 'command',
+command,
+cwd,
+sandboxId,
+sandboxType,
+}),
+});
+return await response.json();
+},
+{
+name: "run_terminal_command",
+description: "Execute a shell command in the sandbox terminal.",
+schema: z.object({
+command: z.string(),
+cwd: z.string().optional(),
+sandboxId: z.string(),
+sandboxType: z.enum(["daytona", "e2b"]),
+}),
+}
 );
 
 export const tools = [
-  webSearchTool,
-  codeSearchTool,
-  readFileTool,
-  writeFileTool,
-  executeCodeTool,
-  terminalCommandTool,
+webSearchTool,
+codeSearchTool,
+readFileTool,
+writeFileTool,
+executeCodeTool,
+terminalCommandTool,
 ];
+
 ```
 
 ---
@@ -402,6 +427,7 @@ export const tools = [
 **File:** `src/lib/agent/graph.ts`
 
 ```
+
 import { StateGraph } from "@langchain/langgraph";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
 import { ChatOpenAI } from "@langchain/openai";
@@ -413,8 +439,8 @@ import { tools } from "./tools";
 
 // Initialize LLM with tools
 const model = new ChatOpenAI({
-  model: "gpt-4o",
-  temperature: 0,
+model: "gpt-4o",
+temperature: 0,
 }).bindTools(tools);
 
 // Tool execution node
@@ -422,7 +448,8 @@ const toolNode = new ToolNode(tools);
 
 // Agent reasoning node
 async function agentNode(state: typeof AgentState.State) {
-  const systemPrompt = `You are an expert coding assistant with access to:
+const systemPrompt = `You are an expert coding assistant with access to:
+
 - A sandbox environment (${state.sandboxType}) with file operations
 - Terminal command execution
 - Web search via Tavily for documentation
@@ -439,6 +466,7 @@ Recent terminal output:
 ${state.terminalOutput.slice(-3).join('\n')}
 
 Use tools strategically:
+
 1. Search for documentation or examples when needed
 2. Read files to understand context
 3. Write files using Morph=${state.useMorph} for smart merging
@@ -447,36 +475,36 @@ Use tools strategically:
 
 Always consider the current file context when making changes.`;
 
-  const messages = [
-    { role: "system", content: systemPrompt },
-    ...state.messages,
-  ];
-  
-  const response = await model.invoke(messages);
-  return { messages: [response] };
+const messages = [
+{ role: "system", content: systemPrompt },
+...state.messages,
+];
+
+const response = await model.invoke(messages);
+return { messages: [response] };
 }
 
 // Human-in-the-loop review node
 async function humanReviewNode(state: typeof AgentState.State): Promise<Command> {
-  const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
-  
-  // Check if there are tool calls that modify code
-  const hasCodeModification = lastMessage.tool_calls?.some(
-    tc => ['write_file', 'execute_code', 'run_terminal_command'].includes(tc.name)
-  );
-  
-  if (hasCodeModification) {
-    // Interrupt for human review
-    const approval = interrupt({
-      type: "human_review",
-      message: "Review the proposed changes",
-      toolCalls: lastMessage.tool_calls,
-      currentState: {
-        file: state.currentFile,
-        content: state.fileContent,
-      },
-    });
-    
+const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
+
+// Check if there are tool calls that modify code
+const hasCodeModification = lastMessage.tool_calls?.some(
+tc => ['write_file', 'execute_code', 'run_terminal_command'].includes(tc.name)
+);
+
+if (hasCodeModification) {
+// Interrupt for human review
+const approval = interrupt({
+type: "human_review",
+message: "Review the proposed changes",
+toolCalls: lastMessage.tool_calls,
+currentState: {
+file: state.currentFile,
+content: state.fileContent,
+},
+});
+
     if (approval.action === "approved") {
       return new Command({ goto: "tools" });
     } else if (approval.action === "rejected") {
@@ -492,33 +520,35 @@ async function humanReviewNode(state: typeof AgentState.State): Promise<Command>
         },
       });
     }
-  }
-  
-  return new Command({ goto: "tools" });
+
+}
+
+return new Command({ goto: "tools" });
 }
 
 // Routing logic
 function shouldContinue(state: typeof AgentState.State) {
-  const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
-  
-  if (lastMessage.tool_calls?.length) {
-    return "review"; // Go to human review
-  }
-  return "__end__";
+const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
+
+if (lastMessage.tool_calls?.length) {
+return "review"; // Go to human review
+}
+return "**end**";
 }
 
 // Build the graph
 const workflow = new StateGraph(AgentState)
-  .addNode("agent", agentNode)
-  .addNode("review", humanReviewNode)
-  .addNode("tools", toolNode)
-  .addEdge("__start__", "agent")
-  .addConditionalEdges("agent", shouldContinue)
-  .addEdge("tools", "agent");
+.addNode("agent", agentNode)
+.addNode("review", humanReviewNode)
+.addNode("tools", toolNode)
+.addEdge("**start**", "agent")
+.addConditionalEdges("agent", shouldContinue)
+.addEdge("tools", "agent");
 
 // Compile with checkpointer for persistence
 const checkpointer = new MemorySaver();
 export const agentGraph = workflow.compile({ checkpointer });
+
 ```
 
 ---
@@ -530,118 +560,125 @@ export const agentGraph = workflow.compile({ checkpointer });
 **File:** `src/lib/sandbox/daytona.ts`
 
 ```
+
 import { DAYTONA_API_KEY, DAYTONA_URL } from "$env/static/private";
 
 export class DaytonaManager {
-  private apiKey: string;
-  private baseUrl: string;
+private apiKey: string;
+private baseUrl: string;
 
-  constructor() {
-    this.apiKey = DAYTONA_API_KEY;
-    this.baseUrl = DAYTONA_URL;
-  }
+constructor() {
+this.apiKey = DAYTONA_API_KEY;
+this.baseUrl = DAYTONA_URL;
+}
 
-  async createSandbox(language: string = "javascript") {
-    const response = await fetch(`${this.baseUrl}/sandboxes`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        language,
-        timeout: 3600,
-      }),
-    });
-    
+async createSandbox(language: string = "javascript") {
+const response = await fetch(`${this.baseUrl}/sandboxes`, {
+method: "POST",
+headers: {
+"Content-Type": "application/json",
+Authorization: `Bearer ${this.apiKey}`,
+},
+body: JSON.stringify({
+language,
+timeout: 3600,
+}),
+});
+
     return await response.json();
-  }
 
-  async executeCode(sandboxId: string, code: string) {
-    const response = await fetch(
-      `${this.baseUrl}/sandboxes/${sandboxId}/process/code_run`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify({ code }),
-      }
-    );
-    
+}
+
+async executeCode(sandboxId: string, code: string) {
+const response = await fetch(
+`${this.baseUrl}/sandboxes/${sandboxId}/process/code_run`,
+{
+method: "POST",
+headers: {
+"Content-Type": "application/json",
+Authorization: `Bearer ${this.apiKey}`,
+},
+body: JSON.stringify({ code }),
+}
+);
+
     const data = await response.json();
     return {
       exitCode: data.exit_code,
       output: data.result,
       error: data.exit_code !== 0 ? data.result : null,
     };
-  }
 
-  async executeCommand(
-    sandboxId: string,
-    command: string,
-    cwd: string = "/home/daytona"
-  ) {
-    const response = await fetch(
-      `${this.baseUrl}/sandboxes/${sandboxId}/process/exec`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify({ command, cwd, timeout: 30 }),
-      }
-    );
-    
-    return await response.json();
-  }
-
-  async readFile(sandboxId: string, filePath: string) {
-    const response = await fetch(
-      `${this.baseUrl}/sandboxes/${sandboxId}/files/read`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify({ path: filePath }),
-      }
-    );
-    
-    return await response.json();
-  }
-
-  async writeFile(sandboxId: string, filePath: string, content: string) {
-    const response = await fetch(
-      `${this.baseUrl}/sandboxes/${sandboxId}/files/write`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify({
-          path: filePath,
-          content,
-        }),
-      }
-    );
-    
-    return await response.json();
-  }
-
-  async deleteSandbox(sandboxId: string) {
-    await fetch(`${this.baseUrl}/sandboxes/${sandboxId}`, {
-      method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-    });
-  }
 }
+
+async executeCommand(
+sandboxId: string,
+command: string,
+cwd: string = "/home/daytona"
+) {
+const response = await fetch(
+`${this.baseUrl}/sandboxes/${sandboxId}/process/exec`,
+{
+method: "POST",
+headers: {
+"Content-Type": "application/json",
+Authorization: `Bearer ${this.apiKey}`,
+},
+body: JSON.stringify({ command, cwd, timeout: 30 }),
+}
+);
+
+    return await response.json();
+
+}
+
+async readFile(sandboxId: string, filePath: string) {
+const response = await fetch(
+`${this.baseUrl}/sandboxes/${sandboxId}/files/read`,
+{
+method: "POST",
+headers: {
+"Content-Type": "application/json",
+Authorization: `Bearer ${this.apiKey}`,
+},
+body: JSON.stringify({ path: filePath }),
+}
+);
+
+    return await response.json();
+
+}
+
+async writeFile(sandboxId: string, filePath: string, content: string) {
+const response = await fetch(
+`${this.baseUrl}/sandboxes/${sandboxId}/files/write`,
+{
+method: "POST",
+headers: {
+"Content-Type": "application/json",
+Authorization: `Bearer ${this.apiKey}`,
+},
+body: JSON.stringify({
+path: filePath,
+content,
+}),
+}
+);
+
+    return await response.json();
+
+}
+
+async deleteSandbox(sandboxId: string) {
+await fetch(`${this.baseUrl}/sandboxes/${sandboxId}`, {
+method: "DELETE",
+headers: {
+Authorization: `Bearer ${this.apiKey}`,
+},
+});
+}
+}
+
 ```
 
 #### E2B Integration
@@ -649,74 +686,81 @@ export class DaytonaManager {
 **File:** `src/lib/sandbox/e2b.ts`
 
 ```
+
 import { Sandbox } from "@e2b/code-interpreter";
 import { E2B_API_KEY } from "$env/static/private";
 
 export class E2BManager {
-  private sandboxes: Map<string, Sandbox> = new Map();
+private sandboxes: Map<string, Sandbox> = new Map();
 
-  async createSandbox() {
-    const sandbox = await Sandbox.create({
-      apiKey: E2B_API_KEY,
-    });
-    
+async createSandbox() {
+const sandbox = await Sandbox.create({
+apiKey: E2B_API_KEY,
+});
+
     this.sandboxes.set(sandbox.sandboxId, sandbox);
     return { sandboxId: sandbox.sandboxId };
-  }
 
-  async executeCode(sandboxId: string, code: string) {
-    const sandbox = this.sandboxes.get(sandboxId);
-    if (!sandbox) throw new Error("Sandbox not found");
-    
+}
+
+async executeCode(sandboxId: string, code: string) {
+const sandbox = this.sandboxes.get(sandboxId);
+if (!sandbox) throw new Error("Sandbox not found");
+
     const execution = await sandbox.runCode(code);
-    
+
     return {
       exitCode: execution.error ? 1 : 0,
       output: execution.text || "",
       error: execution.error?.message || null,
       logs: execution.logs,
     };
-  }
 
-  async executeCommand(sandboxId: string, command: string, cwd?: string) {
-    const sandbox = this.sandboxes.get(sandboxId);
-    if (!sandbox) throw new Error("Sandbox not found");
-    
+}
+
+async executeCommand(sandboxId: string, command: string, cwd?: string) {
+const sandbox = this.sandboxes.get(sandboxId);
+if (!sandbox) throw new Error("Sandbox not found");
+
     const result = await sandbox.process.start({
       cmd: command,
       cwd: cwd || "/home/user",
     });
-    
+
     return {
       exitCode: result.exitCode,
       output: result.stdout + result.stderr,
     };
-  }
 
-  async readFile(sandboxId: string, filePath: string) {
-    const sandbox = this.sandboxes.get(sandboxId);
-    if (!sandbox) throw new Error("Sandbox not found");
-    
+}
+
+async readFile(sandboxId: string, filePath: string) {
+const sandbox = this.sandboxes.get(sandboxId);
+if (!sandbox) throw new Error("Sandbox not found");
+
     const content = await sandbox.files.read(filePath);
     return { content };
-  }
 
-  async writeFile(sandboxId: string, filePath: string, content: string) {
-    const sandbox = this.sandboxes.get(sandboxId);
-    if (!sandbox) throw new Error("Sandbox not found");
-    
+}
+
+async writeFile(sandboxId: string, filePath: string, content: string) {
+const sandbox = this.sandboxes.get(sandboxId);
+if (!sandbox) throw new Error("Sandbox not found");
+
     await sandbox.files.write(filePath, content);
     return { success: true };
-  }
 
-  async deleteSandbox(sandboxId: string) {
-    const sandbox = this.sandboxes.get(sandboxId);
-    if (sandbox) {
-      await sandbox.close();
-      this.sandboxes.delete(sandboxId);
-    }
-  }
 }
+
+async deleteSandbox(sandboxId: string) {
+const sandbox = this.sandboxes.get(sandboxId);
+if (sandbox) {
+await sandbox.close();
+this.sandboxes.delete(sandboxId);
+}
+}
+}
+
 ```
 
 ---
@@ -726,6 +770,7 @@ export class E2BManager {
 **File:** `src/lib/vector/qdrant.ts`
 
 ```
+
 import { QdrantVectorStore } from "@langchain/qdrant";
 import { OpenAIEmbeddings } from "@langchain/openai";
 import { QdrantClient } from "@qdrant/js-client";
@@ -733,27 +778,28 @@ import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
 import { QDRANT_URL, QDRANT_API_KEY } from "$env/static/private";
 
 export class CodeVectorStore {
-  private embeddings: OpenAIEmbeddings;
-  private client: QdrantClient;
-  private collectionName = "code-context";
+private embeddings: OpenAIEmbeddings;
+private client: QdrantClient;
+private collectionName = "code-context";
 
-  constructor() {
-    this.embeddings = new OpenAIEmbeddings({
-      model: "text-embedding-3-small",
-    });
-    
+constructor() {
+this.embeddings = new OpenAIEmbeddings({
+model: "text-embedding-3-small",
+});
+
     this.client = new QdrantClient({
       url: QDRANT_URL,
       apiKey: QDRANT_API_KEY,
     });
-  }
 
-  async initializeCollection() {
-    const collections = await this.client.getCollections();
-    const exists = collections.collections.some(
-      c => c.name === this.collectionName
-    );
-    
+}
+
+async initializeCollection() {
+const collections = await this.client.getCollections();
+const exists = collections.collections.some(
+c => c.name === this.collectionName
+);
+
     if (!exists) {
       await this.client.createCollection(this.collectionName, {
         vectors: {
@@ -762,14 +808,15 @@ export class CodeVectorStore {
         },
       });
     }
-  }
 
-  async indexCodeFiles(files: Array<{ path: string; content: string }>) {
-    const splitter = new RecursiveCharacterTextSplitter({
-      chunkSize: 1000,
-      chunkOverlap: 200,
-    });
-    
+}
+
+async indexCodeFiles(files: Array<{ path: string; content: string }>) {
+const splitter = new RecursiveCharacterTextSplitter({
+chunkSize: 1000,
+chunkOverlap: 200,
+});
+
     const docs = [];
     for (const file of files) {
       const chunks = await splitter.createDocuments(
@@ -778,7 +825,7 @@ export class CodeVectorStore {
       );
       docs.push(...chunks);
     }
-    
+
     const vectorStore = await QdrantVectorStore.fromDocuments(
       docs,
       this.embeddings,
@@ -787,22 +834,25 @@ export class CodeVectorStore {
         collectionName: this.collectionName,
       }
     );
-    
-    return vectorStore;
-  }
 
-  async searchCode(query: string, topK: number = 5) {
-    const vectorStore = await QdrantVectorStore.fromExistingCollection(
-      this.embeddings,
-      {
-        url: QDRANT_URL,
-        collectionName: this.collectionName,
-      }
-    );
-    
-    return await vectorStore.similaritySearch(query, topK);
-  }
+    return vectorStore;
+
 }
+
+async searchCode(query: string, topK: number = 5) {
+const vectorStore = await QdrantVectorStore.fromExistingCollection(
+this.embeddings,
+{
+url: QDRANT_URL,
+collectionName: this.collectionName,
+}
+);
+
+    return await vectorStore.similaritySearch(query, topK);
+
+}
+}
+
 ```
 
 ---
@@ -812,18 +862,19 @@ export class CodeVectorStore {
 **File:** `src/lib/mcp/client.ts`
 
 ```
+
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 export class MCPClient {
-  private clients: Map<string, Client> = new Map();
+private clients: Map<string, Client> = new Map();
 
-  async connectServer(serverName: string, command: string, args: string[]) {
-    const transport = new StdioClientTransport({
-      command,
-      args,
-    });
-    
+async connectServer(serverName: string, command: string, args: string[]) {
+const transport = new StdioClientTransport({
+command,
+args,
+});
+
     const client = new Client({
       name: "coding-agent",
       version: "1.0.0",
@@ -833,28 +884,30 @@ export class MCPClient {
         resources: {},
       },
     });
-    
+
     await client.connect(transport);
     this.clients.set(serverName, client);
-    
-    return client;
-  }
 
-  async listTools(serverName: string) {
-    const client = this.clients.get(serverName);
-    if (!client) throw new Error(`Server ${serverName} not connected`);
-    
+    return client;
+
+}
+
+async listTools(serverName: string) {
+const client = this.clients.get(serverName);
+if (!client) throw new Error(`Server ${serverName} not connected`);
+
     const response = await client.request({
       method: "tools/list",
     }, {});
-    
-    return response.tools;
-  }
 
-  async callTool(serverName: string, toolName: string, args: any) {
-    const client = this.clients.get(serverName);
-    if (!client) throw new Error(`Server ${serverName} not connected`);
-    
+    return response.tools;
+
+}
+
+async callTool(serverName: string, toolName: string, args: any) {
+const client = this.clients.get(serverName);
+if (!client) throw new Error(`Server ${serverName} not connected`);
+
     const response = await client.request({
       method: "tools/call",
       params: {
@@ -862,43 +915,46 @@ export class MCPClient {
         arguments: args,
       },
     }, {});
-    
-    return response;
-  }
 
-  async getResource(serverName: string, uri: string) {
-    const client = this.clients.get(serverName);
-    if (!client) throw new Error(`Server ${serverName} not connected`);
-    
+    return response;
+
+}
+
+async getResource(serverName: string, uri: string) {
+const client = this.clients.get(serverName);
+if (!client) throw new Error(`Server ${serverName} not connected`);
+
     const response = await client.request({
       method: "resources/read",
       params: { uri },
     }, {});
-    
+
     return response;
-  }
+
+}
 }
 
 // Initialize MCP servers
 export async function initializeMCPServers() {
-  const mcpClient = new MCPClient();
-  
-  // Connect to documentation server
-  await mcpClient.connectServer(
-    "docs",
-    "npx",
-    ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/docs"]
-  );
-  
-  // Connect to web search MCP server (if using)
-  await mcpClient.connectServer(
-    "web-search",
-    "npx",
-    ["-y", "@modelcontextprotocol/server-brave-search"]
-  );
-  
-  return mcpClient;
+const mcpClient = new MCPClient();
+
+// Connect to documentation server
+await mcpClient.connectServer(
+"docs",
+"npx",
+["-y", "@modelcontextprotocol/server-filesystem", "/path/to/docs"]
+);
+
+// Connect to web search MCP server (if using)
+await mcpClient.connectServer(
+"web-search",
+"npx",
+["-y", "@modelcontextprotocol/server-brave-search"]
+);
+
+return mcpClient;
 }
+
 ```
 
 ---
@@ -910,32 +966,33 @@ export async function initializeMCPServers() {
 **File:** `src/routes/api/agent/+server.ts`
 
 ```
+
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
 import { agentGraph } from "$lib/agent/graph";
 import { HumanMessage } from "@langchain/core/messages";
 
 export const POST: RequestHandler = async ({ request }) => {
-  const { message, threadId, currentFile, sandboxId, sandboxType, useMorph } = await request.json();
-  
-  const config = {
-    configurable: { thread_id: threadId || "default" },
-  };
-  
-  const initialState = {
-    messages: [new HumanMessage(message)],
-    currentFile: currentFile || null,
-    sandboxId: sandboxId || null,
-    sandboxType: sandboxType || "e2b",
-    useMorph: useMorph || false,
-    codeContext: [],
-    terminalOutput: [],
-    awaitingHumanInput: false,
-  };
-  
-  try {
-    const result = await agentGraph.invoke(initialState, config);
-    
+const { message, threadId, currentFile, sandboxId, sandboxType, useMorph } = await request.json();
+
+const config = {
+configurable: { thread_id: threadId || "default" },
+};
+
+const initialState = {
+messages: [new HumanMessage(message)],
+currentFile: currentFile || null,
+sandboxId: sandboxId || null,
+sandboxType: sandboxType || "e2b",
+useMorph: useMorph || false,
+codeContext: [],
+terminalOutput: [],
+awaitingHumanInput: false,
+};
+
+try {
+const result = await agentGraph.invoke(initialState, config);
+
     return json({
       response: result.messages[result.messages.length - 1].content,
       state: {
@@ -944,39 +1001,42 @@ export const POST: RequestHandler = async ({ request }) => {
         awaitingHumanInput: result.awaitingHumanInput,
       },
     });
-  } catch (error: any) {
-    if (error.name === "GraphInterrupt") {
-      // Human-in-the-loop interrupt
-      return json({
-        interrupt: true,
-        data: error.value,
-        threadId,
-      });
-    }
-    
+
+} catch (error: any) {
+if (error.name === "GraphInterrupt") {
+// Human-in-the-loop interrupt
+return json({
+interrupt: true,
+data: error.value,
+threadId,
+});
+}
+
     throw error;
-  }
+
+}
 };
 
 // Resume after human review
 export const PUT: RequestHandler = async ({ request }) => {
-  const { threadId, approval } = await request.json();
-  
-  const config = {
-    configurable: { thread_id: threadId },
-  };
-  
-  // Resume with approval decision
-  const result = await agentGraph.invoke(approval, config);
-  
-  return json({
-    response: result.messages[result.messages.length - 1].content,
-    state: {
-      currentFile: result.currentFile,
-      sandboxId: result.sandboxId,
-    },
-  });
+const { threadId, approval } = await request.json();
+
+const config = {
+configurable: { thread_id: threadId },
 };
+
+// Resume with approval decision
+const result = await agentGraph.invoke(approval, config);
+
+return json({
+response: result.messages[result.messages.length - 1].content,
+state: {
+currentFile: result.currentFile,
+sandboxId: result.sandboxId,
+},
+});
+};
+
 ```
 
 ### Sandbox Create Endpoint
@@ -984,6 +1044,7 @@ export const PUT: RequestHandler = async ({ request }) => {
 **File:** `src/routes/api/sandbox/create/+server.ts`
 
 ```
+
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
 import { DaytonaManager } from "$lib/sandbox/daytona";
@@ -993,17 +1054,18 @@ const daytonaManager = new DaytonaManager();
 const e2bManager = new E2BManager();
 
 export const POST: RequestHandler = async ({ request }) => {
-  const { type, language } = await request.json();
-  
-  let result;
-  if (type === "daytona") {
-    result = await daytonaManager.createSandbox(language);
-  } else {
-    result = await e2bManager.createSandbox();
-  }
-  
-  return json(result);
+const { type, language } = await request.json();
+
+let result;
+if (type === "daytona") {
+result = await daytonaManager.createSandbox(language);
+} else {
+result = await e2bManager.createSandbox();
+}
+
+return json(result);
 };
+
 ```
 
 ### Sandbox Execute Endpoint
@@ -1011,6 +1073,7 @@ export const POST: RequestHandler = async ({ request }) => {
 **File:** `src/routes/api/sandbox/execute/+server.ts`
 
 ```
+
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
 import { DaytonaManager } from "$lib/sandbox/daytona";
@@ -1020,19 +1083,20 @@ const daytonaManager = new DaytonaManager();
 const e2bManager = new E2BManager();
 
 export const POST: RequestHandler = async ({ request }) => {
-  const { sandboxId, sandboxType, type, code, command, cwd } = await request.json();
-  
-  const manager = sandboxType === "daytona" ? daytonaManager : e2bManager;
-  
-  let result;
-  if (type === "command") {
-    result = await manager.executeCommand(sandboxId, command, cwd);
-  } else {
-    result = await manager.executeCode(sandboxId, code);
-  }
-  
-  return json(result);
+const { sandboxId, sandboxType, type, code, command, cwd } = await request.json();
+
+const manager = sandboxType === "daytona" ? daytonaManager : e2bManager;
+
+let result;
+if (type === "command") {
+result = await manager.executeCommand(sandboxId, command, cwd);
+} else {
+result = await manager.executeCode(sandboxId, code);
+}
+
+return json(result);
 };
+
 ```
 
 ### Sandbox Files Endpoint
@@ -1040,6 +1104,7 @@ export const POST: RequestHandler = async ({ request }) => {
 **File:** `src/routes/api/sandbox/files/+server.ts`
 
 ```
+
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
 import { DaytonaManager } from "$lib/sandbox/daytona";
@@ -1049,19 +1114,20 @@ const daytonaManager = new DaytonaManager();
 const e2bManager = new E2BManager();
 
 export const POST: RequestHandler = async ({ request }) => {
-  const { sandboxId, sandboxType, action, filePath, content } = await request.json();
-  
-  const manager = sandboxType === "daytona" ? daytonaManager : e2bManager;
-  
-  let result;
-  if (action === "read") {
-    result = await manager.readFile(sandboxId, filePath);
-  } else if (action === "write") {
-    result = await manager.writeFile(sandboxId, filePath, content);
-  }
-  
-  return json(result);
+const { sandboxId, sandboxType, action, filePath, content } = await request.json();
+
+const manager = sandboxType === "daytona" ? daytonaManager : e2bManager;
+
+let result;
+if (action === "read") {
+result = await manager.readFile(sandboxId, filePath);
+} else if (action === "write") {
+result = await manager.writeFile(sandboxId, filePath, content);
+}
+
+return json(result);
 };
+
 ```
 
 ---
@@ -1071,11 +1137,15 @@ export const POST: RequestHandler = async ({ request }) => {
 ### Start Qdrant
 
 ```
+
 # Run locally with Docker
+
 docker run -p 6333:6333 qdrant/qdrant
 
 # Or use Qdrant Cloud
+
 # Set QDRANT_URL and QDRANT_API_KEY accordingly
+
 ```
 
 ### Initialize Vector Store
@@ -1083,34 +1153,38 @@ docker run -p 6333:6333 qdrant/qdrant
 Create a script to index your codebase:
 
 ```
+
 // scripts/init-vector-store.ts
 import { CodeVectorStore } from "./src/lib/vector/qdrant";
 import { readdir, readFile } from "fs/promises";
 import path from "path";
 
 async function indexCodebase() {
-  const vectorStore = new CodeVectorStore();
-  await vectorStore.initializeCollection();
-  
-  // Read all code files from your project
-  const files = await getCodeFiles("./src");
-  
-  await vectorStore.indexCodeFiles(files);
-  console.log(`Indexed ${files.length} files`);
+const vectorStore = new CodeVectorStore();
+await vectorStore.initializeCollection();
+
+// Read all code files from your project
+const files = await getCodeFiles("./src");
+
+await vectorStore.indexCodeFiles(files);
+console.log(`Indexed ${files.length} files`);
 }
 
 async function getCodeFiles(dir: string): Promise<Array<{ path: string; content: string }>> {
-  // Implementation to recursively read files
-  // Filter for .ts, .js, .svelte files
+// Implementation to recursively read files
+// Filter for .ts, .js, .svelte files
 }
 
 indexCodebase();
+
 ```
 
 ### Start Development Server
 
 ```
+
 npm run dev
+
 ```
 
 ---
@@ -1151,41 +1225,43 @@ npm run dev
 ## Architecture Diagram
 
 ```
+
 ┌─────────────────────────────────────────────────────────────┐
-│                        User Interface                        │
-│                      (SvelteKit Frontend)                    │
+│ User Interface │
+│ (SvelteKit Frontend) │
 └────────────────────────┬────────────────────────────────────┘
-                         │
-                         ▼
+│
+▼
 ┌─────────────────────────────────────────────────────────────┐
-│                   SvelteKit API Routes                       │
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────────┐   │
-│  │ /api/agent   │ │ /api/sandbox │ │ /api/interrupt   │   │
-│  └──────────────┘ └──────────────┘ └──────────────────┘   │
+│ SvelteKit API Routes │
+│ ┌──────────────┐ ┌──────────────┐ ┌──────────────────┐ │
+│ │ /api/agent │ │ /api/sandbox │ │ /api/interrupt │ │
+│ └──────────────┘ └──────────────┘ └──────────────────┘ │
 └─────────┬───────────────────────────────────────────────────┘
-          │
-          ▼
+│
+▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    LangGraph.js Agent                        │
-│  ┌─────────┐    ┌──────────┐    ┌────────────────┐        │
-│  │ Agent   │───▶│  Review  │───▶│  Tool Node     │        │
-│  │  Node   │    │   Node   │    │                │        │
-│  └─────────┘    └──────────┘    └────────────────┘        │
+│ LangGraph.js Agent │
+│ ┌─────────┐ ┌──────────┐ ┌────────────────┐ │
+│ │ Agent │───▶│ Review │───▶│ Tool Node │ │
+│ │ Node │ │ Node │ │ │ │
+│ └─────────┘ └──────────┘ └────────────────┘ │
 └─────┬───────────────────────────────────────────────────────┘
-      │
-      ├─────────────────────────┬────────────────────────┬─────────┐
-      ▼                         ▼                        ▼         ▼
-┌──────────┐            ┌──────────────┐         ┌───────────┐  ┌──────┐
-│  Qdrant  │            │   Sandbox    │         │   Tavily  │  │ MCP  │
-│  Vector  │            │  (E2B/Day.)  │         │  Search   │  │ Docs │
-│  Store   │            └──────────────┘         └───────────┘  └──────┘
-└──────────┘                   │
-                               │
-                      ┌────────┴────────┐
-                      ▼                 ▼
-               ┌─────────────┐   ┌──────────┐
-               │  File Ops   │   │ Terminal │
-               └─────────────┘   └──────────┘
+│
+├─────────────────────────┬────────────────────────┬─────────┐
+▼ ▼ ▼ ▼
+┌──────────┐ ┌──────────────┐ ┌───────────┐ ┌──────┐
+│ Qdrant │ │ Sandbox │ │ Tavily │ │ MCP │
+│ Vector │ │ (E2B/Day.) │ │ Search │ │ Docs │
+│ Store │ └──────────────┘ └───────────┘ └──────┘
+└──────────┘ │
+│
+┌────────┴────────┐
+▼ ▼
+┌─────────────┐ ┌──────────┐
+│ File Ops │ │ Terminal │
+└─────────────┘ └──────────┘
+
 ```
 
 ---

@@ -90,59 +90,65 @@ Configure multiple model access through Helicone:
 
 ```typescript
 // src/models/helicone-gateway.ts
-import { ChatOpenAI } from "@langchain/openai";
-import { ChatAnthropic } from "@langchain/anthropic";
+import { ChatOpenAI } from '@langchain/openai';
+import { ChatAnthropic } from '@langchain/anthropic';
 import { v4 as uuidv4 } from 'uuid';
 
 export class HeliconeModelManager {
-  private models: Map<string, any> = new Map();
-  
-  constructor() {
-    this.initializeModels();
-  }
+	private models: Map<string, any> = new Map();
 
-  private initializeModels() {
-    // OpenAI models through Helicone
-    this.models.set('gpt-4', new ChatOpenAI({
-      modelName: "gpt-4",
-      temperature: 0.1,
-      configuration: {
-        baseURL: "https://oai.helicone.ai/v1",
-        defaultHeaders: {
-          "Helicone-Auth": `Bearer ${process.env.HELICONE_API_KEY}`,
-          "Helicone-Cache-Enabled": "true",
-          "Helicone-Session-Id": uuidv4(),
-          "Helicone-Session-Name": "coding-agent",
-        },
-      },
-    }));
+	constructor() {
+		this.initializeModels();
+	}
 
-    // Anthropic models through Helicone
-    this.models.set('claude-3', new ChatAnthropic({
-      modelName: "claude-3-opus-20240229",
-      temperature: 0.1,
-      anthropicApiKey: process.env.ANTHROPIC_API_KEY,
-      clientOptions: {
-        baseURL: "https://anthropic.helicone.ai",
-        defaultHeaders: {
-          "Helicone-Auth": `Bearer ${process.env.HELICONE_API_KEY}`,
-          "Helicone-Cache-Enabled": "true",
-        },
-      },
-    }));
-  }
+	private initializeModels() {
+		// OpenAI models through Helicone
+		this.models.set(
+			'gpt-4',
+			new ChatOpenAI({
+				modelName: 'gpt-4',
+				temperature: 0.1,
+				configuration: {
+					baseURL: 'https://oai.helicone.ai/v1',
+					defaultHeaders: {
+						'Helicone-Auth': `Bearer ${process.env.HELICONE_API_KEY}`,
+						'Helicone-Cache-Enabled': 'true',
+						'Helicone-Session-Id': uuidv4(),
+						'Helicone-Session-Name': 'coding-agent'
+					}
+				}
+			})
+		);
 
-  getModel(modelName: string) {
-    const model = this.models.get(modelName);
-    if (!model) {
-      throw new Error(`Model ${modelName} not found`);
-    }
-    return model;
-  }
+		// Anthropic models through Helicone
+		this.models.set(
+			'claude-3',
+			new ChatAnthropic({
+				modelName: 'claude-3-opus-20240229',
+				temperature: 0.1,
+				anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+				clientOptions: {
+					baseURL: 'https://anthropic.helicone.ai',
+					defaultHeaders: {
+						'Helicone-Auth': `Bearer ${process.env.HELICONE_API_KEY}`,
+						'Helicone-Cache-Enabled': 'true'
+					}
+				}
+			})
+		);
+	}
 
-  async switchModel(modelName: string) {
-    return this.getModel(modelName);
-  }
+	getModel(modelName: string) {
+		const model = this.models.get(modelName);
+		if (!model) {
+			throw new Error(`Model ${modelName} not found`);
+		}
+		return model;
+	}
+
+	async switchModel(modelName: string) {
+		return this.getModel(modelName);
+	}
 }
 ```
 
@@ -155,109 +161,111 @@ Setup vector database for context management:
 import { QdrantClient } from '@qdrant/js-client-rest';
 
 export interface CodeContext {
-  id: string;
-  fileName: string;
-  filePath: string;
-  content: string;
-  language: string;
-  lastModified: Date;
-  metadata: Record<string, any>;
+	id: string;
+	fileName: string;
+	filePath: string;
+	content: string;
+	language: string;
+	lastModified: Date;
+	metadata: Record<string, any>;
 }
 
 export class QdrantContextManager {
-  private client: QdrantClient;
-  private collectionName = 'coding_agent_context';
+	private client: QdrantClient;
+	private collectionName = 'coding_agent_context';
 
-  constructor() {
-    this.client = new QdrantClient({
-      host: process.env.QDRANT_URL || 'localhost',
-      port: 6333,
-      apiKey: process.env.QDRANT_API_KEY,
-    });
-  }
+	constructor() {
+		this.client = new QdrantClient({
+			host: process.env.QDRANT_URL || 'localhost',
+			port: 6333,
+			apiKey: process.env.QDRANT_API_KEY
+		});
+	}
 
-  async initialize() {
-    try {
-      // Check if collection exists
-      const collections = await this.client.getCollections();
-      const exists = collections.collections.some(c => c.name === this.collectionName);
+	async initialize() {
+		try {
+			// Check if collection exists
+			const collections = await this.client.getCollections();
+			const exists = collections.collections.some((c) => c.name === this.collectionName);
 
-      if (!exists) {
-        await this.client.createCollection(this.collectionName, {
-          vectors: {
-            size: 1536, // OpenAI embedding dimension
-            distance: 'Cosine',
-          },
-        });
-      }
-    } catch (error) {
-      console.error('Failed to initialize Qdrant collection:', error);
-      throw error;
-    }
-  }
+			if (!exists) {
+				await this.client.createCollection(this.collectionName, {
+					vectors: {
+						size: 1536, // OpenAI embedding dimension
+						distance: 'Cosine'
+					}
+				});
+			}
+		} catch (error) {
+			console.error('Failed to initialize Qdrant collection:', error);
+			throw error;
+		}
+	}
 
-  async storeContext(context: CodeContext, embedding: number[]) {
-    await this.client.upsert(this.collectionName, {
-      wait: true,
-      points: [{
-        id: context.id,
-        vector: embedding,
-        payload: {
-          fileName: context.fileName,
-          filePath: context.filePath,
-          content: context.content,
-          language: context.language,
-          lastModified: context.lastModified.toISOString(),
-          ...context.metadata,
-        },
-      }],
-    });
-  }
+	async storeContext(context: CodeContext, embedding: number[]) {
+		await this.client.upsert(this.collectionName, {
+			wait: true,
+			points: [
+				{
+					id: context.id,
+					vector: embedding,
+					payload: {
+						fileName: context.fileName,
+						filePath: context.filePath,
+						content: context.content,
+						language: context.language,
+						lastModified: context.lastModified.toISOString(),
+						...context.metadata
+					}
+				}
+			]
+		});
+	}
 
-  async searchContext(queryEmbedding: number[], limit: number = 5) {
-    const searchResult = await this.client.search(this.collectionName, {
-      vector: queryEmbedding,
-      limit,
-      with_payload: true,
-    });
+	async searchContext(queryEmbedding: number[], limit: number = 5) {
+		const searchResult = await this.client.search(this.collectionName, {
+			vector: queryEmbedding,
+			limit,
+			with_payload: true
+		});
 
-    return searchResult.map(result => ({
-      id: result.id,
-      score: result.score,
-      context: result.payload as CodeContext,
-    }));
-  }
+		return searchResult.map((result) => ({
+			id: result.id,
+			score: result.score,
+			context: result.payload as CodeContext
+		}));
+	}
 
-  async updateFileContext(filePath: string, content: string, embedding: number[]) {
-    const id = Buffer.from(filePath).toString('base64');
-    
-    const context: CodeContext = {
-      id,
-      fileName: filePath.split('/').pop() || '',
-      filePath,
-      content,
-      language: this.detectLanguage(filePath),
-      lastModified: new Date(),
-      metadata: { isCurrentFile: true },
-    };
+	async updateFileContext(filePath: string, content: string, embedding: number[]) {
+		const id = Buffer.from(filePath).toString('base64');
 
-    await this.storeContext(context, embedding);
-  }
+		const context: CodeContext = {
+			id,
+			fileName: filePath.split('/').pop() || '',
+			filePath,
+			content,
+			language: this.detectLanguage(filePath),
+			lastModified: new Date(),
+			metadata: { isCurrentFile: true }
+		};
 
-  private detectLanguage(filePath: string): string {
-    const ext = filePath.split('.').pop()?.toLowerCase();
-    const langMap: Record<string, string> = {
-      'ts': 'typescript',
-      'js': 'javascript',
-      'py': 'python',
-      'java': 'java',
-      'cpp': 'cpp',
-      'c': 'c',
-      'rs': 'rust',
-      'go': 'go',
-    };
-    return langMap[ext || ''] || 'text';
-  }
+		await this.storeContext(context, embedding);
+	}
+
+	private detectLanguage(filePath: string): string {
+		const ext = filePath.split('.').pop()?.toLowerCase();
+		const langMap: Record<string, string> = {
+			ts: 'typescript',
+			js: 'javascript',
+			py: 'python',
+			java: 'java',
+			cpp: 'cpp',
+			c: 'c',
+			rs: 'rust',
+			go: 'go'
+		};
+		return langMap[ext || ''] || 'text';
+	}
 }
 ```
 
@@ -270,88 +278,88 @@ export class QdrantContextManager {
 import { CodeInterpreter } from '@e2b/code-interpreter';
 
 export class E2BSandboxRunner {
-  private sandbox: CodeInterpreter | null = null;
+	private sandbox: CodeInterpreter | null = null;
 
-  async initialize() {
-    this.sandbox = await CodeInterpreter.create({
-      apiKey: process.env.E2B_API_KEY,
-    });
-  }
+	async initialize() {
+		this.sandbox = await CodeInterpreter.create({
+			apiKey: process.env.E2B_API_KEY
+		});
+	}
 
-  async executeCode(code: string, language: string = 'python') {
-    if (!this.sandbox) {
-      await this.initialize();
-    }
+	async executeCode(code: string, language: string = 'python') {
+		if (!this.sandbox) {
+			await this.initialize();
+		}
 
-    try {
-      const execution = await this.sandbox!.notebook.execCell(code);
-      
-      return {
-        success: true,
-        output: execution.text,
-        error: execution.error,
-        logs: execution.logs,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        output: '',
-        error: error.message,
-        logs: [],
-      };
-    }
-  }
+		try {
+			const execution = await this.sandbox!.notebook.execCell(code);
 
-  async runTerminalCommand(command: string) {
-    if (!this.sandbox) {
-      await this.initialize();
-    }
+			return {
+				success: true,
+				output: execution.text,
+				error: execution.error,
+				logs: execution.logs
+			};
+		} catch (error) {
+			return {
+				success: false,
+				output: '',
+				error: error.message,
+				logs: []
+			};
+		}
+	}
 
-    try {
-      const result = await this.sandbox!.process.start({
-        cmd: command.split(' '),
-      });
+	async runTerminalCommand(command: string) {
+		if (!this.sandbox) {
+			await this.initialize();
+		}
 
-      await result.wait();
+		try {
+			const result = await this.sandbox!.process.start({
+				cmd: command.split(' ')
+			});
 
-      return {
-        success: result.exitCode === 0,
-        output: result.stdout,
-        error: result.stderr,
-        exitCode: result.exitCode,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        output: '',
-        error: error.message,
-        exitCode: -1,
-      };
-    }
-  }
+			await result.wait();
 
-  async uploadFile(filePath: string, content: string) {
-    if (!this.sandbox) {
-      await this.initialize();
-    }
+			return {
+				success: result.exitCode === 0,
+				output: result.stdout,
+				error: result.stderr,
+				exitCode: result.exitCode
+			};
+		} catch (error) {
+			return {
+				success: false,
+				output: '',
+				error: error.message,
+				exitCode: -1
+			};
+		}
+	}
 
-    await this.sandbox!.files.write(filePath, content);
-  }
+	async uploadFile(filePath: string, content: string) {
+		if (!this.sandbox) {
+			await this.initialize();
+		}
 
-  async downloadFile(filePath: string): Promise<string> {
-    if (!this.sandbox) {
-      await this.initialize();
-    }
+		await this.sandbox!.files.write(filePath, content);
+	}
 
-    return await this.sandbox!.files.read(filePath);
-  }
+	async downloadFile(filePath: string): Promise<string> {
+		if (!this.sandbox) {
+			await this.initialize();
+		}
 
-  async cleanup() {
-    if (this.sandbox) {
-      await this.sandbox.close();
-      this.sandbox = null;
-    }
-  }
+		return await this.sandbox!.files.read(filePath);
+	}
+
+	async cleanup() {
+		if (this.sandbox) {
+			await this.sandbox.close();
+			this.sandbox = null;
+		}
+	}
 }
 ```
 
@@ -362,135 +370,135 @@ export class E2BSandboxRunner {
 import { DaytonaSDK } from '@daytona/sdk';
 
 export class DaytonaSandboxRunner {
-  private client: DaytonaSDK;
-  private workspaceId: string | null = null;
+	private client: DaytonaSDK;
+	private workspaceId: string | null = null;
 
-  constructor() {
-    this.client = new DaytonaSDK({
-      apiKey: process.env.DAYTONA_API_KEY,
-      serverUrl: process.env.DAYTONA_SERVER_URL,
-    });
-  }
+	constructor() {
+		this.client = new DaytonaSDK({
+			apiKey: process.env.DAYTONA_API_KEY,
+			serverUrl: process.env.DAYTONA_SERVER_URL
+		});
+	}
 
-  async initialize() {
-    try {
-      // Create a new workspace
-      const workspace = await this.client.workspaces.create({
-        name: `coding-agent-${Date.now()}`,
-        template: 'node-typescript',
-      });
-      
-      this.workspaceId = workspace.id;
-      
-      // Wait for workspace to be ready
-      await this.waitForWorkspaceReady();
-      
-      return workspace;
-    } catch (error) {
-      console.error('Failed to initialize Daytona workspace:', error);
-      throw error;
-    }
-  }
+	async initialize() {
+		try {
+			// Create a new workspace
+			const workspace = await this.client.workspaces.create({
+				name: `coding-agent-${Date.now()}`,
+				template: 'node-typescript'
+			});
 
-  async executeCode(code: string, language: string = 'typescript') {
-    if (!this.workspaceId) {
-      await this.initialize();
-    }
+			this.workspaceId = workspace.id;
 
-    try {
-      const result = await this.client.process.execute(this.workspaceId!, {
-        code,
-        language,
-        timeout: 30000,
-      });
+			// Wait for workspace to be ready
+			await this.waitForWorkspaceReady();
 
-      return {
-        success: result.exitCode === 0,
-        output: result.stdout,
-        error: result.stderr,
-        exitCode: result.exitCode,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        output: '',
-        error: error.message,
-        exitCode: -1,
-      };
-    }
-  }
+			return workspace;
+		} catch (error) {
+			console.error('Failed to initialize Daytona workspace:', error);
+			throw error;
+		}
+	}
 
-  async runTerminalCommand(command: string) {
-    if (!this.workspaceId) {
-      await this.initialize();
-    }
+	async executeCode(code: string, language: string = 'typescript') {
+		if (!this.workspaceId) {
+			await this.initialize();
+		}
 
-    try {
-      const result = await this.client.process.run(this.workspaceId!, {
-        command,
-        workingDir: '/workspace',
-        timeout: 60000,
-      });
+		try {
+			const result = await this.client.process.execute(this.workspaceId!, {
+				code,
+				language,
+				timeout: 30000
+			});
 
-      return {
-        success: result.exitCode === 0,
-        output: result.output,
-        error: result.error,
-        exitCode: result.exitCode,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        output: '',
-        error: error.message,
-        exitCode: -1,
-      };
-    }
-  }
+			return {
+				success: result.exitCode === 0,
+				output: result.stdout,
+				error: result.stderr,
+				exitCode: result.exitCode
+			};
+		} catch (error) {
+			return {
+				success: false,
+				output: '',
+				error: error.message,
+				exitCode: -1
+			};
+		}
+	}
 
-  async uploadFile(filePath: string, content: string) {
-    if (!this.workspaceId) {
-      await this.initialize();
-    }
+	async runTerminalCommand(command: string) {
+		if (!this.workspaceId) {
+			await this.initialize();
+		}
 
-    await this.client.files.write(this.workspaceId!, filePath, content);
-  }
+		try {
+			const result = await this.client.process.run(this.workspaceId!, {
+				command,
+				workingDir: '/workspace',
+				timeout: 60000
+			});
 
-  async downloadFile(filePath: string): Promise<string> {
-    if (!this.workspaceId) {
-      await this.initialize();
-    }
+			return {
+				success: result.exitCode === 0,
+				output: result.output,
+				error: result.error,
+				exitCode: result.exitCode
+			};
+		} catch (error) {
+			return {
+				success: false,
+				output: '',
+				error: error.message,
+				exitCode: -1
+			};
+		}
+	}
 
-    return await this.client.files.read(this.workspaceId!, filePath);
-  }
+	async uploadFile(filePath: string, content: string) {
+		if (!this.workspaceId) {
+			await this.initialize();
+		}
 
-  private async waitForWorkspaceReady() {
-    let attempts = 0;
-    const maxAttempts = 30;
+		await this.client.files.write(this.workspaceId!, filePath, content);
+	}
 
-    while (attempts < maxAttempts) {
-      try {
-        const workspace = await this.client.workspaces.get(this.workspaceId!);
-        if (workspace.status === 'running') {
-          return;
-        }
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        attempts++;
-      } catch (error) {
-        attempts++;
-        if (attempts >= maxAttempts) {
-          throw new Error('Workspace failed to become ready');
-        }
-      }
-    }
-  }
+	async downloadFile(filePath: string): Promise<string> {
+		if (!this.workspaceId) {
+			await this.initialize();
+		}
 
-  async cleanup() {
-    if (this.workspaceId) {
-      await this.client.workspaces.delete(this.workspaceId);
-      this.workspaceId = null;
-    }
-  }
+		return await this.client.files.read(this.workspaceId!, filePath);
+	}
+
+	private async waitForWorkspaceReady() {
+		let attempts = 0;
+		const maxAttempts = 30;
+
+		while (attempts < maxAttempts) {
+			try {
+				const workspace = await this.client.workspaces.get(this.workspaceId!);
+				if (workspace.status === 'running') {
+					return;
+				}
+				await new Promise((resolve) => setTimeout(resolve, 2000));
+				attempts++;
+			} catch (error) {
+				attempts++;
+				if (attempts >= maxAttempts) {
+					throw new Error('Workspace failed to become ready');
+				}
+			}
+		}
+	}
+
+	async cleanup() {
+		if (this.workspaceId) {
+			await this.client.workspaces.delete(this.workspaceId);
+			this.workspaceId = null;
+		}
+	}
 }
 ```
 
@@ -502,123 +510,123 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 export class MCPToolManager {
-  private clients: Map<string, Client> = new Map();
+	private clients: Map<string, Client> = new Map();
 
-  async initializeServers() {
-    // Initialize Filesystem Server
-    await this.initializeFilesystemServer();
-    
-    // Initialize Web Search Server
-    await this.initializeWebSearchServer();
-    
-    // Initialize Documentation Server
-    await this.initializeDocsServer();
-  }
+	async initializeServers() {
+		// Initialize Filesystem Server
+		await this.initializeFilesystemServer();
 
-  private async initializeFilesystemServer() {
-    const transport = new StdioClientTransport({
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem', process.cwd()],
-    });
+		// Initialize Web Search Server
+		await this.initializeWebSearchServer();
 
-    const client = new Client(
-      {
-        name: 'coding-agent',
-        version: '1.0.0',
-      },
-      {
-        capabilities: {
-          tools: {},
-        },
-      }
-    );
+		// Initialize Documentation Server
+		await this.initializeDocsServer();
+	}
 
-    await client.connect(transport);
-    this.clients.set('filesystem', client);
-  }
+	private async initializeFilesystemServer() {
+		const transport = new StdioClientTransport({
+			command: 'npx',
+			args: ['-y', '@modelcontextprotocol/server-filesystem', process.cwd()]
+		});
 
-  private async initializeWebSearchServer() {
-    const transport = new StdioClientTransport({
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-brave-search'],
-      env: {
-        ...process.env,
-        BRAVE_API_KEY: process.env.BRAVE_API_KEY,
-      },
-    });
+		const client = new Client(
+			{
+				name: 'coding-agent',
+				version: '1.0.0'
+			},
+			{
+				capabilities: {
+					tools: {}
+				}
+			}
+		);
 
-    const client = new Client(
-      {
-        name: 'coding-agent',
-        version: '1.0.0',
-      },
-      {
-        capabilities: {
-          tools: {},
-        },
-      }
-    );
+		await client.connect(transport);
+		this.clients.set('filesystem', client);
+	}
 
-    await client.connect(transport);
-    this.clients.set('web-search', client);
-  }
+	private async initializeWebSearchServer() {
+		const transport = new StdioClientTransport({
+			command: 'npx',
+			args: ['-y', '@modelcontextprotocol/server-brave-search'],
+			env: {
+				...process.env,
+				BRAVE_API_KEY: process.env.BRAVE_API_KEY
+			}
+		});
 
-  private async initializeDocsServer() {
-    // Custom documentation server for accessing project docs
-    const transport = new StdioClientTransport({
-      command: 'node',
-      args: ['./src/mcp/docs-server.js'],
-    });
+		const client = new Client(
+			{
+				name: 'coding-agent',
+				version: '1.0.0'
+			},
+			{
+				capabilities: {
+					tools: {}
+				}
+			}
+		);
 
-    const client = new Client(
-      {
-        name: 'coding-agent',
-        version: '1.0.0',
-      },
-      {
-        capabilities: {
-          tools: {},
-        },
-      }
-    );
+		await client.connect(transport);
+		this.clients.set('web-search', client);
+	}
 
-    await client.connect(transport);
-    this.clients.set('docs', client);
-  }
+	private async initializeDocsServer() {
+		// Custom documentation server for accessing project docs
+		const transport = new StdioClientTransport({
+			command: 'node',
+			args: ['./src/mcp/docs-server.js']
+		});
 
-  async callTool(server: string, toolName: string, args: any) {
-    const client = this.clients.get(server);
-    if (!client) {
-      throw new Error(`MCP server ${server} not found`);
-    }
+		const client = new Client(
+			{
+				name: 'coding-agent',
+				version: '1.0.0'
+			},
+			{
+				capabilities: {
+					tools: {}
+				}
+			}
+		);
 
-    const result = await client.callTool({
-      name: toolName,
-      arguments: args,
-    });
+		await client.connect(transport);
+		this.clients.set('docs', client);
+	}
 
-    return result;
-  }
+	async callTool(server: string, toolName: string, args: any) {
+		const client = this.clients.get(server);
+		if (!client) {
+			throw new Error(`MCP server ${server} not found`);
+		}
 
-  async listTools(server?: string) {
-    if (server) {
-      const client = this.clients.get(server);
-      if (client) {
-        return await client.listTools();
-      }
-      return { tools: [] };
-    }
+		const result = await client.callTool({
+			name: toolName,
+			arguments: args
+		});
 
-    const allTools = [];
-    for (const [serverName, client] of this.clients) {
-      const tools = await client.listTools();
-      allTools.push({
-        server: serverName,
-        tools: tools.tools,
-      });
-    }
-    return allTools;
-  }
+		return result;
+	}
+
+	async listTools(server?: string) {
+		if (server) {
+			const client = this.clients.get(server);
+			if (client) {
+				return await client.listTools();
+			}
+			return { tools: [] };
+		}
+
+		const allTools = [];
+		for (const [serverName, client] of this.clients) {
+			const tools = await client.listTools();
+			allTools.push({
+				server: serverName,
+				tools: tools.tools
+			});
+		}
+		return allTools;
+	}
 }
 ```
 
@@ -629,115 +637,121 @@ export class MCPToolManager {
 import { OpenAI } from 'openai';
 
 export class MorphHumanLoop {
-  private morphClient: OpenAI;
-  private pendingEdits: Map<string, any> = new Map();
+	private morphClient: OpenAI;
+	private pendingEdits: Map<string, any> = new Map();
 
-  constructor() {
-    this.morphClient = new OpenAI({
-      apiKey: process.env.MORPH_API_KEY,
-      baseURL: 'https://api.morphllm.com/v1',
-    });
-  }
+	constructor() {
+		this.morphClient = new OpenAI({
+			apiKey: process.env.MORPH_API_KEY,
+			baseURL: 'https://api.morphllm.com/v1'
+		});
+	}
 
-  async suggestEdit(filePath: string, originalContent: string, editDescription: string) {
-    // Generate edit suggestion using AI
-    const suggestion = await this.generateEditSuggestion(originalContent, editDescription);
-    
-    // Store pending edit
-    const editId = `edit_${Date.now()}`;
-    this.pendingEdits.set(editId, {
-      filePath,
-      originalContent,
-      suggestion,
-      editDescription,
-      timestamp: new Date(),
-    });
+	async suggestEdit(filePath: string, originalContent: string, editDescription: string) {
+		// Generate edit suggestion using AI
+		const suggestion = await this.generateEditSuggestion(originalContent, editDescription);
 
-    return {
-      editId,
-      suggestion,
-      preview: await this.generatePreview(originalContent, suggestion),
-    };
-  }
+		// Store pending edit
+		const editId = `edit_${Date.now()}`;
+		this.pendingEdits.set(editId, {
+			filePath,
+			originalContent,
+			suggestion,
+			editDescription,
+			timestamp: new Date()
+		});
 
-  async applyEdit(editId: string, userApproval: boolean, userModifications?: string) {
-    const edit = this.pendingEdits.get(editId);
-    if (!edit) {
-      throw new Error(`Edit ${editId} not found`);
-    }
+		return {
+			editId,
+			suggestion,
+			preview: await this.generatePreview(originalContent, suggestion)
+		};
+	}
 
-    if (!userApproval) {
-      this.pendingEdits.delete(editId);
-      return { success: false, message: 'Edit rejected by user' };
-    }
+	async applyEdit(editId: string, userApproval: boolean, userModifications?: string) {
+		const edit = this.pendingEdits.get(editId);
+		if (!edit) {
+			throw new Error(`Edit ${editId} not found`);
+		}
 
-    let finalEdit = edit.suggestion;
-    if (userModifications) {
-      finalEdit = userModifications;
-    }
+		if (!userApproval) {
+			this.pendingEdits.delete(editId);
+			return { success: false, message: 'Edit rejected by user' };
+		}
 
-    try {
-      // Apply edit using Morph's fast apply
-      const result = await this.morphClient.chat.completions.create({
-        model: 'morph-v3-large',
-        messages: [{
-          role: 'user',
-          content: `Apply this edit to the original file:\n\n\`\`\`\n${edit.originalContent}\n\`\`\`\n\n${finalEdit}`,
-        }],
-      });
+		let finalEdit = edit.suggestion;
+		if (userModifications) {
+			finalEdit = userModifications;
+		}
 
-      const appliedContent = result.choices[0].message.content;
-      
-      this.pendingEdits.delete(editId);
-      
-      return {
-        success: true,
-        content: appliedContent,
-        filePath: edit.filePath,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: `Failed to apply edit: ${error.message}`,
-      };
-    }
-  }
+		try {
+			// Apply edit using Morph's fast apply
+			const result = await this.morphClient.chat.completions.create({
+				model: 'morph-v3-large',
+				messages: [
+					{
+						role: 'user',
+						content: `Apply this edit to the original file:\n\n\`\`\`\n${edit.originalContent}\n\`\`\`\n\n${finalEdit}`
+					}
+				]
+			});
 
-  async replaceFileContent(filePath: string, newContent: string) {
-    // For cases where we want to replace entire file content
-    return {
-      success: true,
-      content: newContent,
-      filePath,
-      type: 'full_replace',
-    };
-  }
+			const appliedContent = result.choices[0].message.content;
 
-  private async generateEditSuggestion(originalContent: string, editDescription: string) {
-    // Generate edit suggestion based on description
-    const response = await this.morphClient.chat.completions.create({
-      model: 'gpt-4',
-      messages: [{
-        role: 'user',
-        content: `Generate an edit snippet for the following request:\n\nOriginal content:\n\`\`\`\n${originalContent}\n\`\`\`\n\nEdit request: ${editDescription}\n\nProvide only the edit snippet, not the full file.`,
-      }],
-    });
+			this.pendingEdits.delete(editId);
 
-    return response.choices[0].message.content;
-  }
+			return {
+				success: true,
+				content: appliedContent,
+				filePath: edit.filePath
+			};
+		} catch (error) {
+			return {
+				success: false,
+				message: `Failed to apply edit: ${error.message}`
+			};
+		}
+	}
 
-  private async generatePreview(originalContent: string, editSuggestion: string) {
-    // Generate a preview of what the edit would look like
-    const response = await this.morphClient.chat.completions.create({
-      model: 'morph-v3-large',
-      messages: [{
-        role: 'user',
-        content: `Show me a preview of applying this edit:\n\n\`\`\`\n${originalContent}\n\`\`\`\n\n${editSuggestion}`,
-      }],
-    });
+	async replaceFileContent(filePath: string, newContent: string) {
+		// For cases where we want to replace entire file content
+		return {
+			success: true,
+			content: newContent,
+			filePath,
+			type: 'full_replace'
+		};
+	}
 
-    return response.choices[0].message.content;
-  }
+	private async generateEditSuggestion(originalContent: string, editDescription: string) {
+		// Generate edit suggestion based on description
+		const response = await this.morphClient.chat.completions.create({
+			model: 'gpt-4',
+			messages: [
+				{
+					role: 'user',
+					content: `Generate an edit snippet for the following request:\n\nOriginal content:\n\`\`\`\n${originalContent}\n\`\`\`\n\nEdit request: ${editDescription}\n\nProvide only the edit snippet, not the full file.`
+				}
+			]
+		});
+
+		return response.choices[0].message.content;
+	}
+
+	private async generatePreview(originalContent: string, editSuggestion: string) {
+		// Generate a preview of what the edit would look like
+		const response = await this.morphClient.chat.completions.create({
+			model: 'morph-v3-large',
+			messages: [
+				{
+					role: 'user',
+					content: `Show me a preview of applying this edit:\n\n\`\`\`\n${originalContent}\n\`\`\`\n\n${editSuggestion}`
+				}
+			]
+		});
+
+		return response.choices[0].message.content;
+	}
 }
 ```
 
@@ -843,7 +857,7 @@ export class CodingAgent {
   async initialize() {
     await this.contextManager.initialize();
     await this.mcpManager.initializeServers();
-    
+
     const checkpointer = new MemorySaver();
     this.app = this.workflow.compile({ checkpointer });
   }
@@ -866,7 +880,7 @@ Respond with a JSON object containing your analysis.
     `;
 
     const response = await model.invoke([{ role: 'user', content: analysisPrompt }]);
-    
+
     let analysis;
     try {
       analysis = JSON.parse(response.content);
@@ -890,7 +904,7 @@ Respond with a JSON object containing your analysis.
     // Simple logic - can be enhanced
     const lastMessage = state.messages[state.messages.length - 1];
     if (lastMessage.content && typeof lastMessage.content === 'string') {
-      if (lastMessage.content.toLowerCase().includes('file') || 
+      if (lastMessage.content.toLowerCase().includes('file') ||
           lastMessage.content.toLowerCase().includes('existing')) {
         return 'search';
       }
@@ -900,16 +914,16 @@ Respond with a JSON object containing your analysis.
 
   private async searchContext(state: CodingAgentState) {
     const lastMessage = state.messages[state.messages.length - 1] as HumanMessage;
-    
+
     // Generate embedding for search query
     const model = this.modelManager.getModel('gpt-4');
     const embedding = await this.generateEmbedding(lastMessage.content.toString());
-    
+
     // Search for relevant context
     const searchResults = await this.contextManager.searchContext(embedding, 5);
-    
+
     const contextMessage = `Found relevant context:\n${
-      searchResults.map(r => 
+      searchResults.map(r =>
         `File: ${r.context.fileName}\nContent: ${r.context.content.substring(0, 500)}...\n---`
       ).join('\n')
     }`;
@@ -923,9 +937,9 @@ Respond with a JSON object containing your analysis.
 
   private async generateCode(state: CodingAgentState) {
     const model = this.modelManager.getModel('gpt-4');
-    
+
     const context = state.messages.slice(-3).map(m => m.content).join('\n');
-    
+
     const codePrompt = `
 Based on the following context and request, generate the appropriate code:
 
@@ -943,7 +957,7 @@ Format your response as a JSON object with these fields.
     `;
 
     const response = await model.invoke([{ role: 'user', content: codePrompt }]);
-    
+
     return {
       ...state,
       messages: [...state.messages, response],
@@ -953,7 +967,7 @@ Format your response as a JSON object with these fields.
   private async executeCode(state: CodingAgentState) {
     const lastMessage = state.messages[state.messages.length - 1];
     let codeToExecute: any;
-    
+
     try {
       codeToExecute = JSON.parse(lastMessage.content.toString());
     } catch {
@@ -964,9 +978,9 @@ Format your response as a JSON object with these fields.
     }
 
     const sandboxRunner = state.sandboxType === 'e2b' ? this.e2bRunner : this.daytonaRunner;
-    
+
     let results = [];
-    
+
     if (codeToExecute.code) {
       const result = await sandboxRunner.executeCode(codeToExecute.code, codeToExecute.language);
       results.push(`Execution result: ${result.success ? 'Success' : 'Failed'}`);
@@ -983,7 +997,7 @@ Format your response as a JSON object with these fields.
     }
 
     const executionMessage = results.join('\n');
-    
+
     return {
       ...state,
       messages: [...state.messages, new AIMessage(executionMessage)],
@@ -1000,18 +1014,18 @@ Format your response as a JSON object with these fields.
 
   private async humanReview(state: CodingAgentState) {
     const lastMessage = state.messages[state.messages.length - 1];
-    
+
     // This would integrate with your UI to show pending changes to user
     console.log('Human review required for:', lastMessage.content);
-    
+
     // For demo purposes, we'll auto-approve
     // In practice, this would wait for human input
     const approved = true;
-    
-    const reviewMessage = approved ? 
-      'Changes approved by human reviewer' : 
+
+    const reviewMessage = approved ?
+      'Changes approved by human reviewer' :
       'Changes rejected by human reviewer';
-      
+
     return {
       ...state,
       messages: [...state.messages, new AIMessage(reviewMessage)],
@@ -1020,7 +1034,7 @@ Format your response as a JSON object with these fields.
 
   private async applyChanges(state: CodingAgentState) {
     const lastMessage = state.messages[state.messages.length - 1];
-    
+
     // Apply file changes through MCP filesystem tools
     try {
       const filesystemResult = await this.mcpManager.callTool(
@@ -1031,9 +1045,9 @@ Format your response as a JSON object with these fields.
           content: 'console.log("Hello from coding agent!");',
         }
       );
-      
+
       const finalMessage = 'Changes applied successfully to files.';
-      
+
       return {
         ...state,
         messages: [...state.messages, new AIMessage(finalMessage)],
@@ -1058,7 +1072,7 @@ Format your response as a JSON object with these fields.
       { messages: [new HumanMessage(input)] },
       { configurable: { thread_id: threadId } }
     );
-    
+
     return result;
   }
 
@@ -1078,19 +1092,19 @@ Format your response as a JSON object with these fields.
 import { CodingAgent } from '../agent/coding-agent.js';
 
 async function main() {
-  const agent = new CodingAgent();
-  await agent.initialize();
+	const agent = new CodingAgent();
+	await agent.initialize();
 
-  try {
-    const result = await agent.runAgent(
-      "Create a TypeScript function that calculates the factorial of a number and includes unit tests",
-      "session-1"
-    );
-    
-    console.log('Agent response:', result.messages[result.messages.length - 1].content);
-  } finally {
-    await agent.cleanup();
-  }
+	try {
+		const result = await agent.runAgent(
+			'Create a TypeScript function that calculates the factorial of a number and includes unit tests',
+			'session-1'
+		);
+
+		console.log('Agent response:', result.messages[result.messages.length - 1].content);
+	} finally {
+		await agent.cleanup();
+	}
 }
 
 main().catch(console.error);
@@ -1105,25 +1119,25 @@ import { QdrantContextManager } from '../memory/qdrant-manager.js';
 import fs from 'fs';
 
 async function addFileContext() {
-  const contextManager = new QdrantContextManager();
-  await contextManager.initialize();
+	const contextManager = new QdrantContextManager();
+	await contextManager.initialize();
 
-  // Add current file to context
-  const filePath = 'src/utils/helpers.ts';
-  const content = fs.readFileSync(filePath, 'utf8');
-  const embedding = new Array(1536).fill(0).map(() => Math.random()); // Replace with real embedding
+	// Add current file to context
+	const filePath = 'src/utils/helpers.ts';
+	const content = fs.readFileSync(filePath, 'utf8');
+	const embedding = new Array(1536).fill(0).map(() => Math.random()); // Replace with real embedding
 
-  await contextManager.updateFileContext(filePath, content, embedding);
+	await contextManager.updateFileContext(filePath, content, embedding);
 
-  const agent = new CodingAgent();
-  await agent.initialize();
+	const agent = new CodingAgent();
+	await agent.initialize();
 
-  const result = await agent.runAgent(
-    "Modify the helpers.ts file to add a new utility function for date formatting",
-    "context-session"
-  );
+	const result = await agent.runAgent(
+		'Modify the helpers.ts file to add a new utility function for date formatting',
+		'context-session'
+	);
 
-  console.log(result);
+	console.log(result);
 }
 
 addFileContext().catch(console.error);
@@ -1136,41 +1150,41 @@ addFileContext().catch(console.error);
 ```typescript
 // src/config/agent-config.ts
 export interface AgentConfig {
-  models: {
-    primary: string;
-    fallback: string[];
-  };
-  sandbox: {
-    type: 'e2b' | 'daytona';
-    timeout: number;
-  };
-  context: {
-    maxResults: number;
-    similarityThreshold: number;
-  };
-  humanLoop: {
-    required: boolean;
-    timeout: number;
-  };
+	models: {
+		primary: string;
+		fallback: string[];
+	};
+	sandbox: {
+		type: 'e2b' | 'daytona';
+		timeout: number;
+	};
+	context: {
+		maxResults: number;
+		similarityThreshold: number;
+	};
+	humanLoop: {
+		required: boolean;
+		timeout: number;
+	};
 }
 
 export const defaultConfig: AgentConfig = {
-  models: {
-    primary: 'gpt-4',
-    fallback: ['claude-3', 'gpt-3.5'],
-  },
-  sandbox: {
-    type: 'e2b',
-    timeout: 30000,
-  },
-  context: {
-    maxResults: 5,
-    similarityThreshold: 0.7,
-  },
-  humanLoop: {
-    required: false,
-    timeout: 300000, // 5 minutes
-  },
+	models: {
+		primary: 'gpt-4',
+		fallback: ['claude-3', 'gpt-3.5']
+	},
+	sandbox: {
+		type: 'e2b',
+		timeout: 30000
+	},
+	context: {
+		maxResults: 5,
+		similarityThreshold: 0.7
+	},
+	humanLoop: {
+		required: false,
+		timeout: 300000 // 5 minutes
+	}
 };
 ```
 
@@ -1213,15 +1227,15 @@ services:
   qdrant:
     image: qdrant/qdrant
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - '6333:6333'
+      - '6334:6334'
     volumes:
       - ./qdrant_storage:/qdrant/storage
 
   coding-agent:
     build: .
     ports:
-      - "3000:3000"
+      - '3000:3000'
     environment:
       - QDRANT_URL=http://qdrant:6333
       - HELICONE_API_KEY=${HELICONE_API_KEY}
@@ -1241,32 +1255,32 @@ services:
 ```typescript
 // src/utils/error-handling.ts
 export class AgentError extends Error {
-  constructor(
-    message: string,
-    public code: string,
-    public recoverable: boolean = false
-  ) {
-    super(message);
-    this.name = 'AgentError';
-  }
+	constructor(
+		message: string,
+		public code: string,
+		public recoverable: boolean = false
+	) {
+		super(message);
+		this.name = 'AgentError';
+	}
 }
 
 export async function withRetry<T>(
-  fn: () => Promise<T>,
-  maxAttempts: number = 3,
-  delay: number = 1000
+	fn: () => Promise<T>,
+	maxAttempts: number = 3,
+	delay: number = 1000
 ): Promise<T> {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return await fn();
-    } catch (error) {
-      if (attempt === maxAttempts || !(error instanceof AgentError) || !error.recoverable) {
-        throw error;
-      }
-      await new Promise(resolve => setTimeout(resolve, delay * attempt));
-    }
-  }
-  throw new Error('Retry logic failed');
+	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+		try {
+			return await fn();
+		} catch (error) {
+			if (attempt === maxAttempts || !(error instanceof AgentError) || !error.recoverable) {
+				throw error;
+			}
+			await new Promise((resolve) => setTimeout(resolve, delay * attempt));
+		}
+	}
+	throw new Error('Retry logic failed');
 }
 ```
 
@@ -1317,9 +1331,9 @@ process.env.DEBUG = 'coding-agent:*';
 import winston from 'winston';
 
 const logger = winston.createLogger({
-  level: 'debug',
-  format: winston.format.simple(),
-  transports: [new winston.transports.Console()],
+	level: 'debug',
+	format: winston.format.simple(),
+	transports: [new winston.transports.Console()]
 });
 ```
 
@@ -1405,21 +1419,21 @@ import type { Provider, ProviderGenerateOptions } from './provider.interface';
 import { BedrockClient, InvokeModelCommand } from '@aws-sdk/client-bedrock';
 
 export class BedrockDirectProvider implements Provider {
-  name = 'bedrock';
+	name = 'bedrock';
 
-  private client = new BedrockClient({ region: process.env.AWS_REGION });
+	private client = new BedrockClient({ region: process.env.AWS_REGION });
 
-  async generate(opts: ProviderGenerateOptions) {
-    const modelId = opts.endpoint?.endpoint?.providerModelId || opts.model.id;
+	async generate(opts: ProviderGenerateOptions) {
+		const modelId = opts.endpoint?.endpoint?.providerModelId || opts.model.id;
 
-    const payload = typeof opts.input === 'string' ? opts.input : JSON.stringify(opts.input);
+		const payload = typeof opts.input === 'string' ? opts.input : JSON.stringify(opts.input);
 
-    const cmd = new InvokeModelCommand({ ModelId: modelId, Input: payload /* map params */ });
-    const resp = await this.client.send(cmd);
+		const cmd = new InvokeModelCommand({ ModelId: modelId, Input: payload /* map params */ });
+		const resp = await this.client.send(cmd);
 
-    // Extract text from provider response and return normalized object
-    return { provider: this.name, modelId, text: resp?.Body || '', meta: resp };
-  }
+		// Extract text from provider response and return normalized object
+		return { provider: this.name, modelId, text: resp?.Body || '', meta: resp };
+	}
 }
 ```
 
@@ -1438,13 +1452,13 @@ Example LLM node referencing a model endpoint (graph JSON):
 
 ```json
 {
-  "id": "llm-1",
-  "type": "llm",
-  "modelId": "claude-opus-4-1",
-  "config": {
-    "provider": "anthropic",
-    "params": { "temperature": 0 }
-  }
+	"id": "llm-1",
+	"type": "llm",
+	"modelId": "claude-opus-4-1",
+	"config": {
+		"provider": "anthropic",
+		"params": { "temperature": 0 }
+	}
 }
 ```
 

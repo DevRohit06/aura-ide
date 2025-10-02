@@ -12,7 +12,7 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 
 	// Get project
 	const project = await DatabaseService.findProjectById(id);
-	
+
 	if (!project) {
 		throw redirect(302, '/dashboard');
 	}

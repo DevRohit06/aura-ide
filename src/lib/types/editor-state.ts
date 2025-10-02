@@ -50,7 +50,7 @@ export interface SidebarPanelState {
 	debug: boolean;
 	extensions: boolean;
 	'vector-indexing': boolean;
-	
+
 	// Panel visibility
 	leftSidebarVisible: boolean;
 	rightSidebarVisible: boolean;

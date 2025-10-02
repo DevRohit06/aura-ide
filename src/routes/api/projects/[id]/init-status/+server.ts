@@ -4,13 +4,20 @@ import { DatabaseService } from '$lib/services/database.service';
 import { logger } from '$lib/utils/logger';
 
 // Store initialization status in memory (could be Redis in production)
-const initStatus = new Map<string, {
-	progress: number;
-	message: string;
-	complete: boolean;
-	error?: string;
-	steps: Array<{ name: string; status: 'pending' | 'loading' | 'complete' | 'error'; message?: string }>;
-}>();
+const initStatus = new Map<
+	string,
+	{
+		progress: number;
+		message: string;
+		complete: boolean;
+		error?: string;
+		steps: Array<{
+			name: string;
+			status: 'pending' | 'loading' | 'complete' | 'error';
+			message?: string;
+		}>;
+	}
+>();
 
 export const GET: RequestHandler = async ({ params, locals }) => {
 	const { id } = params;
@@ -23,7 +30,7 @@ export const GET: RequestHandler = async ({ params, locals }) => {
 	try {
 		// Get project to verify ownership
 		const project = await DatabaseService.findProjectById(id);
-		
+
 		if (!project) {
 			return json({ error: 'Project not found' }, { status: 404 });
 		}
@@ -34,7 +41,7 @@ export const GET: RequestHandler = async ({ params, locals }) => {
 
 		// Get or create status
 		let status = initStatus.get(id);
-		
+
 		if (!status) {
 			// Initialize default status
 			status = {
@@ -56,7 +63,7 @@ export const GET: RequestHandler = async ({ params, locals }) => {
 			status.complete = true;
 			status.progress = 100;
 			status.message = 'Project ready!';
-			status.steps = status.steps.map(s => ({ ...s, status: 'complete' as const }));
+			status.steps = status.steps.map((s) => ({ ...s, status: 'complete' as const }));
 		} else if (project.status === 'error') {
 			status.error = 'Project initialization failed';
 			status.progress = 0;
@@ -92,7 +99,7 @@ export function updateInitStatus(
 			{ name: 'Indexing workspace', status: 'pending' as const }
 		]
 	};
-	
+
 	initStatus.set(projectId, { ...current, ...update });
 }
 

@@ -1,7 +1,13 @@
 import type { SidebarPanelState } from '@/types/editor-state';
 import { get, writable } from 'svelte/store';
 
-export type SidebarView = 'explorer' | 'search' | 'source-control' | 'debug' | 'extensions' | 'vector-indexing';
+export type SidebarView =
+	| 'explorer'
+	| 'search'
+	| 'source-control'
+	| 'debug'
+	| 'extensions'
+	| 'vector-indexing';
 
 // Default sidebar panel state
 const defaultSidebarPanels: SidebarPanelState = {
@@ -12,7 +18,7 @@ const defaultSidebarPanels: SidebarPanelState = {
 	debug: false,
 	extensions: false,
 	'vector-indexing': false,
-	
+
 	// Panel visibility
 	leftSidebarVisible: true,
 	rightSidebarVisible: true,
@@ -45,18 +51,18 @@ export const sidebarPanelActions = {
 		sidebarPanelsStore.update((state) => {
 			// Reset all views to false
 			const newPanels = { ...state.panels };
-			Object.keys(newPanels).forEach(key => {
+			Object.keys(newPanels).forEach((key) => {
 				if (key !== 'leftSidebarVisible' && key !== 'rightSidebarVisible') {
 					newPanels[key as keyof SidebarPanelState] = false;
 				}
 			});
-			
+
 			// Set the new view to true
 			newPanels[view] = true;
-			
+
 			// Ensure sidebar is visible when setting a view
 			newPanels.leftSidebarVisible = true;
-			
+
 			return {
 				...state,
 				panels: newPanels,
@@ -70,7 +76,7 @@ export const sidebarPanelActions = {
 		sidebarPanelsStore.update((state) => {
 			const isCurrentlyActive = state.currentView === view && state.panels[view];
 			const isLeftSidebarVisible = state.panels.leftSidebarVisible;
-			
+
 			if (isCurrentlyActive && isLeftSidebarVisible) {
 				// Same view clicked and sidebar is visible - hide the sidebar
 				return {
@@ -83,18 +89,18 @@ export const sidebarPanelActions = {
 			} else {
 				// Different view or sidebar was hidden - show the view
 				const newPanels = { ...state.panels };
-				
+
 				// Reset all views to false
-				Object.keys(newPanels).forEach(key => {
+				Object.keys(newPanels).forEach((key) => {
 					if (key !== 'leftSidebarVisible' && key !== 'rightSidebarVisible') {
 						newPanels[key as keyof SidebarPanelState] = false;
 					}
 				});
-				
+
 				// Set the new view to true and make sidebar visible
 				newPanels[view] = true;
 				newPanels.leftSidebarVisible = true;
-				
+
 				return {
 					...state,
 					panels: newPanels,

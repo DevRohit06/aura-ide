@@ -127,7 +127,8 @@ export class MorphCodeEditingService {
 			let currentContent = '';
 			try {
 				const file = await sandboxManager.readFile(sandboxId, edit.filePath);
-				currentContent = typeof file?.content === 'string' ? file.content : file?.content?.toString() || '';
+				currentContent =
+					typeof file?.content === 'string' ? file.content : file?.content?.toString() || '';
 			} catch (error) {
 				// File doesn't exist, treat as empty for create operations
 				if (edit.changeType !== 'create') {
@@ -183,12 +184,9 @@ export class MorphCodeEditingService {
 		const { sandboxManager } = await import('$lib/services/sandbox');
 
 		try {
-			const success = await sandboxManager.writeFile(
-				sandboxId,
-				edit.filePath,
-				edit.newContent,
-				{ createDirs: true }
-			);
+			const success = await sandboxManager.writeFile(sandboxId, edit.filePath, edit.newContent, {
+				createDirs: true
+			});
 
 			return {
 				success,
@@ -241,12 +239,9 @@ export class MorphCodeEditingService {
 		// If oldContent matches currentContent, it's a clean edit
 		if (edit.oldContent === currentContent) {
 			try {
-				const success = await sandboxManager.writeFile(
-					sandboxId,
-					edit.filePath,
-					edit.newContent,
-					{ backup: options.backupOriginals }
-				);
+				const success = await sandboxManager.writeFile(sandboxId, edit.filePath, edit.newContent, {
+					backup: options.backupOriginals
+				});
 
 				return {
 					success,
@@ -315,16 +310,18 @@ export class MorphCodeEditingService {
 		// Return conflicts for manual resolution
 		return {
 			success: false,
-			conflicts: [{
-				filePath: edit.filePath,
-				conflicts: mergeResult.conflicts.map(c => ({
-					startLine: c.startLine,
-					endLine: c.endLine,
-					ourContent: c.ourContent,
-					theirContent: c.theirContent,
-					baseContent: c.baseContent
-				}))
-			}]
+			conflicts: [
+				{
+					filePath: edit.filePath,
+					conflicts: mergeResult.conflicts.map((c) => ({
+						startLine: c.startLine,
+						endLine: c.endLine,
+						ourContent: c.ourContent,
+						theirContent: c.theirContent,
+						baseContent: c.baseContent
+					}))
+				}
+			]
 		};
 	}
 
@@ -335,13 +332,16 @@ export class MorphCodeEditingService {
 		baseContent: string,
 		ourContent: string,
 		theirContent: string
-	): { mergedContent: string; conflicts: Array<{
-		startLine: number;
-		endLine: number;
-		ourContent: string;
-		theirContent: string;
-		baseContent: string;
-	}> } {
+	): {
+		mergedContent: string;
+		conflicts: Array<{
+			startLine: number;
+			endLine: number;
+			ourContent: string;
+			theirContent: string;
+			baseContent: string;
+		}>;
+	} {
 		const baseLines = baseContent.split('\n');
 		const ourLines = ourContent.split('\n');
 		const theirLines = theirContent.split('\n');
@@ -406,15 +406,16 @@ export class MorphCodeEditingService {
 	/**
 	 * Auto-resolve conflicts using heuristics
 	 */
-	private autoResolveConflicts(
-		mergeResult: { mergedContent: string; conflicts: Array<{
+	private autoResolveConflicts(mergeResult: {
+		mergedContent: string;
+		conflicts: Array<{
 			startLine: number;
 			endLine: number;
 			ourContent: string;
 			theirContent: string;
 			baseContent: string;
-		}> }
-	): { mergedContent: string; conflicts: Array<any> } {
+		}>;
+	}): { mergedContent: string; conflicts: Array<any> } {
 		let mergedLines = mergeResult.mergedContent.split('\n');
 		const remainingConflicts: Array<any> = [];
 
@@ -476,7 +477,10 @@ export class MorphCodeEditingService {
 	/**
 	 * Validate that an edit can be safely applied
 	 */
-	validateEdit(edit: CodeEdit, currentContent: string): {
+	validateEdit(
+		edit: CodeEdit,
+		currentContent: string
+	): {
 		valid: boolean;
 		reason?: string;
 		risk: 'low' | 'medium' | 'high';

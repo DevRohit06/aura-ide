@@ -5,4 +5,10 @@ export interface SidebarViewData {
 	component?: any;
 }
 
-export type SidebarViewId = 'explorer' | 'search' | 'source-control' | 'debug' | 'extensions' | 'vector-indexing';
+export type SidebarViewId =
+	| 'explorer'
+	| 'search'
+	| 'source-control'
+	| 'debug'
+	| 'extensions'
+	| 'vector-indexing';
