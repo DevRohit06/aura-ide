@@ -329,7 +329,7 @@
 	<!-- Explorer Header -->
 	<div class="border-b border-border p-2">
 		<div class="flex items-center justify-between">
-			<h2 class="text-sm font-semibold tracking-wide text-muted-foreground uppercase">Explorer</h2>
+			<h2 class="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Explorer</h2>
 			<div class="flex gap-1">
 				<Tooltip.Provider>
 					<Tooltip.Root>
