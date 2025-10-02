@@ -217,42 +217,6 @@ export function validateProjectNameFormat(name: string): {
 	};
 }
 
-// Check if project name is available (this would typically make an API call)
-export async function checkProjectNameAvailability(name: string): Promise<{
-	isAvailable: boolean;
-	message?: string;
-}> {
-	// Format validation first
-	const formatCheck = validateProjectNameFormat(name);
-	if (!formatCheck.isValid) {
-		return {
-			isAvailable: false,
-			message: formatCheck.errors[0]
-		};
-	}
-
-	try {
-		// This would make an API call to check availability
-		const response = await fetch(`/api/projects/check-name?name=${encodeURIComponent(name)}`);
-
-		if (!response.ok) {
-			throw new Error('Failed to check name availability');
-		}
-
-		const result = await response.json();
-		return {
-			isAvailable: result.available,
-			message: result.message
-		};
-	} catch (error) {
-		console.error('Error checking project name availability:', error);
-		return {
-			isAvailable: false,
-			message: 'Unable to check name availability. Please try again.'
-		};
-	}
-}
-
 // Utility function to get step validation
 export function getStepValidation(
 	step: number,
