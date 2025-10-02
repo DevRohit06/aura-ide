@@ -1,15 +1,24 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Menubar from '$lib/components/ui/menubar/index.js';
 	import { fileActions, tabActions } from '$lib/stores/editor.js';
-	import { sidebarPanelActions } from '$lib/stores/sidebar-panels.store';
+	import { sidebarPanelActions, sidebarPanelsStore } from '$lib/stores/sidebar-panels.store';
+	import MessageSquareIcon from '@lucide/svelte/icons/message-square';
+	import SearchIcon from '@lucide/svelte/icons/search';
 
-	let { project } = $props<{ project: any }>();
+	let { project, onOpenCommandPalette } = $props<{
+		project: any;
+		onOpenCommandPalette?: () => void;
+	}>();
 
 	// Menu state
 	let showSidebarChecked = $state(true);
 	let showTerminalChecked = $state(true);
 	let showRightSidebarChecked = $state(true);
+
+	// Reactive state for chat sidebar visibility
+	let chatSidebarVisible = $derived($sidebarPanelsStore.panels.rightSidebarVisible);
 
 	function handleNewFile() {
 		// Create a new untitled file
@@ -92,15 +101,22 @@
 		goto('/dashboard');
 	}
 
+	function handleOpenCommandPalette() {
+		onOpenCommandPalette?.();
+	}
+
+	function handleToggleChatSidebar() {
+		sidebarPanelActions.toggleRightSidebar();
+	}
+
 	function handleProjectSettings() {
 		console.log('Project settings');
 	}
 </script>
 
-<div class="border-b bg-background">
-	<Menubar.Root class="flex items-center">
+<div class="flex w-full justify-between border-b bg-background">
+	<Menubar.Root class="flex items-center border-none">
 		<!-- File Menu -->
-
 		<img class="h-5 px-2" src="/aura.png" alt="Aura Ide" />
 		<Menubar.Menu>
 			<Menubar.Trigger class="px-3 py-1 text-xs">File</Menubar.Trigger>
@@ -207,10 +223,38 @@
 				<Menubar.Item>About Aura IDE</Menubar.Item>
 			</Menubar.Content>
 		</Menubar.Menu>
+	</Menubar.Root>
+
+	<!-- Central Search Button -->
+	<div class="mx-4 flex max-w-lg flex-1 items-center justify-center">
+		<Button
+			variant="outline"
+			size="sm"
+			onclick={handleOpenCommandPalette}
+			class="h-6 min-w-[320px] justify-start px-3 text-xs text-muted-foreground hover:text-foreground"
+			title="Open Command Palette (⇧⌘P)"
+		>
+			<SearchIcon class="mr-2 h-2 w-2" />
+			Search files, symbols, and code...
+		</Button>
+	</div>
+
+	<!-- Right Side Controls -->
+	<div class="flex items-center gap-2">
+		<!-- Chat Toggle Button -->
+		<Button
+			variant={chatSidebarVisible ? 'default' : 'ghost'}
+			size="sm"
+			onclick={handleToggleChatSidebar}
+			class="h-8 px-2"
+			title="Toggle Chat Sidebar"
+		>
+			<MessageSquareIcon class="h-4 w-4" />
+		</Button>
 
 		<!-- Project Name Display -->
-		<div class="ml-auto flex items-center px-4 text-xs text-muted-foreground">
+		<div class="px-4 text-xs text-muted-foreground">
 			{project?.name || 'Untitled Project'}
 		</div>
-	</Menubar.Root>
+	</div>
 </div>

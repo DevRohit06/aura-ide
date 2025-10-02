@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ProfileDropdown from '$lib/components/shared/profile-dropdown.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import {
@@ -20,11 +21,19 @@
 		icon: string;
 	}
 
-	interface Props {
+	type Props = {
 		onSettingsClick?: () => void;
-	}
+		onProfileClick?: () => void;
+		user?: {
+			id: string;
+			email: string;
+			username?: string;
+			name?: string;
+			image?: string;
+		};
+	};
 
-	let { onSettingsClick }: Props = $props();
+	let { onSettingsClick, onProfileClick, user }: Props = $props();
 
 	// Sidebar views configuration
 	const sidebarViews: SidebarViewData[] = [
@@ -92,7 +101,15 @@
 	{/each}
 
 	<!-- Settings Button -->
-	<div class="mt-auto">
+	<div class="mt-auto space-y-0">
+		<!-- Profile Dropdown -->
+		{#if user}
+			<div class="flex justify-center p-2">
+				<ProfileDropdown {user} {onProfileClick} />
+			</div>
+		{/if}
+
+		<!-- Settings Button -->
 		<Tooltip.Provider>
 			<Tooltip.Root>
 				<Tooltip.Trigger>
