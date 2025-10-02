@@ -79,23 +79,25 @@
 {#if !tooltipContent}
 	{@render Button({})}
 {:else}
-	<Tooltip.Root>
-		<Tooltip.Trigger>
-			{#snippet child({ props })}
-				{@render Button({ props })}
-			{/snippet}
-		</Tooltip.Trigger>
-		<Tooltip.Content
-			side="right"
-			align="center"
-			hidden={sidebar.state !== 'collapsed' || sidebar.isMobile}
-			{...tooltipContentProps}
-		>
-			{#if typeof tooltipContent === 'string'}
-				{tooltipContent}
-			{:else if tooltipContent}
-				{@render tooltipContent()}
-			{/if}
-		</Tooltip.Content>
-	</Tooltip.Root>
+	<Tooltip.Provider>
+		<Tooltip.Root>
+			<Tooltip.Trigger>
+				{#snippet child({ props })}
+					{@render Button({ props })}
+				{/snippet}
+			</Tooltip.Trigger>
+			<Tooltip.Content
+				side="right"
+				align="center"
+				hidden={sidebar.state !== 'collapsed' || sidebar.isMobile}
+				{...tooltipContentProps}
+			>
+				{#if typeof tooltipContent === 'string'}
+					{tooltipContent}
+				{:else if tooltipContent}
+					{@render tooltipContent()}
+				{/if}
+			</Tooltip.Content>
+		</Tooltip.Root>
+	</Tooltip.Provider>
 {/if}
