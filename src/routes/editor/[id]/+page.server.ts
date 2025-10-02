@@ -71,9 +71,9 @@ export const load: PageServerLoad = async ({ params, cookies, locals, url }) => 
 			};
 		}
 
-		// Load all data in parallel after we have the project
-		const [sandboxStatus, setupStatus, projectFiles] = await Promise.all([
-			// Sandbox status check
+		// Load critical data first, defer file loading for better performance
+		const criticalDataPromise = Promise.all([
+			// Sandbox status check (critical for editor functionality)
 			project.sandboxId && project.status === 'ready'
 				? (async () => {
 						try {
@@ -118,66 +118,98 @@ export const load: PageServerLoad = async ({ params, cookies, locals, url }) => 
 						}
 						return null;
 					})()
-				: Promise.resolve(null),
+				: Promise.resolve(null)
+		]);
 
-			// Setup status fetch (not needed since we handle initializing above)
-			Promise.resolve(null),
+		// Load files in background with optimizations for faster initial load
+		const projectFilesPromise = (async () => {
+			let projectFiles: any[] = [];
+			try {
+				if (project.sandboxProvider === 'daytona' && project.sandboxId) {
+					try {
+						// Use fast mode for initial page load - no content snippets for faster response
+						const filesResult = await listFilesService(
+							{ projectId: project.id, sandboxId: project.sandboxId, path: '' },
+							{ includeSnippets: false, batchSize: 25, fastMode: true }
+						);
+						projectFiles = Array.isArray(filesResult?.files) ? filesResult.files : [];
 
-			// Project files fetch
-			(async () => {
-				let projectFiles: any[] = [];
-				try {
-					if (project.sandboxProvider === 'daytona' && project.sandboxId) {
-						// Instead of calling the DaytonaService directly, use the unified files API
-						// This ensures the same batching/snippet behavior for Daytona as other providers.
-						try {
-							// Request async snippet loading to keep page load fast; the page can await the promises
-							const filesResult = await listFilesService(
-								{ projectId: project.id, sandboxId: project.sandboxId, path: '' },
-								{ includeSnippets: 'sync', batchSize: 50 }
-							);
-							projectFiles = Array.isArray(filesResult?.files) ? filesResult.files : [];
+						logger.info(`📁 Fast loaded ${projectFiles.length} files from Daytona (no content)`);
+					} catch (error) {
+						logger.error(
+							`Failed to load files via listFilesService for Daytona for project ${id}:`,
+							error
+						);
+						projectFiles = [];
+					}
+				} else if (project.sandboxProvider === 'e2b' && project.id) {
+					// For E2B projects, use a timeout to avoid blocking page load
+					const controller = new AbortController();
+					const timeout = setTimeout(() => controller.abort(), 3000); // 3 second timeout
 
-							logger.info(
-								'Project files from Daytona (via service, async snippets):',
-								projectFiles.length
-							);
-						} catch (error) {
-							logger.error(
-								`Failed to load files via listFilesService for Daytona for project ${id}:`,
-								error
-							);
-							projectFiles = [];
-						}
-					} else if (project.sandboxProvider === 'e2b' && project.id) {
-						// For E2B projects, fetch files from R2 via internal API
+					try {
 						const response = await fetch(
 							`${process.env.ORIGIN || 'http://localhost:5173'}/api/projects/${project.id}/files`,
 							{
 								headers: {
 									cookie: `session=${cookies.get('session') || ''}`
-								}
+								},
+								signal: controller.signal
 							}
 						);
+						clearTimeout(timeout);
+
 						if (response.ok) {
 							const files = await response.json();
 							projectFiles = Array.isArray(files) ? files : [];
-							logger.info(`Loaded ${projectFiles.length} files from R2 storage for project ${id}`);
+							logger.info(
+								`📁 Loaded ${projectFiles.length} files from R2 storage for project ${id}`
+							);
 						} else {
 							logger.warn(`Failed to fetch files from R2 API: ${response.status}`);
 							projectFiles = [];
 						}
-					} else {
-						logger.warn(`No sandbox provider configured for project ${id}, no files loaded`);
+					} catch (error) {
+						clearTimeout(timeout);
+						if (error instanceof Error && error.name === 'AbortError') {
+							logger.warn(`File loading timed out for project ${id}, returning empty list`);
+						} else {
+							logger.error(`Failed to fetch files from R2:`, error);
+						}
+						projectFiles = [];
 					}
-				} catch (error) {
-					logger.error(`Failed to load project files for project ${id}:`, error);
-					// Don't fail the entire page load if file loading fails
-					projectFiles = [];
+				} else {
+					logger.warn(`No sandbox provider configured for project ${id}, no files loaded`);
 				}
-				return projectFiles;
-			})()
-		]);
+			} catch (error) {
+				logger.error(`Failed to load project files for project ${id}:`, error);
+				projectFiles = [];
+			}
+			return projectFiles;
+		})();
+
+		// Wait for critical data, start file loading in background
+		const [sandboxStatus] = await criticalDataPromise;
+		const setupStatus = null; // Not needed since we handle initializing above
+
+		// Start file loading but don't block the response
+		let projectFiles: any[] = [];
+		try {
+			// Use a shorter timeout for server-side loading to avoid blocking SSR
+			const filesWithTimeout = await Promise.race([
+				projectFilesPromise,
+				new Promise<any[]>((resolve) => {
+					setTimeout(() => {
+						logger.info(`⏱️ File loading timeout reached for project ${id}, returning empty array`);
+						resolve([]);
+					}, 2000); // 2 second timeout for SSR
+				})
+			]);
+			projectFiles = filesWithTimeout;
+		} catch (error) {
+			logger.error(`File loading failed for project ${id}:`, error);
+			projectFiles = [];
+		}
 
 		return {
 			project: serializableProject,
