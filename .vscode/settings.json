@@ -12,7 +12,7 @@
 		"*.svelte": "svelte"
 	},
 	"[svelte]": {
-		"editor.defaultFormatter": "svelte.svelte-vscode",
+		"editor.defaultFormatter": "esbenp.prettier-vscode",
 		"editor.formatOnSave": true
 	},
 	"[typescript]": {
