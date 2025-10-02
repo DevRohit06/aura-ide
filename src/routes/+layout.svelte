@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { initializeApp } from '$lib/app-init.js';
-	import favicon from '$lib/assets/favicon.svg';
 	import SettingsInitializer from '$lib/components/shared/settings-initializer.svelte';
 	import { Toaster } from '$lib/components/ui/sonner/index.js';
 	import { initializeTheme } from '$lib/config/theme-init.js';
@@ -52,10 +51,6 @@
 		}
 	});
 </script>
-
-<svelte:head>
-	<link rel="icon" href={favicon} />
-</svelte:head>
 
 {#if loading}
 	<div

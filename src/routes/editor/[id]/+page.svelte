@@ -4,16 +4,16 @@
 	import { onMount } from 'svelte';
 	// PaneForge
 	import { Pane } from 'paneforge';
-	// Components
-	import CodemirrorEditor from '$lib/components/code-editor/codemirror-editor.svelte';
+	// Light components that can be imported directly
 	import ActivityBar from '$lib/components/editor/activity-bar.svelte';
 	import BottomStatusBar from '$lib/components/editor/bottom-status-bar.svelte';
+	import EditorSkeleton from '$lib/components/editor/editor-skeleton.svelte';
 	import FileTabs from '$lib/components/editor/file-tabs.svelte';
+	import TerminalSkeleton from '$lib/components/editor/terminal-skeleton.svelte';
 	import TopMenubar from '$lib/components/editor/top-menubar.svelte';
 	import CommandPalette from '$lib/components/shared/command-palette.svelte';
 	import ComprehensiveSettingsDialog from '$lib/components/shared/comprehensive-settings-dialog.svelte';
 	import EnhancedSidebar from '$lib/components/shared/enhanced-sidebar.svelte';
-	import { TerminalManager } from '$lib/components/shared/terminal';
 	import ChatSidebar from '@/components/chat/chat-sidebar.svelte';
 	// UI Components
 	import * as Alert from '$lib/components/ui/alert/index.js';
@@ -30,6 +30,10 @@
 	import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
 	import FolderIcon from '@lucide/svelte/icons/folder';
 	import LoaderIcon from '@lucide/svelte/icons/loader-2';
+
+	// Lazy imports for heavy components
+	let CodemirrorEditor: any = $state(null);
+	let TerminalManager: any = $state(null);
 
 	let { data } = $props();
 	const pageData = data as any;
@@ -166,6 +170,29 @@
 		}
 	});
 
+	// Lazy load heavy components
+	async function loadEditor() {
+		if (!CodemirrorEditor) {
+			try {
+				const module = await import('$lib/components/code-editor/codemirror-editor.svelte');
+				CodemirrorEditor = module.default;
+			} catch (error) {
+				console.error('Failed to load CodeMirror editor:', error);
+			}
+		}
+	}
+
+	async function loadTerminal() {
+		if (!TerminalManager) {
+			try {
+				const module = await import('$lib/components/shared/terminal');
+				TerminalManager = module.TerminalManager;
+			} catch (error) {
+				console.error('Failed to load terminal manager:', error);
+			}
+		}
+	}
+
 	// Poll initialization status if project is initializing
 	async function pollInitStatus() {
 		if (!isProjectInitializing) return;
@@ -194,12 +221,35 @@
 		}
 	}
 
+	// Load components immediately - remove lazy loading for critical components
+	async function loadComponents() {
+		try {
+			// Load editor
+			if (!CodemirrorEditor) {
+				const editorModule = await import('$lib/components/code-editor/codemirror-editor.svelte');
+				CodemirrorEditor = editorModule.default;
+			}
+
+			// Load terminal
+			if (!TerminalManager) {
+				const terminalModule = await import('$lib/components/shared/terminal');
+				TerminalManager = terminalModule.TerminalManager;
+			}
+		} catch (error) {
+			console.error('Failed to load components:', error);
+		}
+	}
+
 	onMount(() => {
 		// If project is initializing, start polling
 		if (isProjectInitializing) {
 			pollInitStatus();
 			return;
 		}
+
+		// Load components immediately
+		loadEditor();
+		loadTerminal();
 
 		// Single initialization block: set project and load files, register listeners, and kick off indexing
 		try {
@@ -503,7 +553,11 @@
 							<!-- Editor Content -->
 							{#if currentFile}
 								<div class="!relative !h-[100%] !overflow-auto">
-									<CodemirrorEditor {project} />
+									{#if CodemirrorEditor}
+										<CodemirrorEditor {project} />
+									{:else}
+										<EditorSkeleton />
+									{/if}
 								</div>
 							{:else}
 								<div class="flex flex-1 items-center justify-center">
@@ -541,7 +595,11 @@
 								sidebarPanelActions.showTerminal();
 							}}
 						>
-							<TerminalManager {project} />
+							{#if TerminalManager}
+								<TerminalManager {project} />
+							{:else}
+								<TerminalSkeleton />
+							{/if}
 						</Resizable.Pane>
 					</Resizable.PaneGroup>
 				</Resizable.Pane>

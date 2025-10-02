@@ -101,11 +101,7 @@
 	<Menubar.Root class="flex items-center">
 		<!-- File Menu -->
 
-		<img
-			class="h-4 px-2"
-			src="https://upload.wikimedia.org/wikipedia/commons/thumb/9/9a/Visual_Studio_Code_1.35_icon.svg/500px-Visual_Studio_Code_1.35_icon.svg.png"
-			alt=""
-		/>
+		<img class="h-5 px-2" src="/aura.png" alt="Aura Ide" />
 		<Menubar.Menu>
 			<Menubar.Trigger class="px-3 py-1 text-xs">File</Menubar.Trigger>
 			<Menubar.Content>
