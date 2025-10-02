@@ -13,7 +13,12 @@ export async function listFiles(
 		sandboxId?: string;
 		path?: string;
 	},
-	options?: { includeSnippets?: 'sync' | 'async' | false; batchSize?: number; maxReadSize?: number }
+	options?: {
+		includeSnippets?: 'sync' | 'async' | false;
+		batchSize?: number;
+		maxReadSize?: number;
+		fastMode?: boolean; // New option for faster initial loading
+	}
 ) {
 	const results: any = {};
 
@@ -29,13 +34,26 @@ export async function listFiles(
 		}
 	}
 
+	// Fast mode optimizations
+	const fastMode = options?.fastMode ?? false;
+	const maxReadSize = options?.maxReadSize || (fastMode ? 512 * 1024 : 1024 * 1024); // Reduce to 512KB in fast mode
+	const batchSize = options?.batchSize || (fastMode ? 5 : 10); // Smaller batches in fast mode
+	const includeSnippets = fastMode ? false : (options?.includeSnippets ?? 'sync'); // Disable snippets in fast mode
+
 	// List files based on provider
 	if (provider === 'daytona' && sandboxId) {
 		// For Daytona sandboxes, list from sandbox only
 		try {
 			const { DaytonaService } = await import('$lib/services/sandbox/daytona.service.js');
 			const daytonaService = DaytonaService.getInstance();
-			const files = await daytonaService.listFiles(sandboxId, path || '/home/daytona');
+
+			// Use timeout for file listing to prevent hanging
+			const listPromise = daytonaService.listFiles(sandboxId, path || '/home/daytona');
+			const timeoutPromise = new Promise<never>((_, reject) => {
+				setTimeout(() => reject(new Error('File listing timeout')), fastMode ? 3000 : 8000);
+			});
+
+			const files = await Promise.race([listPromise, timeoutPromise]);
 			results.files = files;
 
 			// Try to read small text files concurrently to provide content snippets
@@ -90,21 +108,20 @@ export async function listFiles(
 						if (!fp) return false;
 						// prefer numeric size if present
 						const size = Number(f?.size || 0) || 0;
-						if (size && size > MAX_READ_SIZE) return false;
+						if (size && size > maxReadSize) return false;
 						return isLikelyText(fp);
 					})
-					.map((f: any) => computeFullPath(f));
+					.map((f: any) => computeFullPath(f))
+					.slice(0, fastMode ? 10 : 50); // Limit files in fast mode to improve performance
 
 				if (candidatePaths.length > 0) {
-					const batchSize = options?.batchSize || 10;
-					const maxSize = options?.maxReadSize || MAX_READ_SIZE;
-					if (options?.includeSnippets === 'async') {
+					if (includeSnippets === 'async') {
 						// start background fetch and attach promises to files (non-blocking)
 						const snippetsPromise = batchReadFilesFromSandbox(
 							sandboxId,
 							candidatePaths,
 							batchSize,
-							maxSize,
+							maxReadSize,
 							provider
 						);
 						results.files = fileEntries.map((f: any) => {
@@ -120,16 +137,19 @@ export async function listFiles(
 						});
 						// also expose the full promise map for callers who want everything at once
 						results._snippetsPromise = snippetsPromise;
-					} else if (options?.includeSnippets === false) {
-						// do nothing: return raw file entries
-						results.files = fileEntries;
+					} else if (includeSnippets === false) {
+						// Skip content loading for faster performance
+						results.files = fileEntries.map((f: any) => {
+							const fp = computeFullPath(f);
+							return { ...f, fullPath: fp };
+						});
 					} else {
 						// default (sync): read snippets now and attach content directly
 						const snippets = await batchReadFilesFromSandbox(
 							sandboxId,
 							candidatePaths,
 							batchSize,
-							maxSize,
+							maxReadSize,
 							provider
 						);
 						results.files = fileEntries.map((f: any) => {
@@ -147,6 +167,12 @@ export async function listFiles(
 							return { ...f, fullPath: fp };
 						});
 					}
+				} else {
+					// No candidates, just return basic file list
+					results.files = fileEntries.map((f: any) => {
+						const fp = computeFullPath(f);
+						return { ...f, fullPath: fp };
+					});
 				}
 			} catch (err) {
 				console.warn('Failed to read file snippets from Daytona sandbox:', err);
