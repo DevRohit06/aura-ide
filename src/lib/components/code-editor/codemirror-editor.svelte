@@ -2,13 +2,18 @@
 	import { history } from '@codemirror/commands';
 	import { indentOnInput } from '@codemirror/language';
 	import { EditorState, type Extension } from '@codemirror/state';
-	import { oneDark } from '@codemirror/theme-one-dark';
 	import { highlightActiveLine } from '@codemirror/view';
 	import { EditorView } from 'codemirror';
 	import { onDestroy, onMount } from 'svelte';
-	import { barf, dracula, tomorrow } from 'thememirror';
+	// Lazy theme imports
 	import ContextMenu from './context-menu.svelte';
 	import SearchPanel from './search-panel.svelte';
+	import {
+		loadBarfTheme,
+		loadDraculaTheme,
+		loadOneDarkTheme,
+		loadTomorrowTheme
+	} from './theme-loader';
 	// Extracted utilities
 	import {
 		autocompletionCompartment,
@@ -54,18 +59,56 @@
 	let { project = undefined }: Props = $props();
 
 	// State
+	let editorLoading = $state(false);
+	let themesLoaded = $state<Record<string, any>>({});
+
+	// State
 	let editorContainer = $state<HTMLDivElement>();
 	let editorView = $state<EditorView | null>(null);
 	let mounted = $state(false);
 	let currentFileId = $state<string | null>(null);
 	let showSearchPanel = $state(false);
-	let searchPanel: SearchPanel | null = $state(null); // Debug effect for search panel state
+	let searchPanel: SearchPanel | null = $state(null);
 	$effect(() => {
 		console.log('Search panel state changed:', showSearchPanel);
 	});
 
+	// Lazy load theme
+	async function loadTheme(themeName: string) {
+		if (themesLoaded[themeName]) {
+			return themesLoaded[themeName];
+		}
+
+		try {
+			let theme;
+			switch (themeName) {
+				case 'onedark':
+					theme = await loadOneDarkTheme();
+					break;
+				case 'barf':
+					theme = await loadBarfTheme();
+					break;
+				case 'dracula':
+					theme = await loadDraculaTheme();
+					break;
+				case 'tomorrow':
+					theme = await loadTomorrowTheme();
+					break;
+				default:
+					theme = await loadDraculaTheme(); // fallback
+			}
+
+			themesLoaded[themeName] = theme;
+			return theme;
+		} catch (error) {
+			console.error(`Failed to load theme ${themeName}:`, error);
+			// Return a fallback
+			return null;
+		}
+	}
+
 	// Get extensions
-	function getExtensions(filename?: string): Extension[] {
+	async function getExtensions(filename?: string): Promise<Extension[]> {
 		const settings = $comprehensiveSettingsStore;
 		const editorSettings = settings.editor;
 
@@ -115,21 +158,27 @@
 			(settings.appearance.theme === 'system' && mode.current === 'dark');
 		const themeExts = [createTheme(isDark, settings)];
 
-		// Apply color scheme based on settings
+		// Apply color scheme based on settings with lazy loading
 		if (isDark) {
-			if (settings.appearance.colorScheme === 'onedark') {
-				themeExts.push(oneDark);
-			} else if (settings.appearance.colorScheme === 'barf') {
-				themeExts.push(barf);
-			} else if (settings.appearance.colorScheme === 'dracula') {
-				themeExts.push(dracula);
-			} else if (settings.appearance.colorScheme === 'tomorrow') {
-				themeExts.push(tomorrow);
+			const colorScheme = settings.appearance.colorScheme;
+			if (colorScheme && colorScheme !== 'default') {
+				const theme = await loadTheme(colorScheme);
+				if (theme) {
+					themeExts.push(theme);
+				}
 			} else {
-				themeExts.push(dracula);
+				// Default dark theme
+				const theme = await loadTheme('dracula');
+				if (theme) {
+					themeExts.push(theme);
+				}
 			}
 		} else {
-			themeExts.push(tomorrow);
+			// Light theme
+			const theme = await loadTheme('tomorrow');
+			if (theme) {
+				themeExts.push(theme);
+			}
 		}
 
 		extensions.push(themeCompartment.of(themeExts));
@@ -240,15 +289,16 @@
 	}
 
 	// Create editor state
-	function createEditorState(content: string, filename?: string): EditorState {
+	async function createEditorState(content: string, filename?: string): Promise<EditorState> {
+		const extensions = await getExtensions(filename);
 		return EditorState.create({
 			doc: content,
-			extensions: getExtensions(filename)
+			extensions
 		});
 	}
 
 	// Initialize editor
-	function initializeEditor() {
+	async function initializeEditor() {
 		if (!editorContainer || !mounted) return;
 
 		const activeFileId = $tabsStore.activeFileId;
@@ -268,7 +318,7 @@
 		const filename = file.name;
 
 		// Create new editor
-		const state = createEditorState(content, filename);
+		const state = await createEditorState(content, filename);
 		editorView = new EditorView({
 			state,
 			parent: editorContainer
@@ -386,66 +436,75 @@
 		const themeMode = $currentTheme;
 
 		if (mounted && editorView && currentFileId) {
-			const filename = $filesStore.get(currentFileId)?.name;
-			const editorSettings = settings.editor;
+			// Use async function to handle theme loading
+			(async () => {
+				const filename = $filesStore.get(currentFileId)?.name;
+				const editorSettings = settings.editor;
 
-			// Get language extension
-			let languageExt = null;
-			if (filename) {
-				const language = getLanguageFromFilename(filename);
-				const langExt = languageExtensions[language];
-				if (langExt) {
-					languageExt = langExt();
+				// Get language extension
+				let languageExt = null;
+				if (filename) {
+					const language = getLanguageFromFilename(filename);
+					const langExt = languageExtensions[language];
+					if (langExt) {
+						languageExt = langExt();
+					}
 				}
-			}
 
-			// Get theme extensions
-			const isDark =
-				settings.appearance.theme === 'dark' ||
-				(settings.appearance.theme === 'system' && mode.current === 'dark');
-			const themeExts = [createTheme(isDark, settings)];
+				// Get theme extensions with lazy loading
+				const isDark =
+					settings.appearance.theme === 'dark' ||
+					(settings.appearance.theme === 'system' && mode.current === 'dark');
+				const themeExts = [createTheme(isDark, settings)];
 
-			// Apply color scheme based on settings
-			if (isDark) {
-				if (settings.appearance.colorScheme === 'onedark') {
-					themeExts.push(oneDark);
-				} else if (settings.appearance.colorScheme === 'barf') {
-					themeExts.push(barf);
-				} else if (settings.appearance.colorScheme === 'tomorrow') {
-					themeExts.push(tomorrow);
-				} else {
-					themeExts.push(dracula);
-				}
-			} else {
-				themeExts.push(tomorrow);
-			}
-
-			// Update all compartments
-			const effects = [
-				themeCompartment.reconfigure(themeExts),
-				languageCompartment.reconfigure(languageExt || []),
-				lineNumbersCompartment.reconfigure(getLineNumbersExtension(editorSettings)),
-				wordWrapCompartment.reconfigure(getWordWrapExtension(editorSettings)),
-				foldingCompartment.reconfigure(getFoldingExtension(editorSettings)),
-				bracketMatchingCompartment.reconfigure(getBracketMatchingExtension(settings)),
-				multiCursorCompartment.reconfigure(getMultiCursorExtension(settings)),
-				indentationCompartment.reconfigure(getIndentationExtension(editorSettings)),
-				autocompletionCompartment.reconfigure(getAutocompletionExtension(editorSettings)),
-				searchCompartment.reconfigure(getSearchExtension(editorSettings)),
-				keymapCompartment.reconfigure(
-					getKeymapExtension(settings, {
-						handleSave,
-						toggleSearchPanel: () => {
-							showSearchPanel = !showSearchPanel;
+				// Apply color scheme based on settings with lazy loading
+				if (isDark) {
+					const colorScheme = settings.appearance.colorScheme;
+					if (colorScheme && colorScheme !== 'default') {
+						const theme = await loadTheme(colorScheme);
+						if (theme) {
+							themeExts.push(theme);
 						}
-					})
-				),
-				scrollCompartment.reconfigure(getScrollExtension(editorSettings))
-			];
+					} else {
+						const theme = await loadTheme('dracula');
+						if (theme) {
+							themeExts.push(theme);
+						}
+					}
+				} else {
+					const theme = await loadTheme('tomorrow');
+					if (theme) {
+						themeExts.push(theme);
+					}
+				}
 
-			editorView.dispatch({
-				effects: effects
-			});
+				// Update all compartments
+				const effects = [
+					themeCompartment.reconfigure(themeExts),
+					languageCompartment.reconfigure(languageExt || []),
+					lineNumbersCompartment.reconfigure(getLineNumbersExtension(editorSettings)),
+					wordWrapCompartment.reconfigure(getWordWrapExtension(editorSettings)),
+					foldingCompartment.reconfigure(getFoldingExtension(editorSettings)),
+					bracketMatchingCompartment.reconfigure(getBracketMatchingExtension(settings)),
+					multiCursorCompartment.reconfigure(getMultiCursorExtension(settings)),
+					indentationCompartment.reconfigure(getIndentationExtension(editorSettings)),
+					autocompletionCompartment.reconfigure(getAutocompletionExtension(editorSettings)),
+					searchCompartment.reconfigure(getSearchExtension(editorSettings)),
+					keymapCompartment.reconfigure(
+						getKeymapExtension(settings, {
+							handleSave,
+							toggleSearchPanel: () => {
+								showSearchPanel = !showSearchPanel;
+							}
+						})
+					),
+					scrollCompartment.reconfigure(getScrollExtension(editorSettings))
+				];
+
+				editorView.dispatch({
+					effects: effects
+				});
+			})();
 		}
 	});
 </script>
