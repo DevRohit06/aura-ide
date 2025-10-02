@@ -14,7 +14,8 @@ export async function handle({ event, resolve }) {
 		event.locals.user = {
 			id: session.user.id,
 			email: session.user.email,
-			username: session.user.name || session.user.email
+			username: session.user.name || session.user.email,
+			image: session.user.image || null
 		};
 	}
 

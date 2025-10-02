@@ -366,7 +366,7 @@
 									<Avatar.Root
 										class="h-8 w-8 cursor-pointer transition-all hover:ring-2 hover:ring-primary/20"
 									>
-										<Avatar.Image src={$user?.profile?.avatar} alt={$user?.name || 'User'} />
+										<Avatar.Image src={$user?.image} alt={$user?.name || 'User'} />
 										<Avatar.Fallback class="bg-primary/10 text-xs font-medium text-primary">
 											{($user?.name || $user?.username || 'U').charAt(0).toUpperCase()}
 										</Avatar.Fallback>

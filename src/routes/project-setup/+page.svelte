@@ -25,8 +25,7 @@
 	import {
 		getStepValidation,
 		validateProjectNameFormat,
-		validateProjectSetup,
-		type ProjectSetupData
+		validateProjectSetup
 	} from '$lib/validations/project.validation';
 	import FrameworkIcon from '@/components/ui/framework-icon/framework-icon.svelte';
 	import { slide } from 'svelte/transition';
@@ -153,10 +152,7 @@
 						prettier,
 						tailwindcss,
 						packageManager,
-						additionalDependencies: additionalDependencies
-							.split(',')
-							.map((dep) => dep.trim())
-							.filter((dep) => dep.length > 0)
+						additionalDependencies
 					}
 				};
 			default:
@@ -317,7 +313,7 @@
 		if (formState === FORM_STATES.SUBMITTING) return;
 
 		// Final validation
-		const projectData: ProjectSetupData = {
+		const projectData = {
 			name: projectName.trim(),
 			description: projectDescription.trim() || undefined,
 			framework,
@@ -328,19 +324,19 @@
 				prettier,
 				tailwindcss,
 				packageManager: packageManager as 'npm' | 'yarn' | 'pnpm' | 'bun',
-				additionalDependencies: additionalDependencies
-					.split(',')
-					.map((dep) => dep.trim())
-					.filter((dep) => dep.length > 0)
+				additionalDependencies
 			}
 		};
-
 		const validation = validateProjectSetup(projectData);
 		if (!validation.success) {
 			formState = FORM_STATES.ERROR;
+			console.error('Project setup validation failed:', validation.errors);
 			showErrorToast('Please fix all validation errors before creating the project.');
 			return;
 		}
+
+		// Use the validated and transformed data for the API call
+		const validatedProjectData = validation.data;
 
 		if (!$user) {
 			showErrorToast('You must be logged in to create a project');
@@ -366,7 +362,7 @@
 						headers: {
 							'Content-Type': 'application/json'
 						},
-						body: JSON.stringify(projectData)
+						body: JSON.stringify(validatedProjectData)
 					});
 
 					if (!response.ok) {
@@ -942,6 +938,22 @@
 					{:else if currentStep === 4}
 						<!-- Step 4: Configuration -->
 						<div class="space-y-6">
+							{#if currentStepErrors().length > 0}
+								<div
+									class="rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-950/50"
+								>
+									<div class="flex items-center gap-2">
+										<div class="h-5 w-5 text-red-500">⚠️</div>
+										<h4 class="font-medium text-red-800 dark:text-red-200">Validation Errors</h4>
+									</div>
+									<ul class="mt-2 list-inside list-disc text-sm text-red-700 dark:text-red-300">
+										{#each currentStepErrors() as error}
+											<li>{error}</li>
+										{/each}
+									</ul>
+								</div>
+							{/if}
+
 							<ProjectConfiguration
 								{packageManager}
 								{typescript}

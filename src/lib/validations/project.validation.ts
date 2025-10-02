@@ -90,12 +90,12 @@ const additionalDependenciesSchema = z
 
 // Configuration schema
 const configurationSchema = z.object({
-	typescript: z.boolean().default(true),
-	eslint: z.boolean().default(true),
-	prettier: z.boolean().default(true),
-	tailwindcss: z.boolean().default(true),
-	packageManager: packageManagerSchema.default('npm'),
-	additionalDependencies: additionalDependenciesSchema.default([])
+	typescript: z.boolean().default(true).optional(),
+	eslint: z.boolean().default(true).optional(),
+	prettier: z.boolean().default(true).optional(),
+	tailwindcss: z.boolean().default(true).optional(),
+	packageManager: packageManagerSchema.default('npm').optional(),
+	additionalDependencies: additionalDependenciesSchema.default([]).optional()
 });
 
 // Main project setup schema

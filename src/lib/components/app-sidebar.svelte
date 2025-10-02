@@ -267,7 +267,7 @@
 									class="flex w-full items-center gap-2.5 rounded-lg p-2 transition-colors hover:bg-accent/50"
 								>
 									<Avatar.Root class="h-7 w-7">
-										<Avatar.Image src={$user?.profile?.avatar} alt={$user?.name || 'User'} />
+										<Avatar.Image src={$user?.image} alt={$user?.name || 'User'} />
 										<Avatar.Fallback class="bg-primary/10 text-xs font-medium text-primary">
 											{($user?.name || $user?.username || 'U').charAt(0).toUpperCase()}
 										</Avatar.Fallback>
