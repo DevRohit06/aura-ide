@@ -65,58 +65,69 @@
 	let currentLine = $state('');
 	let cursorPosition = $state(0);
 
+	// Terminal themes with comprehensive color schemes
+	const terminalThemes = {
+		dark: {
+			// Modern dark theme with high contrast and readability
+			background: '#0d1117',
+			foreground: '#f0f6fc',
+			cursor: '#58a6ff',
+			cursorAccent: '#0d1117',
+			selection: 'rgba(88, 166, 255, 0.3)',
+			selectionForeground: '#f0f6fc',
+			// Standard colors
+			black: '#484f58',
+			red: '#ff7b72',
+			green: '#3fb950',
+			yellow: '#d29922',
+			blue: '#58a6ff',
+			magenta: '#bc8cff',
+			cyan: '#39c5cf',
+			white: '#b1bac4',
+			// Bright colors
+			brightBlack: '#6e7681',
+			brightRed: '#ffa198',
+			brightGreen: '#56d364',
+			brightYellow: '#e3b341',
+			brightBlue: '#79c0ff',
+			brightMagenta: '#d2a8ff',
+			brightCyan: '#56d4dd',
+			brightWhite: '#f0f6fc'
+		},
+		light: {
+			// Clean light theme with proper contrast
+			background: '#ffffff',
+			foreground: '#24292f',
+			cursor: '#0969da',
+			cursorAccent: '#ffffff',
+			selection: 'rgba(9, 105, 218, 0.2)',
+			selectionForeground: '#24292f',
+			// Standard colors
+			black: '#24292f',
+			red: '#cf222e',
+			green: '#116329',
+			yellow: '#4d2d00',
+			blue: '#0969da',
+			magenta: '#8250df',
+			cyan: '#1b7c83',
+			white: '#6e7781',
+			// Bright colors
+			brightBlack: '#656d76',
+			brightRed: '#a40e26',
+			brightGreen: '#1a7f37',
+			brightYellow: '#633c01',
+			brightBlue: '#218bff',
+			brightMagenta: '#a475f9',
+			brightCyan: '#3192aa',
+			brightWhite: '#8c959f'
+		}
+	};
+
 	// Terminal options with enhanced theme support
 	let options: ITerminalOptions & ITerminalInitOnlyOptions = $derived({
 		fontSize,
 		fontFamily,
-		theme:
-			mode.current === 'dark'
-				? {
-						background: '#0a0a0a',
-						foreground: '#fafafa',
-						cursor: '#fafafa',
-						cursorAccent: '#0a0a0a',
-						selection: '#334155',
-						black: '#262626',
-						red: '#ef4444',
-						green: '#22c55e',
-						yellow: '#eab308',
-						blue: '#3b82f6',
-						magenta: '#a855f7',
-						cyan: '#06b6d4',
-						white: '#f5f5f5',
-						brightBlack: '#525252',
-						brightRed: '#f87171',
-						brightGreen: '#4ade80',
-						brightYellow: '#facc15',
-						brightBlue: '#60a5fa',
-						brightMagenta: '#c084fc',
-						brightCyan: '#22d3ee',
-						brightWhite: '#ffffff'
-					}
-				: {
-						background: '#ffffff',
-						foreground: '#0a0a0a',
-						cursor: '#0a0a0a',
-						cursorAccent: '#ffffff',
-						selection: '#e2e8f0',
-						black: '#0a0a0a',
-						red: '#dc2626',
-						green: '#16a34a',
-						yellow: '#ca8a04',
-						blue: '#2563eb',
-						magenta: '#9333ea',
-						cyan: '#0891b2',
-						white: '#525252',
-						brightBlack: '#262626',
-						brightRed: '#ef4444',
-						brightGreen: '#22c55e',
-						brightYellow: '#eab308',
-						brightBlue: '#3b82f6',
-						brightMagenta: '#a855f7',
-						brightCyan: '#06b6d4',
-						brightWhite: '#f5f5f5'
-					},
+		theme: mode.current === 'dark' ? terminalThemes.dark : terminalThemes.light,
 		cursorBlink: true,
 		cursorStyle: 'block',
 		scrollback: 1000,
@@ -131,7 +142,13 @@
 		allowProposedApi: true
 	});
 
-	// Lifecycle management
+	// Reactive theme updates
+	$effect(() => {
+		if (terminal) {
+			const currentTheme = mode.current === 'dark' ? terminalThemes.dark : terminalThemes.light;
+			terminal.options.theme = currentTheme;
+		}
+	});
 	async function onLoad() {
 		try {
 			isLoading = true;

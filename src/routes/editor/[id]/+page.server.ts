@@ -1,5 +1,4 @@
 import { DatabaseService } from '$lib/services/database.service.js';
-import { listFiles as listFilesService } from '$lib/services/files-list.service';
 import { logger } from '$lib/utils/logger.js';
 import { error, redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
@@ -62,6 +61,7 @@ export const load: PageServerLoad = async ({ params, cookies, locals, url }) => 
 			return {
 				project: serializableProject,
 				setupStatus: null,
+				sandboxStatus: null,
 				layout,
 				verticalLayout,
 				user: locals.session!.user,
@@ -121,103 +121,20 @@ export const load: PageServerLoad = async ({ params, cookies, locals, url }) => 
 				: Promise.resolve(null)
 		]);
 
-		// Load files in background with optimizations for faster initial load
-		const projectFilesPromise = (async () => {
-			let projectFiles: any[] = [];
-			try {
-				if (project.sandboxProvider === 'daytona' && project.sandboxId) {
-					try {
-						// Use fast mode for initial page load - no content snippets for faster response
-						const filesResult = await listFilesService(
-							{ projectId: project.id, sandboxId: project.sandboxId, path: '' },
-							{ includeSnippets: false, batchSize: 25, fastMode: true }
-						);
-						projectFiles = Array.isArray(filesResult?.files) ? filesResult.files : [];
-
-						logger.info(`📁 Fast loaded ${projectFiles.length} files from Daytona (no content)`);
-					} catch (error) {
-						logger.error(
-							`Failed to load files via listFilesService for Daytona for project ${id}:`,
-							error
-						);
-						projectFiles = [];
-					}
-				} else if (project.sandboxProvider === 'e2b' && project.id) {
-					// For E2B projects, use a timeout to avoid blocking page load
-					const controller = new AbortController();
-					const timeout = setTimeout(() => controller.abort(), 3000); // 3 second timeout
-
-					try {
-						const response = await fetch(
-							`${process.env.ORIGIN || 'http://localhost:5173'}/api/projects/${project.id}/files`,
-							{
-								headers: {
-									cookie: `session=${cookies.get('session') || ''}`
-								},
-								signal: controller.signal
-							}
-						);
-						clearTimeout(timeout);
-
-						if (response.ok) {
-							const files = await response.json();
-							projectFiles = Array.isArray(files) ? files : [];
-							logger.info(
-								`📁 Loaded ${projectFiles.length} files from R2 storage for project ${id}`
-							);
-						} else {
-							logger.warn(`Failed to fetch files from R2 API: ${response.status}`);
-							projectFiles = [];
-						}
-					} catch (error) {
-						clearTimeout(timeout);
-						if (error instanceof Error && error.name === 'AbortError') {
-							logger.warn(`File loading timed out for project ${id}, returning empty list`);
-						} else {
-							logger.error(`Failed to fetch files from R2:`, error);
-						}
-						projectFiles = [];
-					}
-				} else {
-					logger.warn(`No sandbox provider configured for project ${id}, no files loaded`);
-				}
-			} catch (error) {
-				logger.error(`Failed to load project files for project ${id}:`, error);
-				projectFiles = [];
-			}
-			return projectFiles;
-		})();
-
-		// Wait for critical data, start file loading in background
+		// Wait for critical data only - files will be loaded client-side
 		const [sandboxStatus] = await criticalDataPromise;
 		const setupStatus = null; // Not needed since we handle initializing above
 
-		// Start file loading but don't block the response
-		let projectFiles: any[] = [];
-		try {
-			// Use a shorter timeout for server-side loading to avoid blocking SSR
-			const filesWithTimeout = await Promise.race([
-				projectFilesPromise,
-				new Promise<any[]>((resolve) => {
-					setTimeout(() => {
-						logger.info(`⏱️ File loading timeout reached for project ${id}, returning empty array`);
-						resolve([]);
-					}, 2000); // 2 second timeout for SSR
-				})
-			]);
-			projectFiles = filesWithTimeout;
-		} catch (error) {
-			logger.error(`File loading failed for project ${id}:`, error);
-			projectFiles = [];
-		}
+		logger.info(`✅ Project ${id} data loaded, files will be loaded client-side`);
 
 		return {
 			project: serializableProject,
 			setupStatus,
+			sandboxStatus,
 			layout,
 			verticalLayout,
 			user: locals.session!.user,
-			projectFiles,
+			projectFiles: [], // Files will be loaded client-side
 			isInitializing: false
 		};
 	} catch (err) {

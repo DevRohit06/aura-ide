@@ -3,6 +3,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import * as Tooltip from '$lib/components/ui/tooltip';
+	import { mode } from 'mode-watcher';
 	import { onDestroy, onMount, tick } from 'svelte';
 	// Icons
 	import MaximizeIcon from '@lucide/svelte/icons/maximize';
@@ -53,13 +54,81 @@
 	// Store terminal elements by session ID
 	let terminalElements: Record<string, HTMLElement> = $state({});
 
+	// Reactive theme updates for all terminals
+	$effect(() => {
+		const currentTheme = mode.current === 'dark' ? terminalThemes.dark : terminalThemes.light;
+		sessions.forEach((session) => {
+			if (session.terminal) {
+				session.terminal.options.theme = currentTheme;
+			}
+		});
+	});
+
 	// Initialize with project's sandbox session if available
 	onMount(() => {
-		if (project?.sandboxSessionId) {
+		if (project?.sandboxId) {
 			// Create initial terminal connected to project's sandbox session
-			createNewSession(true);
+			createNewSession();
 		}
 	});
+
+	// Terminal themes with comprehensive color schemes
+	const terminalThemes = {
+		dark: {
+			// Modern dark theme with high contrast and readability
+			background: '#0d1117',
+			foreground: '#f0f6fc',
+			cursor: '#58a6ff',
+			cursorAccent: '#0d1117',
+			selection: 'rgba(88, 166, 255, 0.3)',
+			selectionForeground: '#f0f6fc',
+			// Standard colors
+			black: '#484f58',
+			red: '#ff7b72',
+			green: '#3fb950',
+			yellow: '#d29922',
+			blue: '#58a6ff',
+			magenta: '#bc8cff',
+			cyan: '#39c5cf',
+			white: '#b1bac4',
+			// Bright colors
+			brightBlack: '#6e7681',
+			brightRed: '#ffa198',
+			brightGreen: '#56d364',
+			brightYellow: '#e3b341',
+			brightBlue: '#79c0ff',
+			brightMagenta: '#d2a8ff',
+			brightCyan: '#56d4dd',
+			brightWhite: '#f0f6fc'
+		},
+		light: {
+			// Clean light theme with proper contrast
+			background: '#ffffff',
+			foreground: '#24292f',
+			cursor: '#0969da',
+			cursorAccent: '#ffffff',
+			selection: 'rgba(9, 105, 218, 0.2)',
+			selectionForeground: '#24292f',
+			// Standard colors
+			black: '#24292f',
+			red: '#cf222e',
+			green: '#116329',
+			yellow: '#4d2d00',
+			blue: '#0969da',
+			magenta: '#8250df',
+			cyan: '#1b7c83',
+			white: '#6e7781',
+			// Bright colors
+			brightBlack: '#656d76',
+			brightRed: '#a40e26',
+			brightGreen: '#1a7f37',
+			brightYellow: '#633c01',
+			brightBlue: '#218bff',
+			brightMagenta: '#a475f9',
+			brightCyan: '#3192aa',
+			brightWhite: '#8c959f'
+		}
+	};
 
 	// Initialize xterm for a specific session
 	async function initializeTerminal(sessionId: string) {
@@ -78,16 +147,22 @@
 			await import('@xterm/xterm/css/xterm.css');
 			const { Terminal } = await import('@xterm/xterm');
 
-			// Create terminal instance
+			// Create terminal instance with theme support
+			const currentTheme = mode.current === 'dark' ? terminalThemes.dark : terminalThemes.light;
 			const terminal = new Terminal({
-				theme: {
-					background: '#0a0a0a',
-					foreground: '#fafafa',
-					cursor: '#fafafa'
-				},
+				theme: currentTheme,
 				fontSize: 14,
-				fontFamily: 'monospace',
-				cursorBlink: true
+				fontFamily: '"Fira Code", "JetBrains Mono", "Cascadia Code", Consolas, monospace',
+				cursorBlink: true,
+				cursorStyle: 'block',
+				scrollback: 1000,
+				tabStopWidth: 4,
+				allowTransparency: false,
+				convertEol: true,
+				rightClickSelectsWord: true,
+				macOptionIsMeta: true,
+				scrollOnUserInput: true,
+				altClickMovesCursor: true
 			});
 
 			// Open terminal in DOM

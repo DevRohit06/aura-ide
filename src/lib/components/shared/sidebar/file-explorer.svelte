@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import { gitChanges } from '$lib/data/dummy-files.js';
@@ -10,6 +11,8 @@
 	import CollapseIcon from '@lucide/svelte/icons/fold-vertical';
 	import FolderPlusIcon from '@lucide/svelte/icons/folder-plus';
 	import RefreshIcon from '@lucide/svelte/icons/refresh-ccw';
+	import { onMount } from 'svelte';
+	import FileExplorerSkeleton from './file-explorer-skeleton.svelte';
 	import FileTreeItem from './file-tree-item.svelte';
 
 	interface Props {
@@ -24,6 +27,56 @@
 	let selectedItem: string | null = $state(null);
 	let draggedItem: FileSystemItem | null = $state(null);
 	let clipboard: { item: FileSystemItem; operation: 'cut' | 'copy' } | null = $state(null);
+	let isLoadingFiles = $state(false);
+	let filesLoaded = $state(false);
+	let loadError: string | null = $state(null);
+
+	// Load project files from API
+	async function loadProjectFiles() {
+		if (!project?.id || !browser) return;
+
+		isLoadingFiles = true;
+		loadError = null;
+
+		try {
+			console.log(`📁 Loading files for project ${project.id} (${project.sandboxProvider})`);
+
+			const response = await fetch(
+				`/api/projects/${project.id}/files/list?fastMode=true&includeContent=false`
+			);
+
+			if (!response.ok) {
+				throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+			}
+
+			const result = await response.json();
+
+			if (result.success && result.data?.files) {
+				// Clear existing files first
+				filesStore.set(new Map());
+
+				// Add files to store
+				for (const file of result.data.files) {
+					fileActions.addFile(file);
+				}
+
+				filesLoaded = true;
+				console.log(`✅ Loaded ${result.data.files.length} files from ${project.sandboxProvider}`);
+			} else {
+				throw new Error(result.message || 'Failed to load files');
+			}
+		} catch (error) {
+			console.error('Failed to load project files:', error);
+			loadError = error instanceof Error ? error.message : 'Unknown error';
+		} finally {
+			isLoadingFiles = false;
+		}
+	}
+
+	// Retry loading files
+	async function retryLoadFiles() {
+		await loadProjectFiles();
+	}
 
 	// Build file tree
 	function buildFileTree(files: Map<string, FileSystemItem>): FileSystemItem[] {
@@ -320,9 +373,30 @@
 		}
 	}
 
+	// Check if we should show files or skeleton
+	let shouldShowSkeleton = $derived(
+		project && !filesLoaded && ($filesStore.size === 0 || isLoadingFiles)
+	);
+
 	// Reactive computed values
 	const fileTree = $derived(buildFileTree($filesStore));
 	const filteredTree = $derived(filterFiles(Array.from($filesStore.values()), searchQuery));
+
+	// Load files on mount for real projects
+	onMount(() => {
+		if (project && project.id) {
+			// Check if files are already loaded
+			if ($filesStore.size === 0) {
+				loadProjectFiles();
+			} else {
+				filesLoaded = true;
+			}
+		} else {
+			// Load dummy data for development
+			initializeDummyData();
+			filesLoaded = true;
+		}
+	});
 </script>
 
 <div class="flex h-full flex-col">
@@ -399,7 +473,18 @@
 
 	<!-- File Tree -->
 	<div class="flex-1 overflow-y-auto">
-		{#if searchQuery.trim()}
+		{#if shouldShowSkeleton}
+			<FileExplorerSkeleton />
+		{:else if loadError}
+			<div class="p-4 text-center">
+				<div class="mb-2 text-sm text-destructive">Failed to load files</div>
+				<div class="mb-3 text-xs text-muted-foreground">{loadError}</div>
+				<Button size="sm" variant="outline" onclick={retryLoadFiles} disabled={isLoadingFiles}>
+					<RefreshIcon size={12} class={isLoadingFiles ? 'mr-1 animate-spin' : 'mr-1'} />
+					Retry
+				</Button>
+			</div>
+		{:else if searchQuery.trim()}
 			{#each filteredTree as item (item.path)}
 				{@render renderFileTreeItem(item, 0)}
 			{/each}

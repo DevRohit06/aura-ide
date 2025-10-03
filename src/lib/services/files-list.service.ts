@@ -49,11 +49,8 @@ export async function listFiles(
 
 			// Use timeout for file listing to prevent hanging
 			const listPromise = daytonaService.listFiles(sandboxId, path || '/home/daytona');
-			const timeoutPromise = new Promise<never>((_, reject) => {
-				setTimeout(() => reject(new Error('File listing timeout')), fastMode ? 3000 : 8000);
-			});
 
-			const files = await Promise.race([listPromise, timeoutPromise]);
+			const files = await Promise.race([listPromise]);
 			results.files = files;
 
 			// Try to read small text files concurrently to provide content snippets
