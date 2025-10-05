@@ -3,8 +3,8 @@
  * REST API endpoints for executing code and commands in sandbox
  */
 
-import { SandboxManager } from '$lib/services/sandbox/sandbox-manager';
-import { SandboxSessionService } from '$lib/services/session/sandbox-session.service';
+import { DatabaseService } from '$lib/services/database.service';
+import { DaytonaService } from '$lib/services/sandbox/daytona.service';
 import type { RequestHandler } from '@sveltejs/kit';
 import { json } from '@sveltejs/kit';
 
@@ -42,31 +42,18 @@ export const POST: RequestHandler = async ({ params, request, locals, url }) => 
 
 		const executionType = url.searchParams.get('type') || 'command';
 
-		const sessionService = SandboxSessionService.getInstance();
-		const sandboxManager = SandboxManager.getInstance();
-
-		// Get session by sandbox ID
-		const session = await sessionService.getSession(sandboxId);
-		if (!session || session.userId !== user.id) {
-			return json({ error: 'Sandbox not found' }, { status: 404 });
+		// Find project by sandbox ID to verify ownership
+		const project = await DatabaseService.findProjectBySandboxId(sandboxId);
+		if (!project || project.ownerId !== user.id) {
+			return json({ error: 'Sandbox not found or access denied' }, { status: 404 });
 		}
 
-		// Check if sandbox is running
-		if (session.status !== 'running' && session.status !== 'active') {
-			return json(
-				{
-					error: 'Sandbox is not running',
-					status: session.status
-				},
-				{ status: 400 }
-			);
+		// Check if this is a Daytona sandbox
+		if (project.sandboxProvider !== 'daytona') {
+			return json({ error: 'Only Daytona sandboxes are currently supported' }, { status: 400 });
 		}
 
-		// Get provider for this sandbox
-		const provider = await sandboxManager['getProviderForSandbox'](
-			session.sandboxId,
-			session.provider
-		);
+		const daytonaService = DaytonaService.getInstance();
 
 		let result;
 
@@ -78,12 +65,76 @@ export const POST: RequestHandler = async ({ params, request, locals, url }) => 
 				return json({ error: 'Command is required' }, { status: 400 });
 			}
 
-			// Execute command
-			result = await provider.executeCommand(session.sandboxId, command, {
-				workingDir,
-				timeout,
-				environment
-			});
+			// Execute command using Daytona service
+			const startTime = Date.now();
+			try {
+				console.log(`🚀 [Execute] Running command: "${command}" in sandbox ${sandboxId}`);
+				console.log(`📁 [Execute] Working directory: ${workingDir || 'default'}`);
+
+				// For debugging, let's also check the current directory and list files
+				if (workingDir) {
+					try {
+						const pwdResult = await daytonaService.executeCommand(sandboxId, 'pwd');
+						console.log(`📍 [Execute] Current directory:`, pwdResult.output);
+
+						const lsResult = await daytonaService.executeCommand(sandboxId, `ls -la ${workingDir}`);
+						console.log(`📁 [Execute] Directory contents:`, lsResult.output);
+					} catch (debugError) {
+						console.log(`⚠️ [Execute] Debug commands failed:`, debugError);
+					}
+				}
+
+				// Prepare the full command with working directory if specified
+				console.log(`🔧 [Execute] Executing command: "${command}"`);
+				console.log(`� [Execute] Working directory: ${workingDir || 'default'}`);
+
+				const execResult = await daytonaService.executeCommand(
+					sandboxId,
+					command,
+					workingDir,
+					environment,
+					timeout
+				);
+				const duration = Date.now() - startTime;
+
+				console.log(`📊 [Execute] Raw result:`, {
+					success: execResult.success,
+					output: execResult.output?.substring(0, 500), // First 500 chars
+					outputLength: execResult.output?.length || 0,
+					exitCode: execResult.exitCode,
+					executionTime: execResult.executionTime
+				});
+
+				// Determine if command was actually successful
+				const isSuccess =
+					execResult.success && (execResult.exitCode === 0 || execResult.exitCode === undefined);
+
+				result = {
+					success: isSuccess,
+					output: execResult.output || '',
+					error: isSuccess ? '' : execResult.output || 'Command execution failed',
+					exitCode: execResult.exitCode || (isSuccess ? 0 : 1),
+					duration
+				};
+
+				console.log(`✅ [Execute] Processed result:`, {
+					success: result.success,
+					outputLength: result.output.length,
+					errorLength: result.error.length,
+					exitCode: result.exitCode
+				});
+			} catch (execError) {
+				const duration = Date.now() - startTime;
+				console.error(`❌ [Execute] Command execution threw error:`, execError);
+
+				result = {
+					success: false,
+					output: '',
+					error: execError instanceof Error ? execError.message : String(execError),
+					exitCode: -1,
+					duration
+				};
+			}
 		} else if (executionType === 'code') {
 			const body = (await request.json()) as ExecuteCodeRequest;
 			const { code, language, filename, workingDir, timeout = 30000, inputData } = body;
@@ -94,29 +145,38 @@ export const POST: RequestHandler = async ({ params, request, locals, url }) => 
 
 			// For code execution, we need to create a temporary file and run it
 			const tempFileName = filename || `temp_${Date.now()}.${getFileExtension(language)}`;
-			const tempFilePath = workingDir ? `${workingDir}/${tempFileName}` : `/${tempFileName}`;
+			const tempFilePath = workingDir
+				? `${workingDir}/${tempFileName}`
+				: `/workspace/${tempFileName}`;
 
 			try {
-				// Write code to temporary file
-				await provider.writeFile(session.sandboxId, tempFilePath, code, {
-					encoding: 'utf-8',
-					createDirs: true
-				});
+				// Write code to temporary file using echo command
+				const writeCommand = `echo ${JSON.stringify(code)} > ${tempFilePath}`;
+				await daytonaService.executeCommand(sandboxId, writeCommand);
 
 				// Execute based on language
 				const command = getExecutionCommand(language, tempFilePath, inputData);
 
-				result = await provider.executeCommand(session.sandboxId, command, {
-					workingDir,
-					timeout
-				});
+				const execResult = await daytonaService.executeCommand(sandboxId, command);
+
+				result = {
+					success: execResult.success,
+					output: execResult.output || '',
+					error: execResult.success ? '' : 'Execution failed',
+					exitCode: execResult.exitCode || (execResult.success ? 0 : 1),
+					duration: 0 // Daytona doesn't provide duration
+				};
 
 				// Clean up temporary file
-				await provider.deleteFile(session.sandboxId, tempFilePath);
+				try {
+					await daytonaService.executeCommand(sandboxId, `rm -f ${tempFilePath}`);
+				} catch (cleanupError) {
+					console.warn('Failed to clean up temporary file:', cleanupError);
+				}
 			} catch (error) {
 				// Try to clean up on error
 				try {
-					await provider.deleteFile(session.sandboxId, tempFilePath);
+					await daytonaService.executeCommand(sandboxId, `rm -f ${tempFilePath}`);
 				} catch (cleanupError) {
 					console.warn('Failed to clean up temporary file:', cleanupError);
 				}
@@ -131,12 +191,9 @@ export const POST: RequestHandler = async ({ params, request, locals, url }) => 
 			);
 		}
 
-		// Update session activity
-		sessionService.updateLastActivity(session.id);
-
-		// Store execution in database for analytics
+		// Store execution in database for analytics (optional)
 		const execution = {
-			sandbox_session_id: session.id,
+			project_id: project.id,
 			user_id: user.id,
 			language: executionType === 'code' ? (request as any).body?.language || 'unknown' : 'shell',
 			code: executionType === 'code' ? (request as any).body?.code : (request as any).body?.command,

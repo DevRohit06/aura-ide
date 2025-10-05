@@ -443,7 +443,10 @@ export class DaytonaService {
 
 	async executeCommand(
 		sandboxId: string,
-		command: string
+		command: string,
+		workingDir?: string,
+		environment?: Record<string, string>,
+		timeout?: number
 	): Promise<{
 		success: boolean;
 		output: string;
@@ -495,26 +498,31 @@ export class DaytonaService {
 
 		try {
 			logger.info(`Executing command in Daytona sandbox ${sandboxId}: ${command}`);
+			logger.info(`📁 Working directory: ${workingDir || '/workspace'}`);
+			logger.info(`🌍 Environment: ${environment ? Object.keys(environment).join(', ') : 'none'}`);
 
 			const startTime = Date.now();
 			let result;
 
 			// Try different methods based on what's available in the SDK
 			if (sandbox.daytonaSandbox.process) {
-				if (sandbox.daytonaSandbox.process.exec) {
-					// Method 1: Direct exec (correct API according to docs)
-					result = await sandbox.daytonaSandbox.process.exec(command, {
-						cwd: '/workspace',
-						timeout: 30000
-					});
-				} else if (sandbox.daytonaSandbox.process.executeCommand) {
-					// Method 2: executeCommand method (TypeScript SDK)
+				if (sandbox.daytonaSandbox.process.executeCommand) {
+					// Use the correct signature: executeCommand(command, workingDir?, environment?, timeout?)
+					logger.info(`🚀 Using process.executeCommand with proper parameters`);
+
 					result = await sandbox.daytonaSandbox.process.executeCommand(
 						command,
-						'/workspace',
-						undefined,
-						30000
+						workingDir || '/workspace',
+						environment,
+						timeout || 30000
 					);
+				} else if (sandbox.daytonaSandbox.process.exec) {
+					// Method 1: Direct exec (alternative API)
+					result = await sandbox.daytonaSandbox.process.exec(command, {
+						cwd: workingDir || '/workspace',
+						timeout: timeout || 30000,
+						env: environment
+					});
 				} else {
 					throw new Error('Process execution not available in current SDK version');
 				}
@@ -523,18 +531,88 @@ export class DaytonaService {
 			}
 
 			const executionTime = `${Date.now() - startTime}ms`;
+
+			// Debug: Log the raw result to understand its structure
+			logger.info(`🔍 Raw result object:`, JSON.stringify(result, null, 2));
+
+			// Parse result based on the response structure - try multiple possible fields
+			let success = false;
+			let output = '';
+			let exitCode = -1;
+
+			// Try different possible success indicators
+			if (typeof result.exitCode !== 'undefined') {
+				exitCode = result.exitCode;
+				success = exitCode === 0;
+			} else if (typeof result.exit_code !== 'undefined') {
+				exitCode = result.exit_code;
+				success = exitCode === 0;
+			} else if (typeof result.code !== 'undefined') {
+				exitCode = result.code;
+				success = exitCode === 0;
+			} else if (result.success !== undefined) {
+				success = result.success;
+				exitCode = success ? 0 : 1;
+			} else {
+				// Fallback: assume success if we have output
+				success = Boolean(result.stdout || result.output || result.result);
+				exitCode = success ? 0 : 1;
+			}
+
+			// Try different possible output fields - check 'result' first as per Daytona SDK docs
+			output = result.result || result.stdout || result.output || result.data || '';
+
+			// If still no output but command "succeeded", try stderr
+			if (!output && result.stderr) {
+				output = result.stderr;
+			}
+
+			// For exit code, also try checking if result.result exists (command succeeded)
+			if (typeof result.exitCode !== 'undefined') {
+				exitCode = result.exitCode;
+				success = exitCode === 0;
+			} else if (typeof result.exit_code !== 'undefined') {
+				exitCode = result.exit_code;
+				success = exitCode === 0;
+			} else if (typeof result.code !== 'undefined') {
+				exitCode = result.code;
+				success = exitCode === 0;
+			} else if (result.success !== undefined) {
+				success = result.success;
+				exitCode = success ? 0 : 1;
+			} else if (result.result) {
+				// If we have a result field with content, assume success
+				success = true;
+				exitCode = 0;
+			} else {
+				// Fallback: assume success if we have any output
+				success = Boolean(output);
+				exitCode = success ? 0 : 1;
+			}
+
 			logger.info(`✅ Command executed successfully in ${executionTime}: ${command}`);
+			logger.info(`📤 Exit code: ${exitCode}, Success: ${success}`);
+			logger.info(`📝 Output length: ${output.length} characters`);
+			logger.info(
+				`📝 Output preview: "${output.substring(0, 300)}${output.length > 300 ? '...' : ''}"`
+			);
 
 			return {
-				success: (result.exitCode || result.exit_code) === 0,
-				output: result.stdout || result.output || result.result || 'Command completed',
-				exitCode: result.exitCode || result.exit_code || 0,
+				success,
+				output,
+				exitCode,
 				executionTime
 			};
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 			logger.error(`❌ Command execution failed in Daytona: ${errorMessage}`);
-			throw new Error(`Failed to execute command: ${errorMessage}`);
+
+			return {
+				success: false,
+				output: errorMessage,
+				exitCode: -1,
+				executionTime: '0ms'
+			};
 		}
 	}
 
@@ -934,6 +1012,87 @@ export class DaytonaService {
 		// If not in active sandboxes, assume it's running (persistent)
 		// The Daytona SDK doesn't provide a getWorkspace method
 		return 'running';
+	}
+
+	/**
+	 * Get preview URL for a specific port in the Daytona sandbox
+	 * This properly implements port forwarding through Daytona's infrastructure
+	 */
+	async getPreviewUrl(
+		sandboxId: string,
+		port: number
+	): Promise<{
+		url: string;
+		token?: string;
+	}> {
+		await this.ensureInitialized();
+
+		const sandbox = this.activeSandboxes.get(sandboxId);
+		if (!sandbox) {
+			throw new Error(`Sandbox not found: ${sandboxId}`);
+		}
+
+		if (!sandbox.daytonaSandbox) {
+			throw new Error(`Daytona sandbox instance not found for ${sandboxId}`);
+		}
+
+		try {
+			logger.info(`🔗 Getting preview URL for port ${port} in sandbox ${sandboxId}`);
+
+			// Try different methods that might be available in the Daytona SDK
+			const sdk = sandbox.daytonaSandbox;
+			console.log('Daytona SDK sandbox object:', Object.keys(sdk));
+
+			// Method 1: Try direct getPreviewUrl method
+			try {
+				logger.info(`Using sdk.getPreviewUrl for port ${port}`);
+				return await sdk.getPreviewLink(port);
+			} catch (error) {
+				logger.warn(`sdk.getPreviewUrl failed:`, error);
+			}
+
+			// Method 2: Check if there's a ports or networking API
+			if (sdk.ports && typeof sdk.ports.forward === 'function') {
+				logger.info(`Using sdk.ports.forward for port ${port}`);
+				const forwardResult = await sdk.ports.forward(port);
+				return {
+					url: forwardResult.url || forwardResult.publicUrl,
+					token: forwardResult.token
+				};
+			}
+
+			// Method 3: Check if there's a networking API
+			if (sdk.networking && typeof sdk.networking.exposePort === 'function') {
+				logger.info(`Using sdk.networking.exposePort for port ${port}`);
+				const exposeResult = await sdk.networking.exposePort(port);
+				return {
+					url: exposeResult.url || exposeResult.publicUrl,
+					token: exposeResult.token
+				};
+			}
+
+			// Method 4: Check if there's a direct port forwarding method
+			if (typeof sdk.forwardPort === 'function') {
+				logger.info(`Using sdk.forwardPort for port ${port}`);
+				const forwardResult = await sdk.forwardPort(port);
+				return {
+					url: forwardResult.url || forwardResult.publicUrl,
+					token: forwardResult.token
+				};
+			}
+
+			// Method 5: Construct preview URL directly (Daytona standard format)
+			logger.info(`Constructing preview URL directly for port ${port}`);
+			return {
+				url: `https://${port}-${sandboxId}.daytona.app`,
+				token: undefined
+			};
+		} catch (error) {
+			logger.error(`Failed to get preview URL for port ${port}:`, error);
+			throw new Error(
+				`Failed to get preview URL: ${error instanceof Error ? error.message : String(error)}`
+			);
+		}
 	}
 
 	/**
