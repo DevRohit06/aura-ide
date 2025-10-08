@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
+	import { Switch } from '$lib/components/ui/switch';
 	import { modelActions, selectedModelStore } from '@/stores/model';
 	import { ArrowUp, Plus } from '@lucide/svelte';
 	import { createEventDispatcher } from 'svelte';
@@ -76,7 +77,7 @@
 	}
 </script>
 
-<div class="p-4">
+<div class="p-4 py-1">
 	<!-- Modern input container -->
 	<div
 		class="relative rounded-xl border border-border/50 bg-muted/10 transition-all duration-200 focus-within:border-primary/30 focus-within:bg-background focus-within:shadow-sm"
@@ -161,17 +162,17 @@
 	<!-- Add a small toggle and optional query input -->
 	<div class="mt-2 flex items-center gap-2 px-1">
 		<label class="flex items-center gap-2 text-sm">
-			<input type="checkbox" bind:checked={includeCodeContext} class="h-4 w-4" />
+			<Switch bind:checked={includeCodeContext} />
 			<span class="text-xs">Include repo code context</span>
 		</label>
 
-		{#if includeCodeContext}
+		<!-- {#if includeCodeContext}
 			<input
 				type="text"
 				placeholder="Optional: narrow context with a short query"
 				bind:value={codeQuery}
 				class="ml-2 w-full rounded border px-2 py-1 text-sm"
 			/>
-		{/if}
+		{/if} -->
 	</div>
 </div>

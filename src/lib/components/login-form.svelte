@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
@@ -124,8 +124,8 @@
 
 		formState = FORM_STATES.SUBMITTING;
 
-		const result = await handleFormSubmission(
-			async () => {
+		try {
+			const result = await handleFormSubmission(async () => {
 				try {
 					const result = await authClient.signIn.email({
 						email: formData.email,
@@ -170,24 +170,22 @@
 						code: 'LOGIN_FAILED'
 					});
 				}
-			},
-			{
-				loadingMessage: 'Signing in...',
-				successMessage: 'Welcome back!',
-				onSuccess: async () => {
-					formState = FORM_STATES.SUCCESS;
-					// Small delay to show success state
-					setTimeout(() => {
-						goto('/dashboard');
-					}, 500);
-				},
-				onError: (error) => {
-					formState = FORM_STATES.ERROR;
-					logError(error, 'Login Form');
-				},
-				suppressErrorToast: false
+			});
+
+			if (result.success) {
+				formState = FORM_STATES.SUCCESS;
+				// Redirect to dashboard after successful login
+				setTimeout(() => {
+					goto('/dashboard');
+				}, 1000);
 			}
-		);
+		} catch (error) {
+			formState = FORM_STATES.ERROR;
+		} finally {
+			if (formState !== FORM_STATES.SUCCESS) {
+				formState = FORM_STATES.IDLE;
+			}
+		}
 	}
 
 	async function handleGoogleLogin(): Promise<any> {
@@ -200,10 +198,18 @@
 				throw result.error;
 			}
 			formState = FORM_STATES.SUCCESS;
+			// Redirect to dashboard after successful Google login
+			setTimeout(() => {
+				goto('/dashboard');
+			}, 1000);
 		} catch (error) {
-			formState = FORM_STATES.ERROR;
+			formState = FORM_STATES.IDLE;
 			logError(error, 'Google Login');
 			showErrorToast('Google login failed. Please try again.');
+		} finally {
+			if (formState !== FORM_STATES.SUCCESS) {
+				formState = FORM_STATES.IDLE;
+			}
 		}
 	}
 
@@ -217,10 +223,18 @@
 				throw result.error;
 			}
 			formState = FORM_STATES.SUCCESS;
+			// Redirect to dashboard after successful GitHub login
+			setTimeout(() => {
+				goto('/dashboard');
+			}, 1000);
 		} catch (error) {
-			formState = FORM_STATES.ERROR;
+			formState = FORM_STATES.IDLE;
 			logError(error, 'GitHub Login');
 			showErrorToast('GitHub login failed. Please try again.');
+		} finally {
+			if (formState !== FORM_STATES.SUCCESS) {
+				formState = FORM_STATES.IDLE;
+			}
 		}
 	}
 

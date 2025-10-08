@@ -222,87 +222,97 @@
 
 		formState = FORM_STATES.SUBMITTING;
 
-		const result = await handleFormSubmission(
-			async () => {
-				try {
-					const result = await authActions.register(
-						formData.email,
-						formData.password,
-						formData.firstName,
-						formData.lastName
-					);
+		try {
+			const result = await handleFormSubmission(
+				async () => {
+					try {
+						const result = await authActions.register(
+							formData.email,
+							formData.password,
+							formData.firstName,
+							formData.lastName
+						);
 
-					if (!result.success) {
+						if (!result.success) {
+							throw new ApiError({
+								message: result.error || 'Registration failed',
+								statusCode: 400,
+								code: 'REGISTRATION_FAILED'
+							});
+						}
+
+						if (result.error) {
+							throw result.error;
+						}
+
+						return result;
+					} catch (error) {
+						logError(error, 'Registration');
+
+						// Handle specific registration errors
+						if (error && typeof error === 'object' && 'status' in error) {
+							const status = (error as any).status;
+							if (status === 409) {
+								throw new ApiError({
+									message:
+										'An account with this email address already exists. Please try logging in instead.',
+									statusCode: 409,
+									code: 'USER_EXISTS'
+								});
+							} else if (status === 422) {
+								throw new ApiError({
+									message:
+										'The provided information is invalid. Please check your input and try again.',
+									statusCode: 422,
+									code: 'VALIDATION_ERROR'
+								});
+							} else if (status === 429) {
+								throw new ApiError({
+									message:
+										'Too many registration attempts. Please wait a moment before trying again.',
+									statusCode: 429,
+									code: 'RATE_LIMITED'
+								});
+							}
+						}
+
+						// Generic error handling
 						throw new ApiError({
-							message: result.error || 'Registration failed',
-							statusCode: 400,
+							message: 'Registration failed. Please try again.',
+							statusCode: 500,
 							code: 'REGISTRATION_FAILED'
 						});
 					}
-
-					if (result.error) {
-						throw result.error;
-					}
-
-					return result;
-				} catch (error) {
-					logError(error, 'Registration');
-
-					// Handle specific registration errors
-					if (error && typeof error === 'object' && 'status' in error) {
-						const status = (error as any).status;
-						if (status === 409) {
-							throw new ApiError({
-								message:
-									'An account with this email address already exists. Please try logging in instead.',
-								statusCode: 409,
-								code: 'USER_EXISTS'
-							});
-						} else if (status === 422) {
-							throw new ApiError({
-								message:
-									'The provided information is invalid. Please check your input and try again.',
-								statusCode: 422,
-								code: 'VALIDATION_ERROR'
-							});
-						} else if (status === 429) {
-							throw new ApiError({
-								message:
-									'Too many registration attempts. Please wait a moment before trying again.',
-								statusCode: 429,
-								code: 'RATE_LIMITED'
-							});
-						}
-					}
-
-					// Generic error handling
-					throw new ApiError({
-						message: 'Registration failed. Please try again.',
-						statusCode: 500,
-						code: 'REGISTRATION_FAILED'
-					});
+				},
+				{
+					loadingMessage: 'Creating your account...',
+					successMessage:
+						'Account created successfully! Please check your email to verify your account.',
+					onSuccess: async () => {
+						formState = FORM_STATES.SUCCESS;
+						// Redirect to dashboard after successful registration
+						setTimeout(() => {
+							goto('/dashboard');
+						}, 2000);
+					},
+					onError: (error) => {
+						formState = FORM_STATES.ERROR;
+						logError(error, 'Registration Form');
+					},
+					suppressErrorToast: false
 				}
-			},
-			{
-				loadingMessage: 'Creating your account...',
-				successMessage:
-					'Account created successfully! Please check your email to verify your account.',
-				onSuccess: async () => {
-					formState = FORM_STATES.SUCCESS;
-					// Redirect to login page with success message
-					setTimeout(() => {
-						goto(
-							'/auth/login?message=Registration successful! Please log in with your credentials.'
-						);
-					}, 2000);
-				},
-				onError: (error) => {
-					formState = FORM_STATES.ERROR;
-					logError(error, 'Registration Form');
-				},
-				suppressErrorToast: false
+			);
+
+			if (result.success) {
+				formState = FORM_STATES.SUCCESS;
 			}
-		);
+		} catch (error) {
+			formState = FORM_STATES.ERROR;
+		} finally {
+			if (formState !== FORM_STATES.SUCCESS) {
+				formState = FORM_STATES.IDLE;
+			}
+		}
 	}
 
 	async function handleGoogleLogin(): Promise<void> {
@@ -312,10 +322,18 @@
 			formState = FORM_STATES.SUBMITTING;
 			await authActions.loginWithGoogle();
 			formState = FORM_STATES.SUCCESS;
+			// Redirect to dashboard after successful Google registration
+			setTimeout(() => {
+				goto('/dashboard');
+			}, 1000);
 		} catch (error) {
-			formState = FORM_STATES.ERROR;
+			formState = FORM_STATES.IDLE;
 			logError(error, 'Google Registration');
 			showErrorToast('Google registration failed. Please try again.');
+		} finally {
+			if (formState !== FORM_STATES.SUCCESS) {
+				formState = FORM_STATES.IDLE;
+			}
 		}
 	}
 
@@ -326,10 +344,18 @@
 			formState = FORM_STATES.SUBMITTING;
 			await authActions.loginWithGitHub();
 			formState = FORM_STATES.SUCCESS;
+			// Redirect to dashboard after successful GitHub registration
+			setTimeout(() => {
+				goto('/dashboard');
+			}, 1000);
 		} catch (error) {
-			formState = FORM_STATES.ERROR;
+			formState = FORM_STATES.IDLE;
 			logError(error, 'GitHub Registration');
 			showErrorToast('GitHub registration failed. Please try again.');
+		} finally {
+			if (formState !== FORM_STATES.SUCCESS) {
+				formState = FORM_STATES.IDLE;
+			}
 		}
 	}
 

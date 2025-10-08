@@ -242,7 +242,7 @@ export async function handleFormSubmission<T>(
 	} = {}
 ): Promise<{ success: boolean; data?: T; error?: ApiError }> {
 	const {
-		loadingMessage = 'Processing...',
+		loadingMessage = '',
 		successMessage,
 		onSuccess,
 		onError,
@@ -251,7 +251,7 @@ export async function handleFormSubmission<T>(
 
 	try {
 		// Show loading toast
-		if (loadingMessage) {
+		if (loadingMessage?.trim()) {
 			toast.loading(loadingMessage);
 		}
 

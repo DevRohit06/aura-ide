@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ConfirmModal from '$lib/components/common/modals/confirm-modal.svelte';
+	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import {
 		DropdownMenu,
@@ -616,11 +617,6 @@
 					{selectedThread.title}
 				</p>
 			{/if}
-			{#if $chatFileContext.isActive}
-				<p class="max-w-32 truncate text-xs text-blue-600" title={$chatFileContext.filePath}>
-					📄 {$chatFileContext.fileName}
-				</p>
-			{/if}
 			<!-- Active Tools Indicator -->
 			{#if $pendingToolsCount > 0}
 				<div class="flex items-center gap-1 text-xs text-purple-600">
@@ -730,6 +726,19 @@
 	</div>
 
 	<!-- Chat input -->
+	{#if $chatFileContext.isActive}
+		<div class="border-t px-4 py-2">
+			<div class="flex items-center gap-2">
+				<!-- <span class="text-xs text-muted-foreground">Current file:</span> -->
+				<Badge variant="secondary" class="flex items-center gap-1 text-xs">
+					<span class="text-blue-600">📄</span>
+					<span class="max-w-32 truncate" title={$chatFileContext.filePath}>
+						{$chatFileContext.fileName}
+					</span>
+				</Badge>
+			</div>
+		</div>
+	{/if}
 	<ChatInput on:send={handleSend} on:voice={handleVoice} />
 </div>
 

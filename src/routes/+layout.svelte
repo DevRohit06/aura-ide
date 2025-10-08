@@ -80,7 +80,7 @@
 {:else}
 	<ModeWatcher />
 	<SettingsInitializer />
-	<Toaster richColors position="top-right" />
+	<Toaster richColors position="top-center" />
 	{@render children?.()}
 {/if}
 
