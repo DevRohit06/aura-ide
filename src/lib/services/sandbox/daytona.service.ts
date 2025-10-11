@@ -1018,13 +1018,7 @@ export class DaytonaService {
 	 * Get preview URL for a specific port in the Daytona sandbox
 	 * This properly implements port forwarding through Daytona's infrastructure
 	 */
-	async getPreviewUrl(
-		sandboxId: string,
-		port: number
-	): Promise<{
-		url: string;
-		token?: string;
-	}> {
+	async getPreviewUrl(sandboxId: string, port: number): Promise<any> {
 		await this.ensureInitialized();
 
 		const sandbox = this.activeSandboxes.get(sandboxId);
@@ -1050,43 +1044,6 @@ export class DaytonaService {
 			} catch (error) {
 				logger.warn(`sdk.getPreviewUrl failed:`, error);
 			}
-
-			// Method 2: Check if there's a ports or networking API
-			if (sdk.ports && typeof sdk.ports.forward === 'function') {
-				logger.info(`Using sdk.ports.forward for port ${port}`);
-				const forwardResult = await sdk.ports.forward(port);
-				return {
-					url: forwardResult.url || forwardResult.publicUrl,
-					token: forwardResult.token
-				};
-			}
-
-			// Method 3: Check if there's a networking API
-			if (sdk.networking && typeof sdk.networking.exposePort === 'function') {
-				logger.info(`Using sdk.networking.exposePort for port ${port}`);
-				const exposeResult = await sdk.networking.exposePort(port);
-				return {
-					url: exposeResult.url || exposeResult.publicUrl,
-					token: exposeResult.token
-				};
-			}
-
-			// Method 4: Check if there's a direct port forwarding method
-			if (typeof sdk.forwardPort === 'function') {
-				logger.info(`Using sdk.forwardPort for port ${port}`);
-				const forwardResult = await sdk.forwardPort(port);
-				return {
-					url: forwardResult.url || forwardResult.publicUrl,
-					token: forwardResult.token
-				};
-			}
-
-			// Method 5: Construct preview URL directly (Daytona standard format)
-			logger.info(`Constructing preview URL directly for port ${port}`);
-			return {
-				url: `https://${port}-${sandboxId}.daytona.app`,
-				token: undefined
-			};
 		} catch (error) {
 			logger.error(`Failed to get preview URL for port ${port}:`, error);
 			throw new Error(
