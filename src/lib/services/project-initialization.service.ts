@@ -22,6 +22,12 @@ export interface ProjectInitializationOptions {
 	userId: string;
 	description?: string;
 	sandboxProvider: 'daytona' | 'e2b'; // Required: choose sandbox provider
+	customRepo?: {
+		owner: string;
+		repo: string;
+		branch?: string;
+		path?: string;
+	};
 	configuration?: {
 		typescript?: boolean;
 		eslint?: boolean;
@@ -77,6 +83,16 @@ export interface ProjectStatus {
 		totalFiles?: number;
 		uploadProgress?: number;
 		sandboxStatus?: Record<string, string>;
+		currentFile?: {
+			name: string;
+			size: number;
+			index: number;
+		};
+		recentFiles?: Array<{
+			name: string;
+			size: number;
+			status: 'downloading' | 'uploaded' | 'complete';
+		}>;
 	};
 	error?: string;
 }
@@ -125,25 +141,27 @@ export class ProjectInitializationService {
 			});
 
 			logger.info(
-				`Downloading template: ${options.templateId} for framework: ${options.framework}`
+				options.customRepo
+					? `🎯 Using custom repository: ${options.customRepo.owner}/${options.customRepo.repo}`
+					: `📦 Using predefined template: ${options.templateId} for framework: ${options.framework}`
 			);
+			logger.info(`🔍 DEBUG: customRepo =`, JSON.stringify(options.customRepo, null, 2));
+			logger.info(`🔍 DEBUG: templateId = ${options.templateId}, framework = ${options.framework}`);
+
 			const files = await Promise.race([
-				this.downloadTemplateFiles(options.templateId, options.framework),
+				this.downloadTemplateFiles(
+					projectId,
+					options.templateId,
+					options.framework,
+					options.customRepo
+				),
 				new Promise<never>((_, reject) =>
 					setTimeout(() => reject(new Error('Template download timeout')), 30000)
 				)
 			]);
-			logger.info(`Downloaded ${files.length} files from template`);
-
-			this.updateProjectStatus(projectId, {
-				phase: 'downloading',
-				progress: 40,
-				message: `Downloaded ${files.length} files from template`,
-				details: {
-					filesDownloaded: files.length,
-					totalFiles: files.length
-				}
-			});
+			logger.info(
+				`Downloaded ${files.length} files from ${options.customRepo ? 'custom repository' : 'template'}`
+			);
 
 			// Step 4: Create sandbox based on provider
 			let sandboxResult;
@@ -164,12 +182,6 @@ export class ProjectInitializationService {
 				logger.info(`Daytona workspace created:`, sandboxResult);
 			} else if (options.sandboxProvider === 'e2b') {
 				// Step 4a: Upload to R2 storage (for E2B flow)
-				this.updateProjectStatus(projectId, {
-					phase: 'uploading',
-					progress: 50,
-					message: 'Uploading project files to cloud storage...'
-				});
-
 				logger.info(`Uploading ${files.length} files to R2 storage for E2B`);
 				const storageResult = await Promise.race([
 					this.uploadToR2Storage(projectId, files),
@@ -178,15 +190,6 @@ export class ProjectInitializationService {
 					)
 				]);
 				logger.info(`Upload completed: ${storageResult.key}`);
-
-				this.updateProjectStatus(projectId, {
-					phase: 'uploading',
-					progress: 70,
-					message: 'Files uploaded to cloud storage',
-					details: {
-						uploadProgress: 100
-					}
-				});
 
 				// Step 4b: Create E2B sandbox
 				this.updateProjectStatus(projectId, {
@@ -283,50 +286,102 @@ export class ProjectInitializationService {
 
 	/**
 	 * Download template files from GitHub using GitHub API service
+	 * Supports both predefined templates and custom GitHub repositories
 	 */
 	private async downloadTemplateFiles(
+		projectId: string,
 		templateId: string,
-		framework: string
+		framework: string,
+		customRepo?: {
+			owner: string;
+			repo: string;
+			branch?: string;
+			path?: string;
+		}
 	): Promise<ProjectFile[]> {
 		try {
-			// Get the GitHub template configuration
-			const { getGitHubTemplate } = await import('$lib/config/template.config.js');
-			const templateConfig = getGitHubTemplate(templateId);
+			let owner: string;
+			let repo: string;
+			let branch: string | undefined;
+			let path: string | undefined;
 
-			if (!templateConfig) {
-				throw new Error(`Template not found: ${templateId}`);
+			// Use custom repository if provided
+			if (customRepo) {
+				owner = customRepo.owner;
+				repo = customRepo.repo;
+				branch = customRepo.branch;
+				path = customRepo.path;
+				logger.info(
+					`🔷 CUSTOM REPO MODE: Downloading from GitHub: ${owner}/${repo}${branch ? `@${branch}` : ''}${path ? ` (path: ${path})` : ''}`
+				);
+			} else {
+				// Get the GitHub template configuration
+				const { getGitHubTemplate } = await import('$lib/config/template.config.js');
+				const templateConfig = getGitHubTemplate(templateId);
+
+				if (!templateConfig) {
+					throw new Error(`Template not found: ${templateId}`);
+				}
+
+				owner = templateConfig.owner;
+				repo = templateConfig.repo;
+				path = templateConfig.path;
+				logger.info(`Downloading template from GitHub: ${owner}/${repo}`);
 			}
-
-			logger.info(
-				`Downloading template from GitHub: ${templateConfig.owner}/${templateConfig.repo}`
-			);
 
 			// Download the template files from GitHub
 			const files = await this.githubService.downloadRepositoryFiles(
-				templateConfig.owner,
-				templateConfig.repo,
-				undefined, // Use default branch
-				templateConfig.path || undefined // Use path filter if specified
+				owner,
+				repo,
+				branch, // Use custom branch or default
+				path // Use path filter if specified
 			);
 
 			if (!files || Object.keys(files).length === 0) {
-				throw new Error(`No files found in template: ${templateId}`);
+				throw new Error(
+					customRepo
+						? `No files found in repository: ${owner}/${repo}`
+						: `No files found in template: ${templateId}`
+				);
 			}
 
 			// Convert files object to ProjectFile array format
-			const projectFiles: ProjectFile[] = Object.entries(files).map(([path, content]) => ({
-				path,
-				content,
-				size: content?.length || 0,
-				sha: ''
+			const projectFiles: ProjectFile[] = Object.entries(files).map(
+				([filePath, content], index) => ({
+					path: filePath,
+					content,
+					size: content?.length || 0,
+					sha: ''
+				})
+			);
+
+			// Track file downloads - update status with recent files
+			const recentFiles = projectFiles.slice(-5).map((f) => ({
+				name: f.path.split('/').pop() || f.path,
+				size: f.size,
+				status: 'complete' as const
 			}));
 
+			this.updateProjectStatus(projectId, {
+				phase: 'downloading',
+				progress: 40,
+				message: `Downloaded ${projectFiles.length} files from template`,
+				details: {
+					filesDownloaded: projectFiles.length,
+					totalFiles: projectFiles.length,
+					recentFiles
+				}
+			});
+
 			logger.info(
-				`Successfully downloaded ${projectFiles.length} files from template ${templateId}`
+				`Successfully downloaded ${projectFiles.length} files from ${customRepo ? 'custom repository' : 'template'}`
 			);
 			return projectFiles;
 		} catch (error) {
-			logger.error(`Failed to download template ${templateId}:`, error);
+			logger.error(
+				`Failed to download ${customRepo ? 'custom repository' : `template ${templateId}`}:`,
+				error
+			);
 			throw new Error(
 				`Template download failed: ${error instanceof Error ? error.message : 'Unknown error'}`
 			);
@@ -351,7 +406,43 @@ export class ProjectInitializationService {
 				fileMap[file.path] = file.content;
 			}
 
+			// Track recent files being uploaded for UI display
+			const recentFiles = files.slice(-5).map((f) => ({
+				name: f.path.split('/').pop() || f.path,
+				size: f.size,
+				status: 'downloading' as const
+			}));
+
+			this.updateProjectStatus(projectId, {
+				phase: 'uploading',
+				progress: 55,
+				message: `Uploading ${files.length} files to R2 storage...`,
+				details: {
+					totalFiles: files.length,
+					uploadProgress: 50,
+					recentFiles
+				}
+			});
+
 			const result = await this.r2Service.uploadProject(projectId, fileMap);
+
+			// Update to complete
+			const completeFiles = files.slice(-5).map((f) => ({
+				name: f.path.split('/').pop() || f.path,
+				size: f.size,
+				status: 'uploaded' as const
+			}));
+
+			this.updateProjectStatus(projectId, {
+				phase: 'uploading',
+				progress: 70,
+				message: 'Files uploaded to cloud storage',
+				details: {
+					totalFiles: files.length,
+					uploadProgress: 100,
+					recentFiles: completeFiles
+				}
+			});
 
 			return {
 				key: result.storage_key,

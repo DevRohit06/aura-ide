@@ -4,8 +4,22 @@
  */
 
 export interface SSEEvent {
-	type: 'start' | 'thinking' | 'tool_call' | 'tool_result' | 'content' | 'complete' | 'error';
-	data: any;
+	type:
+		| 'start'
+		| 'thinking'
+		| 'tool_call'
+		| 'tool_result'
+		| 'content'
+		| 'complete'
+		| 'error'
+		| 'output'
+		| 'stdout'
+		| 'stderr'
+		| 'command'
+		| 'tool_start';
+	data?: any;
+	content?: string;
+	message?: string;
 	timestamp: number;
 }
 
