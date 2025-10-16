@@ -1,6 +1,7 @@
 <script lang="ts">
 	import CodemirrorEditor from '$lib/components/code-editor/codemirror-editor.svelte';
 	import FileTabs from '$lib/components/editor/file-tabs.svelte';
+	import FileWatcher from '$lib/components/file-watcher.svelte';
 	import EnhancedSidebar from '$lib/components/shared/enhanced-sidebar.svelte';
 	import * as Resizable from '$lib/components/ui/resizable/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
@@ -147,3 +148,6 @@
 		</Resizable.Pane>
 	</Sidebar.Provider>
 </Resizable.PaneGroup>
+
+<!-- File Watcher for real-time updates -->
+<FileWatcher enabled={true} />

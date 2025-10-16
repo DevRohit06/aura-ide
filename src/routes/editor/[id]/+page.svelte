@@ -8,10 +8,12 @@
 	// Light components that can be imported directly
 	import ActivityBar from '$lib/components/editor/activity-bar.svelte';
 	import BottomStatusBar from '$lib/components/editor/bottom-status-bar.svelte';
+	import BrowserBar from '$lib/components/editor/browser-bar.svelte';
 	import EditorSkeleton from '$lib/components/editor/editor-skeleton.svelte';
 	import FileTabs from '$lib/components/editor/file-tabs.svelte';
 	import TerminalSkeleton from '$lib/components/editor/terminal-skeleton.svelte';
 	import TopMenubar from '$lib/components/editor/top-menubar.svelte';
+	import FileWatcher from '$lib/components/file-watcher.svelte';
 	import CommandPalette from '$lib/components/shared/command-palette.svelte';
 	import ComprehensiveSettingsDialog from '$lib/components/shared/comprehensive-settings-dialog.svelte';
 	import EnhancedSidebar from '$lib/components/shared/enhanced-sidebar.svelte';
@@ -24,8 +26,10 @@
 	import * as Resizable from '$lib/components/ui/resizable/index.js';
 	import { projectActions } from '$lib/stores/current-project.store.js';
 	import { activeFileId, fileActions, filesStore } from '$lib/stores/editor.js';
+	import { previewURLActions } from '$lib/stores/preview-url.store';
 	import { sidebarPanelActions, sidebarPanelsStore } from '$lib/stores/sidebar-panels.store';
 	// Utils and Services
+	import { terminalBridge } from '$lib/services/terminal-bridge.client';
 	import { indexAllFilesFromStore } from '$lib/services/vector-indexer.client';
 	import { createBreadcrumbs } from '$lib/utils/file-tree';
 	// Icons
@@ -37,6 +41,9 @@
 	let CodemirrorEditor: any = $state(null);
 	let TerminalManager: any = $state(null);
 
+	// Terminal manager reference for programmatic access
+	let terminalManagerRef: any = $state(null);
+
 	let { data } = $props();
 	const pageData = data as any;
 
@@ -47,6 +54,9 @@
 	let leftPaneCollapsed = $state(false);
 	let rightPaneCollapsed = $state(false);
 	let terminalCollapsed = $state(false);
+
+	// Browser mode state
+	let browserMode = $state(false);
 
 	// Reactive current file and breadcrumbs using $derived helper
 	let currentFile = $derived($activeFileId ? $filesStore.get($activeFileId) : null);
@@ -172,6 +182,76 @@
 			console.warn('⚠️ No project files received from server');
 			console.log('Available pageData keys:', Object.keys(pageData));
 		}
+
+		// Initialize preview URLs from project data
+		if (project?.id && project?.sandboxId) {
+			console.log('🌐 Initializing preview URLs for project:', project.id);
+
+			// Extract tokens from forwarded ports metadata
+			const forwardedPorts = project.metadata?.forwardedPorts || [];
+			const getTokenForPort = (port: number) => {
+				const portInfo = forwardedPorts.find(
+					(p: any) => p.internalPort === port || p.externalPort === port
+				);
+				return portInfo?.token;
+			};
+
+			// Check if project has Daytona-specific URLs
+			if (project.sandboxProvider === 'daytona' && project.daytonaUrls) {
+				// Add tokens to Daytona URLs if available
+				const urlsWithTokens = project.daytonaUrls.map((urlInfo: any) => ({
+					...urlInfo,
+					token: urlInfo.token || getTokenForPort(urlInfo.port) || project.daytonaToken
+				}));
+
+				previewURLActions.setFromDaytona(project.id, project.sandboxId, {
+					urls: urlsWithTokens,
+					primaryUrl: project.previewUrl,
+					ports: project.ports,
+					token: project.daytonaToken || getTokenForPort(3000) // Global token fallback
+				});
+
+				console.log(
+					'✅ Set Daytona preview URLs with tokens:',
+					urlsWithTokens.map((u: any) => ({ url: u.url, hasToken: !!u.token }))
+				);
+			} else if (project.previewUrl) {
+				// Fallback to generic preview URL
+				const port = parseInt(new URL(project.previewUrl).port) || 3000;
+				const token = getTokenForPort(port) || project.daytonaToken;
+
+				previewURLActions.setFromSandbox(
+					project.id,
+					project.sandboxId,
+					project.previewUrl,
+					project.framework || 'Application',
+					token
+				);
+
+				console.log('✅ Set preview URL with token:', {
+					url: project.previewUrl,
+					hasToken: !!token
+				});
+			} else if (project.port) {
+				// Fallback to port-based URL
+				const url = `http://localhost:${project.port}`;
+				const token = getTokenForPort(project.port) || project.daytonaToken;
+
+				previewURLActions.setFromSandbox(
+					project.id,
+					project.sandboxId,
+					url,
+					project.framework || 'Application',
+					token
+				);
+
+				console.log('✅ Set port-based URL with token:', {
+					url,
+					port: project.port,
+					hasToken: !!token
+				});
+			}
+		}
 	});
 
 	// Lazy load heavy components
@@ -205,23 +285,35 @@
 			const response = await fetch(`/api/projects/${project.id}/init-status`);
 			if (response.ok) {
 				const data = await response.json();
+				console.log('📊 Init status poll:', data);
+
 				initProgress = data.progress || 0;
 				initStatus = data.message || 'Initializing...';
 				if (data.steps) {
 					initSteps = data.steps;
 				}
 
-				// If complete, reload the page
-				if (data.complete) {
-					window.location.reload();
-				} else if (!data.error) {
+				// If complete or ready, reload the page
+				if (data.complete || data.phase === 'ready' || initProgress >= 100) {
+					console.log('✅ Project ready, reloading page...');
+					setTimeout(() => {
+						window.location.reload();
+					}, 500);
+				} else if (data.error) {
+					console.error('❌ Initialization error:', data.error);
+					// Stop polling on error
+				} else {
 					// Continue polling
-					setTimeout(pollInitStatus, 1000);
+					setTimeout(pollInitStatus, 1500);
 				}
+			} else {
+				console.error('❌ Init status poll failed:', response.status);
+				// Retry with longer delay
+				setTimeout(pollInitStatus, 3000);
 			}
 		} catch (error) {
 			console.error('Failed to poll init status:', error);
-			setTimeout(pollInitStatus, 2000);
+			setTimeout(pollInitStatus, 3000);
 		}
 	}
 
@@ -320,6 +412,38 @@
 		};
 	});
 
+	// Initialize terminal bridge when terminal manager is ready
+	$effect(() => {
+		if (terminalManagerRef) {
+			console.log('🔌 Connecting terminal bridge...', terminalManagerRef);
+			console.log('🔍 Terminal manager methods:', {
+				hasWriteOutput: typeof terminalManagerRef?.writeOutput,
+				hasGetActiveSessionId: typeof terminalManagerRef?.getActiveSessionId,
+				hasIsReady: typeof terminalManagerRef?.isReady
+			});
+
+			terminalBridge.setTerminalManager(terminalManagerRef);
+
+			// Check if ready and wait for initialization
+			const checkAndInit = () => {
+				if (terminalManagerRef?.isReady && terminalManagerRef.isReady()) {
+					console.log('✅ Terminal is ready, showing welcome');
+					if (project?.name) {
+						terminalBridge.showWelcome(project.name);
+						terminalBridge.showSuccess('Terminal initialized successfully!');
+						terminalBridge.write('\nReady to display command outputs and AI responses.\n\n');
+					}
+				} else {
+					console.log('⏳ Terminal not ready yet, checking again...');
+					setTimeout(checkAndInit, 200);
+				}
+			};
+
+			// Start checking after a short delay
+			setTimeout(checkAndInit, 300);
+		}
+	});
+
 	function handleRetrySetup() {
 		// Navigate back to project setup
 		goto(`/project-setup?retry=${project.id}`);
@@ -412,7 +536,7 @@
 	</div>
 {:else if isProjectInitializing}
 	<div class="flex h-screen items-center justify-center bg-background p-4">
-		<div class="w-full max-w-md space-y-6">
+		<div class="w-full max-w-2xl space-y-6">
 			<!-- Header -->
 			<div class="text-center">
 				<h1 class="text-2xl font-bold">Aura IDE</h1>
@@ -421,8 +545,11 @@
 
 			<!-- Progress Bar -->
 			<div class="space-y-2">
+				<div class="flex justify-between text-sm">
+					<span class="font-medium">Overall Progress</span>
+					<span class="text-muted-foreground">{Math.round(initProgress)}%</span>
+				</div>
 				<Progress value={initProgress} class="h-2" />
-				<p class="text-center text-sm text-muted-foreground">{Math.round(initProgress)}%</p>
 			</div>
 
 			<!-- Current Status -->
@@ -437,16 +564,17 @@
 			<div class="space-y-3">
 				{#each initSteps as step}
 					<div
-						class="flex items-center gap-3 rounded-lg border p-3 {step.status === 'complete'
-							? 'bg-green-50 dark:bg-green-950/20'
+						class="flex items-start gap-3 rounded-lg border p-3 transition-colors {step.status ===
+						'complete'
+							? 'border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/20'
 							: step.status === 'loading'
-								? 'bg-blue-50 dark:bg-blue-950/20'
+								? 'border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950/20'
 								: step.status === 'error'
-									? 'bg-red-50 dark:bg-red-950/20'
-									: ''}"
+									? 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/20'
+									: 'bg-muted/50'}"
 					>
 						<!-- Status Icon -->
-						<div class="flex-shrink-0">
+						<div class="flex-shrink-0 pt-0.5">
 							{#if step.status === 'complete'}
 								<div
 									class="flex h-6 w-6 items-center justify-center rounded-full bg-green-500 text-white"
@@ -483,32 +611,62 @@
 						</div>
 
 						<!-- Step Info -->
-						<div class="flex-1">
+						<div class="min-w-0 flex-1">
 							<p class="text-sm font-medium">{step.name}</p>
 							{#if step.message}
-								<p class="text-xs text-muted-foreground">{step.message}</p>
+								<p class="mt-1 text-xs text-muted-foreground">{step.message}</p>
 							{/if}
 						</div>
 					</div>
 				{/each}
 			</div>
 
+			<!-- Files Being Processed -->
+			{#if initProgress > 5 && initProgress < 100}
+				<div class="space-y-2 rounded-lg border bg-muted/30 p-4">
+					<p class="flex items-center gap-2 text-sm font-semibold">
+						<FolderIcon class="h-4 w-4" />
+						Files being processed
+					</p>
+					{#if initSteps && initSteps[0]?.status === 'loading'}
+						<div class="space-y-1">
+							{#each initSteps as step}
+								{#if step.status === 'loading' || step.status === 'complete'}
+									<div class="flex items-center justify-between text-xs text-muted-foreground">
+										<span>{step.name}</span>
+										{#if step.status === 'complete'}
+											<span class="text-green-600 dark:text-green-400">✓</span>
+										{:else}
+											<div
+												class="h-3 w-3 animate-spin rounded-full border border-primary border-t-transparent"
+											></div>
+										{/if}
+									</div>
+								{/if}
+							{/each}
+						</div>
+					{:else if initSteps && initSteps[1]?.status === 'loading'}
+						<div class="space-y-1">
+							<div class="text-xs text-muted-foreground">Uploading files to storage...</div>
+							<Progress value={Math.min(initProgress - 40, 30)} max={30} class="h-1.5" />
+						</div>
+					{:else if initSteps && initSteps[2]?.status === 'loading'}
+						<div class="space-y-1">
+							<div class="text-xs text-muted-foreground">Creating sandbox environment...</div>
+							<Progress value={Math.min(initProgress - 80, 20)} max={20} class="h-1.5" />
+						</div>
+					{:else}
+						<div class="text-xs text-muted-foreground">Finalizing setup...</div>
+					{/if}
+				</div>
+			{/if}
+
 			<!-- Tip -->
 			<div class="rounded-lg bg-muted/50 p-4 text-center">
 				<p class="text-xs text-muted-foreground">
-					{setupStatus?.message || 'Initializing project environment...'}
+					This typically takes 30-60 seconds. Please don't close this window.
 				</p>
 			</div>
-
-			{#if setupStatus}
-				<div class="space-y-2">
-					<div class="flex justify-between text-sm">
-						<span>Progress</span>
-						<span>{setupStatus.progress}%</span>
-					</div>
-					<Progress value={setupStatus.progress} class="w-full" />
-				</div>
-			{/if}
 
 			<div class="text-center">
 				<Button onclick={handleGoToDashboard} variant="outline" size="sm">Go to Dashboard</Button>
@@ -518,7 +676,11 @@
 {:else if isProjectReady}
 	<div class="flex h-dvh flex-col overflow-hidden">
 		<!-- Top Menubar -->
-		<TopMenubar {project} onOpenCommandPalette={() => (commandPaletteOpen = true)} />
+		<TopMenubar
+			{project}
+			bind:browserMode
+			onOpenCommandPalette={() => (commandPaletteOpen = true)}
+		/>
 
 		<!-- Main Content Area -->
 
@@ -555,37 +717,42 @@
 				<!-- Main Content Area -->
 				<Resizable.Pane defaultSize={60}>
 					<Resizable.PaneGroup direction="vertical">
-						<!-- Editor -->
+						<!-- Editor or Browser -->
 						<Resizable.Pane defaultSize={80} class="flex h-full flex-col">
-							<!-- File Tabs -->
-							<div class="border-b">
-								<FileTabs {project} />
-							</div>
-
-							<!-- Editor Content -->
-							{#if currentFile}
-								<div class="!relative !h-[100%] !overflow-auto">
-									{#if CodemirrorEditor}
-										<CodemirrorEditor {project} />
-									{:else}
-										<EditorSkeleton />
-									{/if}
-								</div>
+							{#if browserMode}
+								<!-- Browser Preview Mode -->
+								<BrowserBar {project} onClose={() => (browserMode = false)} />
 							{:else}
-								<div class="flex flex-1 items-center justify-center">
-									<div class="space-y-4 text-center">
-										<img src={EmptyFileSate} alt="Welcome" class="mx-auto size-86" />
-										<div>
-											<h2 class="mb-2 text-xl font-semibold">Welcome to {project.name}</h2>
-											<p class="text-muted-foreground">
-												Choose a file from the sidebar to start editing
-											</p>
-											<p class="mt-2 text-xs text-muted-foreground">
-												Framework: {project.framework}
-											</p>
+								<!-- File Tabs -->
+								<div class="border-b">
+									<FileTabs {project} />
+								</div>
+
+								<!-- Editor Content -->
+								{#if currentFile}
+									<div class="!relative !h-[100%] !overflow-auto">
+										{#if CodemirrorEditor}
+											<CodemirrorEditor {project} />
+										{:else}
+											<EditorSkeleton />
+										{/if}
+									</div>
+								{:else}
+									<div class="flex flex-1 items-center justify-center">
+										<div class="space-y-4 text-center">
+											<img src={EmptyFileSate} alt="Welcome" class="mx-auto size-86" />
+											<div>
+												<h2 class="mb-2 text-xl font-semibold">Welcome to {project.name}</h2>
+												<p class="text-muted-foreground">
+													Choose a file from the sidebar to start editing
+												</p>
+												<p class="mt-2 text-xs text-muted-foreground">
+													Framework: {project.framework}
+												</p>
+											</div>
 										</div>
 									</div>
-								</div>
+								{/if}
 							{/if}
 						</Resizable.Pane>
 						<Resizable.Handle />
@@ -608,7 +775,7 @@
 							}}
 						>
 							{#if TerminalManager}
-								<TerminalManager {project} />
+								<TerminalManager bind:this={terminalManagerRef} {project} />
 							{:else}
 								<TerminalSkeleton />
 							{/if}
@@ -642,7 +809,12 @@
 		</div>
 
 		<!-- Bottom Status Bar -->
-		<BottomStatusBar {project} />
+		<BottomStatusBar
+			{project}
+			onOpenBrowserMode={() => {
+				browserMode = true;
+			}}
+		/>
 	</div>
 
 	<!-- Settings Dialog -->
@@ -650,6 +822,8 @@
 	<!-- Profile Modal -->
 	<ProfileModal bind:open={profileOpen} {user} />
 	<CommandPalette bind:open={commandPaletteOpen} {project} />
+	<!-- File Watcher for real-time updates -->
+	<FileWatcher projectId={project?.id} sandboxId={project?.sandboxId} enabled={true} />
 {:else}
 	<div class="flex h-screen items-center justify-center">
 		<div class="space-y-4 text-center">
