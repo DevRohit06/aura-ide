@@ -50,4 +50,6 @@ Goal: Help AI coding agents be immediately productive in this repository by list
    - LLM code: `src/lib/services/llm/llm.service.ts`
 
 Please review this condensed guidance — what sections need more detail (e.g., deployment, rate-limits, or preferred test fixtures)?
+
+Also don't create docs for each changes you make if it's a small fix or improvement; just update this file. for if it is important enough, create a new file under docs/ with the relevant details.
 ```
