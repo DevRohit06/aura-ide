@@ -4,7 +4,7 @@ import { sandboxManager } from '$lib/services/sandbox/sandbox-manager';
 import { vectorDbService } from '$lib/services/vector-db.service';
 import { logger } from '$lib/utils/logger.js';
 import { tool } from '@langchain/core/tools';
-import { TavilySearch } from '@langchain/tavily';
+import { tavily } from '@tavily/core';
 import { z } from 'zod';
 
 // Web Search Tool using Tavily (if configured)
@@ -15,23 +15,20 @@ export const webSearchTool = tool(
 			logger.warn('Tavily API key not configured, returning empty search result');
 			return 'Web search is not configured. Please set TAVILY_API_KEY environment variable.';
 		}
-		const maxResults = 5;
-		const tavily = new TavilySearch({ 
-			apiKey: env.TAVILY_API_KEY, 
-			maxResults 
-		});
-		
+
 		try {
-			// TavilySearch has invoke() method for LangChain compatibility
-			const results = await tavily.invoke(query);
-			
-			// Results should be a string or object with search results
-			const resultData = typeof results === 'string' 
-				? { answer: results, results: [] }
-				: {
-					answer: results?.answer ?? null,
-					results: results?.results ?? results ?? []
-				};
+			// Use Tavily SDK directly
+			const tvly = tavily({ apiKey: env.TAVILY_API_KEY });
+			const results = await tvly.search(query, {
+				maxResults: 5,
+				searchDepth: 'advanced',
+				includeAnswer: true
+			});
+
+			const resultData = {
+				answer: results?.answer ?? null,
+				results: results?.results ?? []
+			};
 
 			if (!resultData.answer && (!resultData.results || resultData.results.length === 0)) {
 				return 'No web search results found for the query.';
