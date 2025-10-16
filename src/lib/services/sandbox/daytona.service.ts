@@ -4,7 +4,7 @@
  */
 
 import { env } from '$env/dynamic/private';
-import type { Directory, File, FileSystemItem } from '$lib/types/files';
+import type { Directory, File } from '$lib/types/files';
 import { logger } from '$lib/utils/logger.js';
 import type { ProjectFile } from '../project-initialization.service.js';
 
@@ -135,6 +135,7 @@ export class DaytonaService {
 			const sandbox = await Promise.race([
 				this.daytona.create({
 					language: this.mapProjectTypeToLanguage(options.type),
+					public: true,
 					metadata: {
 						projectId,
 						projectType: options.type,
@@ -659,15 +660,20 @@ export class DaytonaService {
 
 			logger.info(`✅ Command executed via API successfully in ${executionTime}: ${command}`);
 
+			const output = result.stdout || result.output || result.result || 'Command completed';
+			const exitCode = result.exitCode || result.exit_code || 0;
+			const success = exitCode === 0;
+
 			return {
-				success: (result.exitCode || result.exit_code || 0) === 0,
-				output: result.stdout || result.output || result.result || 'Command completed',
-				exitCode: result.exitCode || result.exit_code || 0,
+				success,
+				output,
+				exitCode,
 				executionTime
 			};
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 			logger.error(`❌ API command execution failed in Daytona: ${errorMessage}`);
+
 			throw new Error(`Failed to execute command via API: ${errorMessage}`);
 		}
 	}
@@ -727,6 +733,12 @@ export class DaytonaService {
 		}
 	}
 
+	/**
+	 * List files in sandbox with recursive loading
+	 * @param sandboxId - The sandbox ID
+	 * @param path - The directory path to list (defaults to root)
+	 * @returns Array of files and directories (fully loaded recursively)
+	 */
 	async listFiles(sandboxId: string, path = '/workspace'): Promise<any[]> {
 		await this.ensureInitialized();
 
@@ -766,12 +778,14 @@ export class DaytonaService {
 			// Ensure sandbox is running before file operations
 			await this.ensureSandboxRunning(sandbox);
 
-			// Build complete file tree starting from root
+			// Build file tree recursively - loads entire directory structure upfront
+			const normalizedPath = path === '/workspace' ? '/home/daytona' : path;
 			const fileTree = await this.buildFileTree(
 				sandbox.daytonaSandbox,
 				sandboxId,
-				'/home/daytona',
-				null
+				normalizedPath,
+				null,
+				0 // Start at depth 0
 			);
 
 			return fileTree;
@@ -782,7 +796,60 @@ export class DaytonaService {
 	}
 
 	/**
-	 * Recursively build file tree from Daytona sandbox
+	 * Load children of a specific directory on-demand
+	 * Used for lazy loading when user expands a folder in the file tree
+	 * @param sandboxId - The sandbox ID
+	 * @param directoryPath - The directory to load children for
+	 * @param parentId - The parent directory ID for reference
+	 * @returns Array of immediate children (files and directories)
+	 */
+	async loadDirectoryChildren(
+		sandboxId: string,
+		directoryPath: string,
+		parentId: string
+	): Promise<any[]> {
+		await this.ensureInitialized();
+
+		const sandbox = this.activeSandboxes.get(sandboxId);
+		if (!sandbox?.daytonaSandbox) {
+			throw new Error(`Sandbox not found or not initialized: ${sandboxId}`);
+		}
+
+		try {
+			logger.info(`📂 Loading children for directory: ${directoryPath}`);
+
+			// Ensure sandbox is running
+			await this.ensureSandboxRunning(sandbox);
+
+			// Load only immediate children (non-recursive)
+			const children = await this.buildFileTree(
+				sandbox.daytonaSandbox,
+				sandboxId,
+				directoryPath,
+				parentId,
+				0 // Reset depth for this subtree
+			);
+
+			logger.info(`✅ Loaded ${children.length} children for ${directoryPath}`);
+			return children;
+		} catch (error) {
+			logger.error(`Failed to load directory children for ${directoryPath}:`, error);
+			throw error;
+		}
+	}
+
+	/**
+	 * Build file tree from Daytona sandbox (RECURSIVE)
+	 *
+	 * This method recursively loads all files and directories in the sandbox.
+	 * All subdirectories are fully expanded and populated upfront.
+	 *
+	 * @param daytonaSandbox - The Daytona SDK sandbox instance
+	 * @param sandboxId - The sandbox ID for generating unique item IDs
+	 * @param currentPath - The directory path to list
+	 * @param parentId - The parent directory ID (null for root)
+	 * @param depth - Current depth (used for safety checks to prevent infinite recursion)
+	 * @returns Array of all files and directories recursively
 	 */
 	private async buildFileTree(
 		daytonaSandbox: any,
@@ -790,19 +857,146 @@ export class DaytonaService {
 		currentPath: string,
 		parentId: string | null,
 		depth = 0
-	): Promise<FileSystemItem[]> {
-		if (depth > 10) {
-			logger.warn(`Max depth reached for path: ${currentPath}`);
+	): Promise<Array<Directory | File>> {
+		// Safety check - prevent infinite recursion or too deep traversal
+		const MAX_DEPTH = 10;
+		if (depth > MAX_DEPTH) {
+			logger.warn(`⚠️ Max depth ${MAX_DEPTH} reached at path: ${currentPath}. Stopping recursion.`);
 			return [];
 		}
 
+		// Directories to skip to avoid performance issues and unnecessary clutter
+		const skipDirs = new Set([
+			'node_modules',
+			'.git',
+			'dist',
+			'build',
+			'.npm',
+			'.daytona',
+			'out',
+			'.next',
+			'.nuxt',
+			'.svelte-kit',
+			'coverage',
+			'.cache',
+			'.turbo',
+			'__pycache__',
+			'.pytest_cache',
+			'.venv',
+			'venv',
+			'env',
+			'target',
+			'vendor',
+			'.idea',
+			'.vscode',
+			'.vs',
+			'bin',
+			'obj',
+			'.gradle',
+			'.mvn'
+		]);
+
+		// 🚫 EARLY EXIT: Check if current path itself contains any excluded directories
+		// This prevents us from even entering node_modules, .git, .npm, etc.
+		const pathSegments = currentPath.split('/').filter(Boolean);
+		for (const segment of pathSegments) {
+			if (skipDirs.has(segment)) {
+				logger.debug(
+					`⏭️  Skipping entire path (contains excluded dir '${segment}'): ${currentPath}`
+				);
+				return [];
+			}
+		}
+
+		// Additional check: Skip paths containing cache directories (aggressive filtering)
+		const lowerPath = currentPath.toLowerCase();
+		if (
+			lowerPath.includes('node_modules') ||
+			lowerPath.includes('/.npm/') ||
+			lowerPath.includes('.npm/_cacache') ||
+			lowerPath.includes('/.git/') ||
+			lowerPath.includes('/dist/') ||
+			lowerPath.includes('/build/') ||
+			lowerPath.includes('/.daytona/')
+		) {
+			logger.debug(`⏭️  Skipping path (matches cache/build pattern): ${currentPath}`);
+			return [];
+		}
+
+		// Files to skip (by name or extension patterns)
+		const skipFiles = new Set([
+			'.DS_Store',
+			'Thumbs.db',
+			'desktop.ini',
+			'.gitkeep',
+			'.npmignore',
+			'.dockerignore',
+			'.eslintcache',
+			'.bash_logout',
+			'.bashrc',
+			'.face',
+			'.face.icon',
+			'.profile',
+			'.zcomptdump',
+			'.zshrc'
+		]);
+
+		// File extensions to skip
+		const skipExtensions = new Set([
+			'.pyc',
+			'.pyo',
+			'.class',
+			'.o',
+			'.obj',
+			'.exe',
+			'.dll',
+			'.so',
+			'.dylib',
+			'.log',
+			'.tmp',
+			'.temp',
+			'.swp',
+			'.swo',
+			'.bak',
+			'.backup'
+		]);
+
 		try {
 			const files = await daytonaSandbox.fs.listFiles(currentPath);
-			const result: FileSystemItem[] = [];
+			const result: Array<Directory | File> = [];
+
+			logger.info(
+				`📂 Loading ${files.length} items from ${currentPath} at depth ${depth} (recursive)`
+			);
 
 			for (let index = 0; index < files.length; index++) {
 				const file = files[index];
 				const fileName = file.name;
+
+				// Skip excluded directories to keep the tree clean
+				if (file.isDir && skipDirs.has(fileName)) {
+					logger.debug(`⏭️  Skipping excluded directory: ${currentPath}/${fileName}`);
+					continue;
+				}
+
+				// Skip excluded files
+				if (!file.isDir) {
+					// Check exact filename match
+					if (skipFiles.has(fileName)) {
+						logger.debug(`⏭️  Skipping excluded file: ${currentPath}/${fileName}`);
+						continue;
+					}
+
+					// Check file extension
+					const extension = fileName.includes('.')
+						? '.' + fileName.split('.').pop()?.toLowerCase()
+						: '';
+					if (extension && skipExtensions.has(extension)) {
+						logger.debug(`⏭️  Skipping file with excluded extension: ${currentPath}/${fileName}`);
+						continue;
+					}
+				}
+
 				const filePath = currentPath === '/home/daytona' ? fileName : `${currentPath}/${fileName}`;
 				const modifiedDate = file.modTime ? new Date(file.modTime) : new Date();
 				const itemId = `daytona-${sandboxId}-${filePath.replace(/\//g, '-')}-${index}`;
@@ -811,7 +1005,7 @@ export class DaytonaService {
 					id: itemId,
 					name: fileName,
 					path: filePath,
-					content: '', // Content will be loaded on demand
+					content: '', // Content loaded on-demand when file is opened
 					parentId,
 					type: file.isDir ? 'directory' : 'file',
 					createdAt: modifiedDate,
@@ -829,26 +1023,29 @@ export class DaytonaService {
 				};
 
 				if (file.isDir) {
-					// Recursively get children
-					const children = await this.buildFileTree(
+					// � RECURSIVE: Load all children immediately
+					// Recursively traverse subdirectories and load their entire content
+					const childItems = await this.buildFileTree(
 						daytonaSandbox,
 						sandboxId,
 						filePath,
 						itemId,
-						depth + 1
+						depth + 1 // Increment depth for safety
 					);
-					const childIds = children.map((child) => child.id);
+
+					// Extract child IDs and add all child items to result
+					const childIds = childItems.map((child) => child.id);
 
 					result.push({
 						...baseItem,
 						type: 'directory' as const,
-						children: childIds,
+						children: childIds, // Array of child IDs (matches Directory type)
 						isExpanded: false,
 						isRoot: parentId === null
-					} as Directory);
+					});
 
-					// Add children to result
-					result.push(...children);
+					// Add all nested children to the flat result array
+					result.push(...childItems);
 				} else {
 					// File-specific properties
 					const extension = fileName.split('.').pop()?.toLowerCase() || '';
@@ -898,7 +1095,7 @@ export class DaytonaService {
 						},
 						editorState: undefined,
 						aiContext: undefined
-					} as File);
+					});
 				}
 			}
 

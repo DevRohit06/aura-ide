@@ -5,6 +5,7 @@
 
 import { sandboxConfig } from '../../config/sandbox.config.js';
 import type { SandboxProvider, SandboxStatus } from '../../types/sandbox.js';
+import { fileChangeBroadcaster } from '../file-change-broadcaster.js';
 import { SandboxProviderFactory } from './provider-factory.js';
 import type {
 	ExecutionResult,
@@ -444,6 +445,8 @@ export class SandboxManager {
 			createDirs?: boolean;
 			backup?: boolean;
 			provider?: SandboxProvider;
+			userId?: string;
+			projectId?: string;
 		}
 	): Promise<boolean> {
 		await this.ensureInitialized();
@@ -454,6 +457,33 @@ export class SandboxManager {
 			createDirs: options?.createDirs,
 			backup: options?.backup
 		});
+
+		// Broadcast file change event for real-time UI updates
+		if (success) {
+			const session = this.activeSessions.get(sandboxId);
+			const contentString = typeof content === 'string' ? content : content.toString('utf-8');
+
+			// Use 'created' type - the file handlers will handle both creates and updates
+			console.log(`📡 [SandboxManager] Broadcasting file change for:`, filePath, {
+				contentLength: contentString.length,
+				sandboxId,
+				projectId: options?.projectId || session?.projectId
+			});
+
+			fileChangeBroadcaster.broadcast({
+				type: 'created', // Use 'created' - handlers will update existing files
+				path: filePath,
+				content: contentString,
+				timestamp: Date.now(),
+				sandboxId,
+				projectId: options?.projectId || session?.projectId,
+				userId: options?.userId || session?.userId,
+				metadata: {
+					encoding: options?.encoding || 'utf-8',
+					source: 'agent'
+				}
+			});
+		}
 
 		this.updateSessionActivity(sandboxId);
 		return success;
@@ -466,6 +496,8 @@ export class SandboxManager {
 			recursive?: boolean;
 			force?: boolean;
 			provider?: SandboxProvider;
+			userId?: string;
+			projectId?: string;
 		}
 	): Promise<boolean> {
 		await this.ensureInitialized();
@@ -475,6 +507,22 @@ export class SandboxManager {
 			recursive: options?.recursive,
 			force: options?.force
 		});
+
+		// Broadcast file deletion event for real-time UI updates
+		if (success) {
+			const session = this.activeSessions.get(sandboxId);
+			fileChangeBroadcaster.broadcast({
+				type: 'deleted',
+				path: filePath,
+				timestamp: Date.now(),
+				sandboxId,
+				projectId: options?.projectId || session?.projectId,
+				userId: options?.userId || session?.userId,
+				metadata: {
+					source: 'agent'
+				}
+			});
+		}
 
 		this.updateSessionActivity(sandboxId);
 		return success;
