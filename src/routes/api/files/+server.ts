@@ -1,4 +1,5 @@
 import { auth } from '$lib/auth';
+import { fileChangeBroadcaster } from '$lib/services/file-change-broadcaster';
 import { listFiles as listFilesService } from '$lib/services/files-list.service';
 import { filesService } from '$lib/services/files.service';
 import { r2StorageService } from '$lib/services/r2-storage.service';
@@ -92,6 +93,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		switch (operation) {
 			case 'create':
 				result = await createFile({ projectId, sandboxId, path, content: content || '', metadata });
+				// Broadcast file creation event
+				if (result) {
+					fileChangeBroadcaster.broadcast({
+						type: 'created',
+						path,
+						content: content || '',
+						timestamp: Date.now(),
+						projectId,
+						sandboxId,
+						userId: session.user.id,
+						metadata
+					});
+				}
 				break;
 
 			case 'read':
@@ -110,10 +124,34 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					);
 				}
 				result = await updateFile({ projectId, sandboxId, path, content, metadata });
+				// Broadcast file modification event
+				if (result) {
+					fileChangeBroadcaster.broadcast({
+						type: 'modified',
+						path,
+						content,
+						timestamp: Date.now(),
+						projectId,
+						sandboxId,
+						userId: session.user.id,
+						metadata
+					});
+				}
 				break;
 
 			case 'delete':
 				result = await deleteFile({ projectId, sandboxId, path });
+				// Broadcast file deletion event
+				if (result) {
+					fileChangeBroadcaster.broadcast({
+						type: 'deleted',
+						path,
+						timestamp: Date.now(),
+						projectId,
+						sandboxId,
+						userId: session.user.id
+					});
+				}
 				break;
 
 			case 'rename':
@@ -128,6 +166,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					);
 				}
 				result = await renameFile({ projectId, sandboxId, path, newPath });
+				// Broadcast file rename event
+				if (result) {
+					fileChangeBroadcaster.broadcast({
+						type: 'renamed',
+						path,
+						newPath,
+						timestamp: Date.now(),
+						projectId,
+						sandboxId,
+						userId: session.user.id
+					});
+				}
 				break;
 
 			case 'move':
@@ -142,13 +192,22 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					);
 				}
 				result = await moveFile({ projectId, sandboxId, path, newPath });
+				// Broadcast file move event
+				if (result) {
+					fileChangeBroadcaster.broadcast({
+						type: 'renamed', // Move is essentially a rename
+						path,
+						newPath,
+						timestamp: Date.now(),
+						projectId,
+						sandboxId,
+						userId: session.user.id
+					});
+				}
 				break;
 
 			case 'list':
-				result = await listFilesService(
-					{ projectId, sandboxId, path: resolvedPath },
-					{ includeSnippets: false }
-				);
+				result = await listFilesService({ projectId, sandboxId, path: resolvedPath });
 				break;
 
 			default:
