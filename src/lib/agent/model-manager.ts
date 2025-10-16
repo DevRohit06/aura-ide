@@ -3,7 +3,9 @@ import { HeliconeConfigManager } from '$lib/config/helicone.config';
 import modelsData from '$lib/data/models.json';
 import { ChatAnthropic } from '@langchain/anthropic';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import { ChatGroq } from '@langchain/groq';
 import { ChatOpenAI } from '@langchain/openai';
+import { logger } from 'better-auth';
 
 export interface ModelConfig {
 	provider: 'openai' | 'anthropic' | 'groq' | 'openrouter';
@@ -27,7 +29,18 @@ export const MODEL_PRESETS: Record<string, { provider: string; model: string; co
 			if (providerEndpoint) {
 				const desc = m.description || '';
 				const match = desc.match(/API model name: ([^\s]+)/);
-				const apiModelName = match ? match[1] : m.id; // fallback to id if no match
+				let apiModelName = match ? match[1] : m.id; // fallback to id if no match
+
+				// For Groq and other providers, use the providerModelId from the endpoint config
+				const providerModelId =
+					providerEndpoint.endpoint?.modelConfig?.providerModelId ||
+					providerEndpoint.providerModelId;
+
+				// if (providerEndpoint.provider === 'groq' && providerModelId) {
+				// Groq model names can be long and complex, so use the providerModelId directly
+				apiModelName = providerModelId;
+				// }
+
 				MODEL_PRESETS[m.id] = {
 					provider: providerEndpoint.provider || m.author || 'openai',
 					model: apiModelName,
@@ -64,8 +77,13 @@ export class ModelManager {
 			for (const m of all) {
 				const endpoints = m.endpoints || [];
 				for (const endpoint of endpoints) {
-					if (endpoint?.modelConfig?.providerModelId) {
-						this.providerModelIdToId.set(endpoint.modelConfig.providerModelId, m.id);
+					// Map from endpoint's providerModelId
+					if (endpoint?.endpoint?.modelConfig?.providerModelId) {
+						this.providerModelIdToId.set(endpoint.endpoint.modelConfig.providerModelId, m.id);
+					}
+					// Also map from top-level providerModelId
+					if (endpoint?.providerModelId) {
+						this.providerModelIdToId.set(endpoint.providerModelId, m.id);
 					}
 				}
 				// Also build mapping from API model name to id
@@ -85,7 +103,7 @@ export class ModelManager {
 		const modelName = config.model;
 		const cacheKey = `${provider}:${modelName}:${config.temperature ?? 0}`;
 		if (this.models.has(cacheKey)) return this.models.get(cacheKey)!;
-
+		logger.info('[ModelManager] Creating model for config:', config);
 		const model = this.createModel(config);
 		this.models.set(cacheKey, model);
 		return model;
@@ -116,13 +134,11 @@ export class ModelManager {
 	private createModel(config: ModelConfig): BaseChatModel {
 		const provider = config.provider;
 		const model = config.model;
-		const temperature = config.temperature ?? 0;
-		const maxTokens = config.maxTokens;
+		const temperature = config.temperature ?? 0.7;
 
 		const heliconeBase = this.helicone.baseUrl || 'https://oai.helicone.ai/v1';
 		const commonOptions: any = {
-			temperature,
-			...(maxTokens ? { maxTokens } : {})
+			temperature
 		};
 
 		const headers: Record<string, string> = {
@@ -155,10 +171,10 @@ export class ModelManager {
 				});
 
 			case 'groq':
-				return new ChatOpenAI({
+				return new ChatGroq({
 					// Groq exposes an OpenAI-compatible API; route through Helicone gateway
 					model: model,
-					openAIApiKey: env.GROQ_API_KEY || undefined,
+					apiKey: env.GROQ_API_KEY || undefined,
 					configuration: {
 						baseURL: 'https://groq.helicone.ai/openai/v1',
 						defaultHeaders: headers
@@ -170,7 +186,7 @@ export class ModelManager {
 				return new ChatOpenAI({
 					// OpenRouter also supports OpenAI-like semantics
 					model: model,
-					openAIApiKey: env.OPENROUTER_API_KEY || undefined,
+					apiKey: env.OPENROUTER_API_KEY || undefined,
 					configuration: {
 						baseURL: 'https://openrouter.helicone.ai/api/v1',
 						defaultHeaders: {

@@ -1,4 +1,5 @@
 import { env } from '$env/dynamic/private';
+import { mcpToolsService } from '$lib/services/mcp/mcp-tools.service';
 import { sandboxManager } from '$lib/services/sandbox/sandbox-manager';
 import { vectorDbService } from '$lib/services/vector-db.service';
 import { logger } from '$lib/utils/logger.js';
@@ -12,7 +13,7 @@ export const webSearchTool = tool(
 		const { query } = input as { query: string };
 		if (!env.TAVILY_API_KEY) {
 			logger.warn('Tavily API key not configured, returning empty search result');
-			return { answer: null, results: [] };
+			return 'Web search is not configured. Please set TAVILY_API_KEY environment variable.';
 		}
 		const maxResults = 5;
 		const tavily = new TavilySearch({ tavilyApiKey: env.TAVILY_API_KEY, maxResults });
@@ -25,13 +26,21 @@ export const webSearchTool = tool(
 			} else {
 				results = await (tavily as any)(query);
 			}
-			return {
+			const resultData = {
 				answer: results?.answer ?? null,
 				results: results?.results ?? results ?? []
 			};
+
+			if (!resultData.answer && (!resultData.results || resultData.results.length === 0)) {
+				return 'No web search results found for the query.';
+			}
+
+			return JSON.stringify(resultData, null, 2);
 		} catch (error) {
 			console.error('Web search tool error:', error);
-			return { answer: null, results: [] };
+			return (
+				'Error performing web search: ' + (error instanceof Error ? error.message : String(error))
+			);
 		}
 	}) as any,
 	{
@@ -47,14 +56,23 @@ export const codeSearchTool = tool(
 		const { query, topK = 5 } = input as { query: string; topK?: number };
 		try {
 			const results = await vectorDbService.searchSimilarCode(query, 'global', { limit: topK });
-			return (results || []).map((r) => ({
+			const formattedResults = (results || []).map((r) => ({
 				filePath: r.document.filePath,
 				relevance: r.score,
 				snippet: r.document.content.substring(0, 800)
 			}));
+
+			// Ensure we always return a non-empty string for LLM compatibility
+			if (formattedResults.length === 0) {
+				return 'No relevant code snippets found for the query.';
+			}
+
+			return JSON.stringify(formattedResults, null, 2);
 		} catch (error) {
 			console.error('Code search tool error:', error);
-			return [];
+			return (
+				'Error searching codebase: ' + (error instanceof Error ? error.message : String(error))
+			);
 		}
 	}) as any,
 	{
@@ -76,10 +94,13 @@ export const readFileTool = tool(
 		try {
 			const provider = sandboxType as any;
 			const file = await sandboxManager.readFile(sandboxId, filePath, { provider });
-			return file?.content ?? null;
+			if (!file?.content) {
+				return `File "${filePath}" is empty or could not be read.`;
+			}
+			return file.content;
 		} catch (error) {
 			console.error('Read file tool error:', error);
-			return null;
+			return `Error reading file "${filePath}": ${error instanceof Error ? error.message : String(error)}`;
 		}
 	}) as any,
 	{
@@ -95,7 +116,7 @@ export const readFileTool = tool(
 
 // File write tool
 export const writeFileTool = tool(
-	(async (input: any) => {
+	(async (input: any, config: any) => {
 		const { sandboxId, sandboxType, filePath, content } = input as {
 			sandboxId: string;
 			sandboxType?: string;
@@ -104,11 +125,29 @@ export const writeFileTool = tool(
 		};
 		try {
 			const provider = sandboxType as any;
-			const success = await sandboxManager.writeFile(sandboxId, filePath, content, { provider });
-			return { success };
+
+			// Extract userId and projectId from config if available
+			const userId = config?.configurable?.userId;
+			const projectId = config?.configurable?.projectId;
+
+			const success = await sandboxManager.writeFile(sandboxId, filePath, content, {
+				provider,
+				userId,
+				projectId
+			});
+			return JSON.stringify({
+				success,
+				message: success
+					? `File "${filePath}" written successfully.`
+					: `Failed to write file "${filePath}".`
+			});
 		} catch (error) {
 			console.error('Write file tool error:', error);
-			return { success: false, error: error instanceof Error ? error.message : String(error) };
+			return JSON.stringify({
+				success: false,
+				error: error instanceof Error ? error.message : String(error),
+				message: `Error writing file "${filePath}": ${error instanceof Error ? error.message : String(error)}`
+			});
 		}
 	}) as any,
 	{
@@ -134,14 +173,20 @@ export const executeCodeTool = tool(
 		try {
 			const provider = sandboxType as any;
 			const result = await sandboxManager.executeCommand(sandboxId, command, { provider });
-			return result;
+
+			// Ensure result is always a string
+			if (typeof result === 'string') {
+				return result || 'Command executed successfully with no output.';
+			}
+
+			return JSON.stringify(result, null, 2);
 		} catch (error) {
 			console.error('Execute code tool error:', error);
-			return {
+			return JSON.stringify({
 				success: false,
 				output: '',
 				error: error instanceof Error ? error.message : String(error)
-			};
+			});
 		}
 	}) as any,
 	{
@@ -155,11 +200,33 @@ export const executeCodeTool = tool(
 	}
 );
 
+// Get MCP tools (Context7 for documentation search, Memory for persistence)
+const getMCPTools = () => {
+	try {
+		const mcpTools = [];
+
+		// Add Context7 documentation search tool
+		mcpTools.push(mcpToolsService.createContext7Tool());
+
+		// Add Memory tool for knowledge persistence
+		mcpTools.push(mcpToolsService.createMemoryTool());
+
+		// Add any other connected MCP server tools
+		const additionalTools = mcpToolsService.getAllLangChainTools();
+		mcpTools.push(...additionalTools);
+
+		return mcpTools;
+	} catch (error) {
+		logger.warn('Failed to load MCP tools, continuing without them', { error });
+		return [];
+	}
+};
+
 export const tools = [
 	webSearchTool,
 	codeSearchTool,
 	readFileTool,
 	writeFileTool,
-	executeCodeTool
-	// ...mcpTools // Temporarily disabled
+	executeCodeTool,
+	...getMCPTools()
 ];

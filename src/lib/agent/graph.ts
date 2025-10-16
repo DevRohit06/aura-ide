@@ -24,6 +24,22 @@ async function toolsNode(state: typeof AgentState.State) {
 			const toolMessages = result.messages.filter((msg: any) => msg.tool_call_id);
 			logger.info(`Tool execution completed. ${toolMessages.length} tool messages generated.`);
 
+			// Sanitize tool_call_id to ensure compatibility with all LLM providers
+			// Anthropic requires IDs to match ^[a-zA-Z0-9_-]+$
+			toolMessages.forEach((msg: any) => {
+				if (msg.tool_call_id) {
+					// Replace invalid characters with underscores
+					msg.tool_call_id = msg.tool_call_id.replace(/[^a-zA-Z0-9_-]/g, '_');
+				}
+
+				// Ensure content is always a non-empty string
+				if (!msg.content || (Array.isArray(msg.content) && msg.content.length === 0)) {
+					msg.content = 'Tool execution completed with no output.';
+				} else if (typeof msg.content !== 'string') {
+					msg.content = JSON.stringify(msg.content);
+				}
+			});
+
 			// Log tool results for debugging
 			toolMessages.forEach((msg: any, index: number) => {
 				logger.info(`Tool result ${index + 1}:`, {
@@ -59,7 +75,7 @@ async function agentNode(state: typeof AgentState.State) {
 	const messages = [new HumanMessage(systemPrompt), ...(state.messages || [])];
 
 	logger.info('Agent node invoking model with messages, last message length:', messages.length);
-
+	logger.info('Agent is using model config:', state.modelConfig);
 	try {
 		// Resolve model from state.modelConfig or fallback to default
 		const modelConfig = (state as any).modelConfig;
@@ -97,6 +113,38 @@ async function agentNode(state: typeof AgentState.State) {
 		} else {
 			// Fallback for unexpected response format
 			aiMessage = new AIMessage('I received an unexpected response format from the model.');
+		}
+
+		// Sanitize tool_call IDs to ensure compatibility with all LLM providers
+		// Anthropic requires IDs to match ^[a-zA-Z0-9_-]+$
+		if ((aiMessage as any).tool_calls && Array.isArray((aiMessage as any).tool_calls)) {
+			(aiMessage as any).tool_calls = (aiMessage as any).tool_calls.map((tc: any) => {
+				if (tc && tc.id) {
+					return {
+						...tc,
+						id: tc.id.replace(/[^a-zA-Z0-9_-]/g, '_')
+					};
+				}
+				return tc;
+			});
+		}
+
+		// Also sanitize in additional_kwargs if present
+		if (
+			aiMessage.additional_kwargs?.tool_calls &&
+			Array.isArray(aiMessage.additional_kwargs.tool_calls)
+		) {
+			aiMessage.additional_kwargs.tool_calls = aiMessage.additional_kwargs.tool_calls.map(
+				(tc: any) => {
+					if (tc && tc.id) {
+						return {
+							...tc,
+							id: tc.id.replace(/[^a-zA-Z0-9_-]/g, '_')
+						};
+					}
+					return tc;
+				}
+			);
 		}
 
 		// Track usage for auditing
@@ -164,15 +212,26 @@ async function humanReviewNode(state: typeof AgentState.State) {
 
 		// If any tool call is in the sensitive list, request human review
 		if (validToolCalls.some((tc: any) => tc?.name && sensitive.has(tc.name))) {
+			// Log the raw tool call structure for debugging
+			logger.info('Raw tool calls before sanitization:', JSON.stringify(validToolCalls, null, 2));
+			
 			logger.info(
 				'Requesting human review for tool calls:',
-				validToolCalls.map((tc) => ({ name: tc?.name, args: tc?.args || tc?.arguments }))
+				validToolCalls.map((tc) => ({ 
+					name: tc?.name, 
+					// LangChain should normalize to 'args', but we check fallbacks
+					args: tc?.args || tc?.arguments || tc?.input || {},
+					hasArgs: !!tc?.args,
+					hasArguments: !!tc?.arguments,
+					hasInput: !!tc?.input
+				}))
 			);
 
 			// Sanitize tool calls to only include serializable properties
+			// LangChain normalizes to "args", but we support fallbacks for safety
 			const sanitizedToolCalls = validToolCalls.map((tc) => ({
 				name: tc?.name || '',
-				args: tc?.args || tc?.arguments || {},
+				args: tc?.args || tc?.arguments || tc?.input || {},
 				id: tc?.id || '',
 				type: tc?.type || 'tool_call'
 			}));

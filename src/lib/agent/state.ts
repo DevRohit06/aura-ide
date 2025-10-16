@@ -21,6 +21,12 @@ export const AgentState = Annotation.Root({
 	sandboxType: Annotation<'daytona' | 'e2b' | null>({
 		reducer: (_prev, y) => y ?? null
 	}),
+	userId: Annotation<string | null>({
+		reducer: (_prev, y) => y ?? null
+	}),
+	projectId: Annotation<string | null>({
+		reducer: (_prev, y) => y ?? null
+	}),
 	codeContext: Annotation<string[]>({
 		reducer: (x = [], y = []) => [...x, ...y]
 	}),
