@@ -802,7 +802,7 @@
 					}}
 				>
 					{#if browser}
-						<ChatSidebar {project} />
+						<ChatSidebar {project} {user} />
 					{/if}
 				</Resizable.Pane>
 			</Resizable.PaneGroup>
