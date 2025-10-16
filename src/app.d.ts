@@ -45,6 +45,8 @@ declare module '$env/dynamic/private' {
 	export const HELICONE_API_KEY: string;
 	export const OPENAI_API_KEY: string;
 	export const ANTHROPIC_API_KEY: string;
+	export const GROQ_API_KEY: string;
+	export const OPENROUTER_API_KEY: string;
 	export const HELICONE_OPENAI_BASE_URL: string;
 	export const HELICONE_ANTHROPIC_BASE_URL: string;
 	export const HELICONE_BASE_URL: string;
@@ -53,6 +55,7 @@ declare module '$env/dynamic/private' {
 	export const TAVILY_API_KEY: string;
 	export const JWT_SECRET: string;
 	export const DATABASE_URL: string;
+	export const APP_ORIGIN: string;
 
 	export const GITHUB_CLIENT_ID: string;
 	export const GITHUB_CLIENT_SECRET: string;
@@ -63,5 +66,4 @@ declare module '$env/dynamic/private' {
 	export const R2_BUCKET_NAME: string;
 	export const R2_ACCOUNT_ID: string;
 	export const R2_ENDPOINT: string;
-	export const DATABASE_URL: string;
 }

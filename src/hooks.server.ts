@@ -1,6 +1,13 @@
 import { building } from '$app/environment';
 import { auth } from '$lib/auth.js';
+import { initializeMCP } from '$lib/services/mcp/mcp-init.service';
 import { svelteKitHandler } from 'better-auth/svelte-kit';
+
+// Initialize MCP on server startup (only once)
+let mcpInitPromise: Promise<void> | null = null;
+if (!building && !mcpInitPromise) {
+	mcpInitPromise = initializeMCP().catch(console.error);
+}
 
 export async function handle({ event, resolve }) {
 	// Fetch current session from Better Auth
