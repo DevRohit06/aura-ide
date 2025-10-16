@@ -4,14 +4,15 @@
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import { gitChanges } from '$lib/data/dummy-files.js';
 	import { initializeDummyData } from '$lib/data/initialize-dummy-data.js';
+	import { fileWatcher, type FileChangeEvent } from '$lib/services/file-watcher.client';
 	import { filesStore, fileStateActions, tabActions } from '$lib/stores/editor.ts';
-	import { fileActions } from '$lib/stores/files.store.js';
+	import { fileActions, recentlyChangedFiles } from '$lib/stores/files.store.js';
 	import type { Directory, File, FileSystemItem } from '@/types/files';
 	import FilePlusIcon from '@lucide/svelte/icons/file-plus';
 	import CollapseIcon from '@lucide/svelte/icons/fold-vertical';
 	import FolderPlusIcon from '@lucide/svelte/icons/folder-plus';
 	import RefreshIcon from '@lucide/svelte/icons/refresh-ccw';
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import FileExplorerSkeleton from './file-explorer-skeleton.svelte';
 	import FileTreeItem from './file-tree-item.svelte';
 
@@ -30,6 +31,9 @@
 	let isLoadingFiles = $state(false);
 	let filesLoaded = $state(false);
 	let loadError: string | null = $state(null);
+	let retryAttempts = $state(0);
+	let retryTimeout: ReturnType<typeof setTimeout> | null = null;
+	let fileWatcherUnsubscribe: (() => void) | null = null;
 
 	// Load project files from API
 	async function loadProjectFiles() {
@@ -39,17 +43,39 @@
 		loadError = null;
 
 		try {
-			console.log(`📁 Loading files for project ${project.id} (${project.sandboxProvider})`);
+			console.log(
+				`📁 Loading files for project ${project.id} (${project.sandboxProvider}) - fast mode`
+			);
 
+			// Use fast mode for initial load (enables flat recursive listing for better performance)
 			const response = await fetch(
 				`/api/projects/${project.id}/files/list?fastMode=true&includeContent=false`
 			);
-
 			if (!response.ok) {
 				throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 			}
 
 			const result = await response.json();
+
+			// Check if sandbox is unavailable
+			if (result.sandboxUnavailable || result.data?.sandboxUnavailable) {
+				const message = result.message || 'Sandbox is not ready. Please wait and try again.';
+				loadError = message;
+				console.warn('⏳ Sandbox unavailable, will retry shortly');
+				filesLoaded = false;
+
+				// Auto-retry with exponential backoff (max 3 attempts)
+				if (retryAttempts < 3) {
+					const delay = Math.min(5000 * Math.pow(2, retryAttempts), 20000); // Max 20s
+					retryAttempts++;
+					console.log(`🔄 Auto-retry ${retryAttempts}/3 in ${delay}ms`);
+
+					retryTimeout = setTimeout(() => {
+						loadProjectFiles();
+					}, delay);
+				}
+				return;
+			}
 
 			if (result.success && result.data?.files) {
 				// Clear existing files first
@@ -61,7 +87,10 @@
 				}
 
 				filesLoaded = true;
-				console.log(`✅ Loaded ${result.data.files.length} files from ${project.sandboxProvider}`);
+				retryAttempts = 0; // Reset retry counter on success
+				console.log(
+					`✅ Loaded ${result.data.files.length} files from ${project.sandboxProvider} using optimized flat listing`
+				);
 			} else {
 				throw new Error(result.message || 'Failed to load files');
 			}
@@ -73,8 +102,13 @@
 		}
 	}
 
-	// Retry loading files
+	// Retry loading files (manual)
 	async function retryLoadFiles() {
+		retryAttempts = 0; // Reset on manual retry
+		if (retryTimeout) {
+			clearTimeout(retryTimeout);
+			retryTimeout = null;
+		}
 		await loadProjectFiles();
 	}
 
@@ -126,14 +160,41 @@
 		);
 	}
 
-	// Check if file has changes
+	// Check if file has changes (including real-time changes)
 	function hasChanges(fileId: string): boolean {
 		const file = $filesStore.get(fileId);
 		if (!file) return false;
+
+		// Check for recent real-time changes
+		const recentChange = $recentlyChangedFiles.get(fileId);
+		if (recentChange && Date.now() - recentChange.timestamp < 5000) {
+			return true;
+		}
+
 		return (
 			gitChanges[file.name as keyof typeof gitChanges] !== undefined ||
 			fileStateActions.isFileDirty(fileId)
 		);
+	}
+
+	// Get change type for visual indicators
+	function getChangeType(fileId: string): string | undefined {
+		// Check for recent real-time changes first
+		const recentChange = $recentlyChangedFiles.get(fileId);
+		if (recentChange && Date.now() - recentChange.timestamp < 5000) {
+			switch (recentChange.type) {
+				case 'created':
+					return 'A'; // Added
+				case 'modified':
+					return 'M'; // Modified
+				case 'deleted':
+					return 'D'; // Deleted
+			}
+		}
+
+		// Fall back to git changes
+		const file = $filesStore.get(fileId);
+		return file ? gitChanges.find((change) => change.file === file.name)?.state : undefined;
 	}
 
 	// Event handlers
@@ -382,6 +443,129 @@
 	const fileTree = $derived(buildFileTree($filesStore));
 	const filteredTree = $derived(filterFiles(Array.from($filesStore.values()), searchQuery));
 
+	/**
+	 * Handle file changes from agent (via file watcher)
+	 */
+	function handleAgentFileChange(
+		path: string,
+		content: string,
+		type: 'created' | 'modified'
+	): void {
+		console.log(`📡 [FileExplorer] Handling agent file ${type}:`, path);
+
+		const fileId = path;
+		const existingFile = $filesStore.get(fileId);
+
+		if (existingFile && existingFile.type === 'file') {
+			// Update existing file
+			console.log('✏️ [FileExplorer] Updating existing file:', path);
+			fileActions.updateFile(fileId, {
+				content: content,
+				modifiedAt: new Date(),
+				size: content.length
+			});
+
+			// Force reactivity by triggering store update
+			filesStore.update((store) => new Map(store));
+		} else {
+			// Create parent directories if they don't exist
+			console.log('✨ [FileExplorer] Creating new file:', path);
+			const pathParts = path.split('/');
+			const fileName = pathParts[pathParts.length - 1];
+
+			// Create all parent directories
+			let currentPath = '';
+			for (let i = 0; i < pathParts.length - 1; i++) {
+				const part = pathParts[i];
+				const parentPath = currentPath;
+				currentPath = currentPath ? `${currentPath}/${part}` : part;
+
+				// Check if directory exists
+				if (!$filesStore.has(currentPath)) {
+					console.log('📁 [FileExplorer] Creating directory:', currentPath);
+					const newDir: Directory = {
+						id: currentPath,
+						name: part,
+						type: 'directory',
+						path: currentPath,
+						content: '',
+						children: [],
+						modifiedAt: new Date(),
+						createdAt: new Date(),
+						parentId: parentPath || null,
+						permissions: {
+							read: true,
+							write: true,
+							execute: false,
+							delete: true,
+							share: true,
+							owner: 'current-user',
+							collaborators: []
+						},
+						isExpanded: true, // Auto-expand new directories
+						isRoot: i === 0
+					};
+					fileActions.addFile(newDir);
+					// Auto-expand the new directory
+					expandedFolders.add(currentPath);
+				}
+			}
+
+			// Create the file
+			const parentPath = pathParts.slice(0, -1).join('/');
+			const newFile: File = {
+				id: fileId,
+				name: fileName,
+				type: 'file',
+				path: path,
+				content: content,
+				size: content.length,
+				modifiedAt: new Date(),
+				createdAt: new Date(),
+				parentId: parentPath || null,
+				permissions: {
+					read: true,
+					write: true,
+					execute: false,
+					delete: true,
+					share: true,
+					owner: 'current-user',
+					collaborators: []
+				},
+				language: fileName.split('.').pop() || 'plaintext',
+				encoding: 'utf-8',
+				mimeType: 'text/plain',
+				isDirty: false,
+				isReadOnly: false,
+				metadata: {
+					extension: fileName.split('.').pop() || '',
+					lineCount: content.split('\n').length,
+					characterCount: content.length,
+					wordCount: content.split(/\s+/).length,
+					lastCursor: null,
+					bookmarks: [],
+					breakpoints: [],
+					folds: [],
+					searchHistory: []
+				}
+			};
+
+			fileActions.addFile(newFile);
+
+			// Force reactivity
+			expandedFolders = new Set(expandedFolders);
+		}
+	}
+
+	/**
+	 * Handle file deletion from agent
+	 */
+	function handleAgentFileDelete(path: string): void {
+		console.log('🗑️ [FileExplorer] Handling agent file delete:', path);
+		const fileId = path;
+		fileActions.removeFile(fileId);
+	}
+
 	// Load files on mount for real projects
 	onMount(() => {
 		if (project && project.id) {
@@ -395,6 +579,43 @@
 			// Load dummy data for development
 			initializeDummyData();
 			filesLoaded = true;
+		}
+
+		// Subscribe to real-time file watcher for agent changes
+		console.log('📡 [FileExplorer] Subscribing to file watcher');
+		fileWatcherUnsubscribe = fileWatcher.subscribe((event: FileChangeEvent) => {
+			console.log('📡 [FileExplorer] Received file change event:', event);
+
+			// Filter by project if available
+			if (project?.id && event.projectId && event.projectId !== project.id) {
+				console.log('⏭️ [FileExplorer] Skipping event for different project');
+				return;
+			}
+
+			// Handle different event types
+			switch (event.type) {
+				case 'created':
+				case 'modified':
+					if (event.content !== undefined) {
+						handleAgentFileChange(event.path, event.content, event.type);
+					} else {
+						console.warn('⚠️ [FileExplorer] Received event without content:', event);
+					}
+					break;
+				case 'deleted':
+					handleAgentFileDelete(event.path);
+					break;
+			}
+		});
+	});
+
+	onDestroy(() => {
+		if (fileWatcherUnsubscribe) {
+			console.log('🔌 [FileExplorer] Unsubscribing from file watcher');
+			fileWatcherUnsubscribe();
+		}
+		if (retryTimeout) {
+			clearTimeout(retryTimeout);
 		}
 	});
 </script>
@@ -489,9 +710,11 @@
 				{@render renderFileTreeItem(item, 0)}
 			{/each}
 		{:else}
-			{#each fileTree as item (item.path)}
-				{@render renderFileTreeItem(item, 0)}
-			{/each}
+			<div class="px-2">
+				{#each fileTree as item (item.path)}
+					{@render renderFileTreeItem(item, 0)}
+				{/each}
+			</div>
 		{/if}
 	</div>
 </div>
@@ -509,7 +732,7 @@
 			getChildren(item.id, $filesStore).some(
 				(child) => child.type === 'file' && hasChanges(child.path)
 			)}
-		changeType={gitChanges.find((change) => change.file === item.name)?.state}
+		changeType={getChangeType(item.id)}
 		isDirty={fileStateActions.isFileDirty(item.id)}
 		canPaste={!!clipboard}
 		onToggleFolder={toggleFolder}

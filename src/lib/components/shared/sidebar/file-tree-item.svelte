@@ -73,7 +73,7 @@
 				<button
 					class="group flex w-full items-center px-2 py-1 text-left transition-colors hover:bg-accent hover:text-accent-foreground"
 					class:bg-accent={isSelected}
-					style="padding-left: {8 + level * 16}px"
+					style="padding-left: 4px"
 					onclick={() => onToggleFolder?.(item)}
 					draggable="true"
 					ondragstart={(e) => onDragStart?.(e, item)}
@@ -101,7 +101,7 @@
 				<button
 					class="group flex w-full items-center px-2 py-1 text-left transition-colors hover:bg-accent hover:text-accent-foreground"
 					class:bg-accent={isSelected}
-					style="padding-left: {8 + (level + 1) * 16}px"
+					style="padding-left: 4px"
 					onclick={() => onFileClick?.(item)}
 					draggable="true"
 					ondragstart={(e) => onDragStart?.(e, item)}
