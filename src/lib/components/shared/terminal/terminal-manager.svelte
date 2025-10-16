@@ -32,18 +32,14 @@
 		project = undefined
 	}: Props = $props();
 
-	// Terminal session interface
+	// Terminal session interface (output-only)
 	interface TerminalSession {
 		id: string;
 		title: string;
 		created: Date;
 		terminal?: any; // xterm Terminal instance
 		element?: HTMLElement;
-		currentLine: string;
-		commandHistory: string[];
 		error?: string;
-		sandboxSessionId?: string; // Sandbox session ID for this terminal
-		isConnected: boolean;
 	}
 
 	let sessions = $state<TerminalSession[]>([]);
@@ -66,10 +62,9 @@
 
 	// Initialize with project's sandbox session if available
 	onMount(() => {
-		if (project?.sandboxId) {
-			// Create initial terminal connected to project's sandbox session
-			createNewSession();
-		}
+		// Always create initial terminal session
+		console.log('🖥️ Terminal Manager mounted, creating initial session');
+		createNewSession();
 	});
 
 	// Terminal themes with comprehensive color schemes
@@ -132,66 +127,91 @@
 
 	// Initialize xterm for a specific session
 	async function initializeTerminal(sessionId: string) {
+		console.log('🔧 initializeTerminal called for:', sessionId);
 		const session = sessions.find((s) => s.id === sessionId);
 		const element = terminalElements[sessionId];
 
+		console.log('🔍 Element lookup:', {
+			sessionId,
+			hasSession: !!session,
+			hasElement: !!element,
+			elementKeys: Object.keys(terminalElements)
+		});
+
 		if (!session || !element) {
-			console.error('Session or element not found for', sessionId);
+			console.error('❌ Session or element not found for', sessionId, {
+				session: !!session,
+				element: !!element,
+				availableElements: Object.keys(terminalElements)
+			});
 			return;
 		}
 
 		try {
-			console.log('Initializing terminal for session', sessionId);
+			console.log('✅ Initializing terminal for session', sessionId);
 
 			// Import xterm CSS and library
 			await import('@xterm/xterm/css/xterm.css');
 			const { Terminal } = await import('@xterm/xterm');
+			const { FitAddon } = await import('@xterm/addon-fit');
+			const { WebLinksAddon } = await import('@xterm/addon-web-links');
 
-			// Create terminal instance with theme support
+			// Create terminal instance with theme support (read-only output)
 			const currentTheme = mode.current === 'dark' ? terminalThemes.dark : terminalThemes.light;
 			const terminal = new Terminal({
 				theme: currentTheme,
 				fontSize: 14,
 				fontFamily: '"Fira Code", "JetBrains Mono", "Cascadia Code", Consolas, monospace',
-				cursorBlink: true,
-				cursorStyle: 'block',
-				scrollback: 1000,
+				cursorBlink: false, // Disable cursor since it's read-only
+				cursorStyle: 'underline',
+				scrollback: 10000,
 				tabStopWidth: 4,
 				allowTransparency: false,
 				convertEol: true,
 				rightClickSelectsWord: true,
 				macOptionIsMeta: true,
 				scrollOnUserInput: true,
-				altClickMovesCursor: true
+				altClickMovesCursor: true,
+				disableStdin: true // Make terminal read-only (no user input)
 			});
+
+			// Load addons
+			const fitAddon = new FitAddon();
+			terminal.loadAddon(fitAddon);
+			terminal.loadAddon(new WebLinksAddon());
 
 			// Open terminal in DOM
 			terminal.open(element);
 
-			// Set up input handling
-			terminal.onData((data: string) => {
-				handleTerminalInput(sessionId, data);
-			});
-
-			// Write welcome message
-			if (session.sandboxSessionId) {
-				terminal.writeln('\x1b[1;32m✓\x1b[0m Sandbox Terminal Connected!');
-				terminal.writeln(`Project: ${project?.name || 'Unknown'}`);
-				terminal.writeln(`Session: ${session.sandboxSessionId}`);
-			} else {
-				terminal.writeln('\x1b[1;33m⚠\x1b[0m Local Terminal (Sandbox not connected)');
-			}
-			terminal.writeln(`Session: ${session.title}`);
-			terminal.writeln('Type "help" for commands');
-			terminal.write('\r\n');
+			// Fit terminal to container
+			setTimeout(() => {
+				fitAddon.fit();
+			}, 0);
 
 			// Update session with terminal instance
 			session.terminal = terminal;
-			session.currentLine = '';
-			session.commandHistory = [];
+			console.log('💾 Terminal instance saved to session:', sessionId);
 
-			// Write initial prompt
-			await writePrompt(session);
+			// Write initial message
+			console.log('✍️ Writing initial welcome message...');
+			terminal.writeln('\x1b[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m');
+			terminal.writeln('\x1b[1;36m  Output Terminal\x1b[0m');
+			terminal.writeln('\x1b[90m  Read-only terminal for AI responses and command outputs\x1b[0m');
+			terminal.writeln('\x1b[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m');
+			terminal.writeln('');
+			console.log('✅ Initial message written');
+
+			// Handle window resize
+			const resizeObserver = new ResizeObserver(() => {
+				if (session.terminal && fitAddon) {
+					try {
+						fitAddon.fit();
+					} catch (err) {
+						console.warn('Error resizing terminal:', err);
+					}
+				}
+			});
+			resizeObserver.observe(element);
 
 			console.log('Terminal initialized successfully for', sessionId);
 		} catch (err) {
@@ -202,193 +222,68 @@
 		}
 	}
 
-	// Handle terminal input
-	async function handleTerminalInput(sessionId: string, data: string) {
+	// Write output to terminal (public method for external use)
+	/**
+	 * Write output to terminal (public method for external use)
+	 */
+	function writeOutput(sessionId: string, data: string) {
+		console.log('✍️ [TerminalManager] writeOutput called:', {
+			sessionId,
+			dataLength: data?.length,
+			dataPreview: data?.substring(0, 100),
+			hasSessions: sessions.length,
+			activeTabId
+		});
 		const session = sessions.find((s) => s.id === sessionId);
-		if (!session || !session.terminal) return;
-
-		const terminal = session.terminal;
-		const code = data.charCodeAt(0);
-
-		switch (code) {
-			case 13: // Enter
-				terminal.write('\r\n');
-				if (session.currentLine.trim()) {
-					executeCommand(sessionId, session.currentLine.trim());
-					if (session.commandHistory[session.commandHistory.length - 1] !== session.currentLine) {
-						session.commandHistory.push(session.currentLine);
-					}
-				}
-				session.currentLine = '';
-				await writePrompt(session);
-				break;
-
-			case 127: // Backspace
-				if (session.currentLine.length > 0) {
-					session.currentLine = session.currentLine.slice(0, -1);
-					terminal.write('\b \b');
-				}
-				break;
-
-			case 3: // Ctrl+C
-				terminal.write('^C\r\n');
-				session.currentLine = '';
-				await writePrompt(session);
-				break;
-
-			default:
-				if (code >= 32) {
-					// Printable characters
-					session.currentLine += data;
-					terminal.write(data);
-				}
-		}
-	}
-
-	// Get formatted prompt with current working directory
-	async function getPrompt(session: TerminalSession): Promise<string> {
-		if (session.isConnected && session.sandboxSessionId) {
+		console.log('📋 [TerminalManager] Session lookup:', {
+			found: !!session,
+			hasTerminal: !!session?.terminal,
+			sessionId,
+			availableSessions: sessions.map((s) => ({ id: s.id, hasTerminal: !!s.terminal }))
+		});
+		if (session?.terminal) {
+			console.log('✅ [TerminalManager] Writing to xterm terminal:', data.substring(0, 100));
 			try {
-				// TODO: Implement sandbox working directory retrieval
-				const workingDir = session.currentDirectory || '/home/user';
-				// Show just the directory name if it's a project directory
-				const dirName = workingDir.split('/').pop() || workingDir;
-				return `\x1b[1;34m${dirName}\x1b[0m$ `;
+				session.terminal.write(data);
+				console.log('✅ [TerminalManager] Write successful');
 			} catch (error) {
-				console.warn('Failed to get working directory:', error);
+				console.error('❌ [TerminalManager] Write failed:', error);
 			}
-		}
-		return '$ ';
-	}
-
-	// Write prompt to terminal
-	async function writePrompt(session: TerminalSession) {
-		if (!session.terminal) return;
-		const prompt = await getPrompt(session);
-		session.terminal.write(prompt);
-	}
-
-	// Execute command in terminal
-	async function executeCommand(sessionId: string, cmd: string) {
-		const session = sessions.find((s) => s.id === sessionId);
-		if (!session || !session.terminal) return;
-
-		const terminal = session.terminal;
-		const trimmed = cmd.trim();
-
-		// Add command to history
-		session.commandHistory.push(trimmed);
-
-		// Handle special local commands
-		if (trimmed === 'clear') {
-			terminal.clear();
-			await writePrompt(session);
-			return;
-		}
-
-		if (trimmed === 'help') {
-			const helpText = [
-				'Available commands:',
-				'  ls                List files',
-				'  cd <dir>          Change directory',
-				'  pwd               Print working directory',
-				'  cat <file>        Display file contents',
-				'  echo <text>       Display text',
-				'  mkdir <dir>       Create directory',
-				'  touch <file>      Create file',
-				'  rm <file>         Remove file',
-				'  clear             Clear terminal',
-				'  help              Show this help',
-				'  history           Show command history',
-				'  whoami            Show session info',
-				''
-			];
-			helpText.forEach((line) => terminal.writeln(line));
-			await writePrompt(session);
-			return;
-		}
-
-		if (trimmed === 'history') {
-			session.commandHistory.forEach((hist, i) => {
-				terminal.writeln(`  ${i + 1}  ${hist}`);
+		} else {
+			console.warn('⚠️ [TerminalManager] Cannot write to terminal: session or terminal not found', {
+				sessionId,
+				availableSessions: sessions.map((s) => s.id),
+				sessionHasTerminal: session ? !!session.terminal : 'no session'
 			});
-			await writePrompt(session);
-			return;
 		}
-
-		if (trimmed === 'whoami') {
-			terminal.writeln(`Session: ${session.title} (${session.id})`);
-			terminal.writeln(`Created: ${session.created.toLocaleString()}`);
-			if (session.sandboxSessionId) {
-				terminal.writeln(`Sandbox Session: ${session.sandboxSessionId}`);
-				terminal.writeln(`Status: ${session.isConnected ? 'Connected' : 'Disconnected'}`);
-			}
-			await writePrompt(session);
-			return;
-		}
-
-		try {
-			// If sandbox session is available, execute real commands
-			if (session.sandboxSessionId && project?.id) {
-				// TODO: Implement sandbox command execution
-				terminal.writeln(`\x1b[33mSandbox execution not yet implemented\x1b[0m`);
-				await writePrompt(session);
-				return;
-			}
-
-			// Fallback to local simulation for commands
-			const parts = trimmed.split(' ');
-			const command = parts[0];
-			const args = parts.slice(1);
-
-			switch (command) {
-				case 'echo':
-					terminal.writeln(args.join(' '));
-					break;
-				case 'date':
-					terminal.writeln(new Date().toString());
-					break;
-				default:
-					if (session.sandboxSessionId) {
-						terminal.writeln(`\x1b[31mSandbox session not available\x1b[0m`);
-					} else {
-						terminal.writeln(`\x1b[33mLocal simulation: ${command} not implemented\x1b[0m`);
-						terminal.writeln('Commands available: echo, date, help, clear, history, whoami');
-					}
-			}
-		} catch (error) {
-			console.error('Command execution error:', error);
-			terminal.writeln(
-				`\x1b[31mError: ${error instanceof Error ? error.message : 'Unknown error'}\x1b[0m`
-			);
-		}
-
-		await writePrompt(session);
-	}
-
-	// Initialize sandbox session for terminal
-	async function initializeSandboxSession(session: TerminalSession): Promise<void> {
-		if (!project?.id) return;
-
-		try {
-			// TODO: Implement sandbox session initialization
-			console.log('Sandbox session initialization not yet implemented');
-			session.isConnected = false;
-			if (session.terminal) {
-				session.terminal.writeln(
-					'\x1b[1;33m⚠\x1b[0m Sandbox not configured - using local terminal simulation'
-				);
-			}
-		} catch (error) {
-			console.error('Failed to initialize sandbox session:', error);
-			session.isConnected = false;
-			if (session.terminal) {
-				session.terminal.writeln(
-					'\x1b[1;33m⚠\x1b[0m Sandbox connection failed - using local terminal'
-				);
-			}
+	} // Write line to terminal (public method for external use)
+	function writeLine(sessionId: string, line: string) {
+		const session = sessions.find((s) => s.id === sessionId);
+		if (session?.terminal) {
+			session.terminal.writeln(line);
 		}
 	}
+
+	// Clear terminal (public method for external use)
+	function clearTerminal(sessionId: string) {
+		const session = sessions.find((s) => s.id === sessionId);
+		if (session?.terminal) {
+			session.terminal.clear();
+		}
+	}
+
+	// Get active session ID (for external access)
+	function getActiveSessionId(): string | null {
+		return activeTabId;
+	}
+
+	// Check if terminal manager is ready
+	function isReady(): boolean {
+		return sessions.length > 0 && activeTabId !== null;
+	}
+
+	// Export functions for parent component to use
+	export { writeOutput, writeLine, clearTerminal, getActiveSessionId, isReady };
 
 	// Create new terminal session
 	async function createNewSession() {
@@ -398,38 +293,31 @@
 		}
 
 		const sessionId = `terminal-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+		console.log(`🆕 Creating new terminal session: ${sessionId}`);
+
 		const newSession: TerminalSession = {
 			id: sessionId,
 			title: `Terminal ${nextSessionNumber}`,
-			created: new Date(),
-			currentLine: '',
-			commandHistory: [],
-			currentDirectory: '/home/user',
-			sandboxSessionId: undefined,
-			isConnected: false
+			created: new Date()
 		};
 
 		sessions = [...sessions, newSession];
 		activeTabId = sessionId;
 		nextSessionNumber++;
 
+		console.log(`📊 Sessions after creation:`, sessions.length, 'Active:', activeTabId);
+
 		// Wait for DOM to update
 		await tick();
+		console.log('⏰ DOM updated, waiting 100ms before terminal init');
 
 		// Initialize terminal after DOM is ready
-		setTimeout(async () => {
+		setTimeout(() => {
+			console.log('🚀 Initializing terminal for session:', sessionId);
 			initializeTerminal(sessionId);
-
-			// Initialize sandbox session if project is available
-			if (project) {
-				const session = sessions.find((s) => s.id === sessionId);
-				if (session) {
-					await initializeSandboxSession(session);
-				}
-			}
 		}, 100);
 
-		console.log(`Created new terminal session: ${sessionId}`);
+		console.log(`✅ Terminal session created: ${sessionId}`);
 	}
 
 	// Close terminal session
