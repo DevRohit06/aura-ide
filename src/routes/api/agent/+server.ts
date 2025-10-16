@@ -321,9 +321,10 @@ function extractToolCallsMetadata(messages: any[]): Record<string, any> {
 	}
 
 	// Extract and sanitize tool calls for metadata
+	// Anthropic uses "input", OpenAI uses "arguments", LangChain normalizes to "args"
 	const sanitizedToolCalls = toolCalls.map((tc: any) => ({
 		name: tc?.name || tc?.function?.name || '',
-		arguments: tc?.args || tc?.arguments || tc?.function?.arguments || {},
+		arguments: tc?.args || tc?.input || tc?.arguments || tc?.function?.arguments || {},
 		id: tc?.id || '',
 		type: tc?.type || 'function'
 	}));
@@ -416,9 +417,10 @@ function sanitizeToolCalls(toolCalls: any): any[] {
 	if (Array.isArray(toolCalls)) {
 		return toolCalls.map((tc) => {
 			if (!tc) return {};
+			// Anthropic uses "input", OpenAI uses "arguments", LangChain normalizes to "args"
 			return {
 				name: tc.name || '',
-				args: tc.args || tc.arguments || {},
+				args: tc.args || tc.input || tc.arguments || {},
 				id: tc.id || '',
 				type: tc.type || 'tool_call'
 			};
@@ -439,7 +441,13 @@ function sanitizeToolCalls(toolCalls: any): any[] {
 			return [
 				{
 					name: toolCalls.name || toolCalls.function?.name || '',
-					args: toolCalls.args || toolCalls.arguments || toolCalls.function?.arguments || {},
+					// Anthropic uses "input", OpenAI uses "arguments", LangChain normalizes to "args"
+					args:
+						toolCalls.args ||
+						toolCalls.input ||
+						toolCalls.arguments ||
+						toolCalls.function?.arguments ||
+						{},
 					id: toolCalls.id || '',
 					type: toolCalls.type || 'tool_call'
 				}
@@ -457,7 +465,8 @@ function sanitizeToolCalls(toolCalls: any): any[] {
  */
 async function applyEdits(
 	sandboxId: string,
-	edits: Array<{ filePath: string; content: string }>
+	edits: Array<{ filePath: string; content: string }>,
+	context?: { userId?: string; projectId?: string }
 ): Promise<EditResult[]> {
 	const results: EditResult[] = [];
 
@@ -467,7 +476,9 @@ async function applyEdits(
 			const previousContent = rawPrev && typeof rawPrev !== 'string' ? String(rawPrev) : rawPrev;
 
 			const success = await sandboxManager.writeFile(sandboxId, edit.filePath, edit.content, {
-				createDirs: true
+				createDirs: true,
+				userId: context?.userId,
+				projectId: context?.projectId
 			});
 
 			results.push({
@@ -542,6 +553,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			currentFile: currentFile || null,
 			sandboxId: sandboxId || null,
 			sandboxType: sandboxType || null,
+			userId: userId || null,
+			projectId: projectId || null,
 			useMorph: !!useMorph,
 			codeContext: [],
 			terminalOutput: [],
@@ -549,8 +562,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			modelConfig: finalModelConfig
 		};
 
-		// Invoke agent
-		const config = { configurable: { thread_id: actualThreadId } };
+		// Invoke agent with userId and projectId in config for tool execution context
+		const config = {
+			configurable: {
+				thread_id: actualThreadId,
+				userId: userId,
+				projectId: projectId
+			}
+		};
 		const result = await agentGraph.invoke(initialState, config);
 
 		// Check if the graph was interrupted for human review
@@ -652,7 +671,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 export const PUT: RequestHandler = async ({ request, locals }) => {
 	// Read body once at the start
 	const body = await request.json();
-	const { threadId, action, edits, interrupt, newModelName, projectId } = body;
+	const { threadId, action, edits, interrupt, newModelName, projectId, streamResponse } = body;
 
 	const userId = locals?.user?.id || 'default';
 
@@ -671,7 +690,13 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
 				{ status: 400 }
 			);
 		}
-		const config = { configurable: { thread_id: threadId } };
+		const config = {
+			configurable: {
+				thread_id: threadId,
+				userId: userId,
+				projectId: projectId
+			}
+		};
 
 		// Extract tool calls and state
 		const toolCalls = sanitizeToolCalls(interrupt?.toolCalls || interrupt?.data?.toolCalls || []);
@@ -709,7 +734,7 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
 			}
 
 			if (editsToApply.length > 0) {
-				appliedEdits = await applyEdits(sandboxId, editsToApply);
+				appliedEdits = await applyEdits(sandboxId, editsToApply, { userId, projectId });
 			}
 		}
 
@@ -721,21 +746,71 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
 
 		// Resume agent with Command
 		const result = await agentGraph.invoke(new Command({ resume: humanDecision }), config);
+
+		// Check if there's another interrupt
+		if ((result as any).__interrupt__) {
+			const interruptData = (result as any).__interrupt__[0];
+			logger.info('Another interrupt detected after approval, returning interrupt info');
+
+			return json({
+				success: true,
+				applied: appliedEdits,
+				interrupt: {
+					toolCalls: interruptData.value?.toolCalls || [],
+					stateSnapshot: interruptData.value?.stateSnapshot || {},
+					reason: interruptData.value?.reason || 'Human approval required'
+				},
+				metadata: {
+					awaitingHumanInput: true,
+					currentFile: result.currentFile,
+					sandboxId: result.sandboxId,
+					sandboxType: result.sandboxType
+				}
+			});
+		}
+
 		const lastMessage = result.messages?.[result.messages?.length - 1];
 		const resumeContent = extractMessageContent(lastMessage?.content ?? 'Action completed');
+
+		// Extract tool results from message history
+		let toolResults = extractToolResults(result.messages || []);
+
+		// If we have applied edits but no tool results from messages, create them from applied edits
+		if (appliedEdits.length > 0 && toolResults.length === 0) {
+			toolResults = appliedEdits.map((edit) => ({
+				tool_name: 'write_file',
+				content: edit.success
+					? `✅ Successfully wrote ${edit.filePath}`
+					: `❌ Failed to write ${edit.filePath}: ${edit.error || 'Unknown error'}`,
+				success: edit.success,
+				message: edit.success
+					? `Successfully wrote ${edit.filePath}`
+					: `Failed to write ${edit.filePath}: ${edit.error || 'Unknown error'}`
+			}));
+			logger.info(`[PUT /api/agent] Created ${toolResults.length} tool results from applied edits`);
+		}
+
+		const toolResultsSummary =
+			toolResults.length > 0
+				? `\n\n**Tool Execution Results:**\n${formatToolResults(toolResults)}`
+				: '';
+
+		// Combine assistant response with tool results
+		const fullContent = resumeContent + toolResultsSummary;
 
 		// Extract tool calls metadata for resume response
 		const toolCallsMetadata = extractToolCallsMetadata(result.messages);
 
-		// Save response
-		const resumeMessageDoc = createMessageDoc(threadId, userId, resumeContent, 'assistant', {
+		// Save response with tool results
+		const resumeMessageDoc = createMessageDoc(threadId, userId, fullContent, 'assistant', {
 			projectId,
 			metadata: {
 				model: `${result.modelConfig?.provider}/${result.modelConfig?.model}`,
 				provider: result.modelConfig?.provider,
 				interruptAction: action,
 				appliedEdits: appliedEdits.length,
-				...toolCallsMetadata
+				...toolCallsMetadata,
+				toolResults: toolResults.length > 0 ? toolResults : undefined
 			}
 		});
 		await DatabaseService.createChatMessage(resumeMessageDoc);
@@ -743,7 +818,8 @@ export const PUT: RequestHandler = async ({ request, locals }) => {
 		return json({
 			success: true,
 			applied: appliedEdits,
-			response: resumeContent,
+			response: fullContent,
+			toolResults: toolResults.length > 0 ? toolResults : undefined,
 			metadata: {
 				awaitingHumanInput: result.awaitingHumanInput,
 				currentFile: result.currentFile,

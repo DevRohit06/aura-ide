@@ -13,8 +13,19 @@ import type { RequestHandler } from './$types';
 
 // Types for SSE events
 interface SSEEvent {
-	type: 'start' | 'thinking' | 'tool_call' | 'tool_result' | 'content' | 'complete' | 'error';
-	data: any;
+	type:
+		| 'start'
+		| 'thinking'
+		| 'tool_call'
+		| 'tool_result'
+		| 'content'
+		| 'complete'
+		| 'error'
+		| 'output'
+		| 'stdout'
+		| 'command';
+	data?: any;
+	content?: string;
 	timestamp: number;
 }
 
@@ -96,6 +107,57 @@ function convertToLangChainMessages(messages: any[]): (HumanMessage | AIMessage)
 		const content = String(msg.content || '');
 		return msg.role === 'assistant' ? new AIMessage(content) : new HumanMessage(content);
 	});
+}
+
+/**
+ * Extracts readable text content from LangChain/Anthropic message content
+ * Handles both string content and structured content blocks
+ */
+function extractMessageContent(content: any): string {
+	if (typeof content === 'string') {
+		return content;
+	}
+
+	if (Array.isArray(content)) {
+		// Handle array of content blocks (Anthropic format)
+		return content
+			.map((block) => {
+				if (typeof block === 'string') return block;
+				if (block && typeof block === 'object' && block.type === 'text') {
+					return block.text || '';
+				}
+				if (block && typeof block === 'object' && block.content) {
+					return String(block.content);
+				}
+				// Ignore tool_use blocks - they're handled separately
+				if (block && typeof block === 'object' && block.type === 'tool_use') {
+					return '';
+				}
+				return String(block);
+			})
+			.filter(Boolean)
+			.join('\n');
+	}
+
+	if (content && typeof content === 'object') {
+		// Try to extract text from common object structures
+		if (content.text) return String(content.text);
+		if (content.content) return String(content.content);
+		if (content.message) return String(content.message);
+
+		// Fallback: stringify
+		try {
+			const str = JSON.stringify(content, null, 2);
+			if (str.length > 500) {
+				return `Response data (${Object.keys(content).length} properties)`;
+			}
+			return str;
+		} catch {
+			return 'Complex response object';
+		}
+	}
+
+	return String(content);
 }
 
 // Resolve model configuration
@@ -204,46 +266,158 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					};
 
 					// Invoke agent with streaming
-					const config = { configurable: { thread_id: actualThreadId } };
-					const result = await agentGraph.invoke(initialState, config);
+					const config = {
+						configurable: { thread_id: actualThreadId },
+						streamMode: 'values' as const
+					};
 
-					// Check for interrupts
-					if ((result as any).__interrupt__) {
-						const interruptData = (result as any).__interrupt__[0];
-						enqueueEvent({
-							type: 'tool_call',
-							data: {
-								interrupt: true,
-								toolCalls: interruptData.value?.toolCalls || [],
-								stateSnapshot: interruptData.value?.stateSnapshot || {},
-								reason: interruptData.value?.reason || 'Human approval required'
-							},
-							timestamp: Date.now()
+					let lastContent = '';
+					let assistantMessage = '';
+					let hadInterrupt = false;
+
+					// Use stream() instead of invoke() to get real-time updates
+					for await (const chunk of await agentGraph.stream(initialState, config)) {
+						logger.info('Stream chunk received:', {
+							hasMessages: !!chunk.messages,
+							messageCount: chunk.messages?.length,
+							lastMessageType: chunk.messages?.[chunk.messages.length - 1]?.constructor?.name
 						});
-					} else {
-						// Extract and send response
-						const lastMessage = result.messages?.[result.messages?.length - 1];
-						const content = lastMessage?.content || 'No response';
 
-						// Stream content in chunks (simulate typing)
-						const contentStr = String(content);
-						const chunkSize = 10;
-						for (let i = 0; i < contentStr.length; i += chunkSize) {
-							const chunk = contentStr.slice(i, i + chunkSize);
+						// Check for interrupts
+						if ((chunk as any).__interrupt__) {
+							hadInterrupt = true;
+							const interruptData = (chunk as any).__interrupt__[0];
 							enqueueEvent({
-								type: 'content',
-								data: { chunk, isComplete: i + chunkSize >= contentStr.length },
+								type: 'tool_call',
+								data: {
+									interrupt: true,
+									toolCalls: interruptData.value?.toolCalls || [],
+									stateSnapshot: interruptData.value?.stateSnapshot || {},
+									reason: interruptData.value?.reason || 'Human approval required'
+								},
 								timestamp: Date.now()
 							});
-							// Small delay for typing effect
-							await new Promise((resolve) => setTimeout(resolve, 50));
+							break; // Stop streaming on interrupt
 						}
+
+						// Process messages in the chunk
+						if (chunk.messages && Array.isArray(chunk.messages)) {
+							const lastMessage = chunk.messages[chunk.messages.length - 1];
+
+							// Handle tool messages (command outputs)
+							if (lastMessage && (lastMessage as any).tool_call_id) {
+								const toolMessage = lastMessage as any;
+								const rawContent = toolMessage.content || '';
+
+								// Normalize content to string for logging and display
+								const toolOutput =
+									typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent, null, 2);
+
+								// For logging, create a safe preview
+								const contentPreview =
+									typeof rawContent === 'string'
+										? rawContent.substring(0, 100)
+										: JSON.stringify(rawContent).substring(0, 100);
+
+								logger.info('Tool output detected:', {
+									tool_call_id: toolMessage.tool_call_id,
+									contentType: typeof rawContent,
+									contentLength: toolOutput.length,
+									contentPreview
+								});
+
+								// Emit tool result event with the actual output
+								enqueueEvent({
+									type: 'tool_result',
+									data: {
+										tool_call_id: toolMessage.tool_call_id,
+										output: toolOutput,
+										content: toolOutput
+									},
+									timestamp: Date.now()
+								});
+
+								// Also emit as stdout for terminal display
+								if (toolOutput && toolOutput.trim()) {
+									enqueueEvent({
+										type: 'output',
+										data: toolOutput,
+										content: toolOutput,
+										timestamp: Date.now()
+									});
+								}
+							}
+
+							// Handle AI messages (assistant responses)
+							if (lastMessage && lastMessage.constructor?.name === 'AIMessage') {
+								const rawContent = (lastMessage as any).content || '';
+
+								// Extract text content properly (handles Anthropic structured format)
+								const content = extractMessageContent(rawContent);
+
+								// Get tool calls from LangChain's normalized format
+								// LangChain's bindTools() should already normalize these to have 'args'
+								const toolCallsFromMessage = (lastMessage as any).tool_calls || [];
+
+								// If there are tool calls, emit them
+								// We rely on LangChain's normalization rather than extracting from content
+								if (toolCallsFromMessage.length > 0) {
+									logger.info('Tool calls detected in AI message:', {
+										count: toolCallsFromMessage.length,
+										tools: toolCallsFromMessage.map((tc: any) => tc.name || tc.function?.name),
+										firstToolCall: toolCallsFromMessage[0] // Log first one for debugging
+									});
+
+									enqueueEvent({
+										type: 'tool_call',
+										data: {
+											toolCalls: toolCallsFromMessage.map((tc: any) => ({
+												id: tc.id || '',
+												name: tc.name || tc.function?.name || '',
+												// LangChain should have normalized this to 'args'
+												arguments: tc.args || tc.arguments || tc.function?.arguments || {},
+												type: tc.type || 'function'
+											}))
+										},
+										timestamp: Date.now()
+									});
+								}
+								if (content && content !== lastContent) {
+									// Stream new content
+									const newContent = content.substring(lastContent.length);
+									if (newContent) {
+										const chunkSize = 10;
+										for (let i = 0; i < newContent.length; i += chunkSize) {
+											const textChunk = newContent.slice(i, i + chunkSize);
+											enqueueEvent({
+												type: 'content',
+												data: { chunk: textChunk, isComplete: false },
+												timestamp: Date.now()
+											});
+											await new Promise((resolve) => setTimeout(resolve, 30));
+										}
+									}
+									lastContent = content;
+									assistantMessage = content;
+								}
+							}
+						}
+					}
+
+					// If we didn't have an interrupt, save the assistant response
+					if (!hadInterrupt && assistantMessage) {
+						// Send final content complete event
+						enqueueEvent({
+							type: 'content',
+							data: { chunk: '', isComplete: true },
+							timestamp: Date.now()
+						});
 
 						// Save assistant response
 						const assistantMessageDoc = createMessageDoc(
 							actualThreadId,
 							userId,
-							contentStr,
+							assistantMessage,
 							'assistant',
 							{
 								projectId,
