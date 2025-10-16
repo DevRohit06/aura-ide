@@ -38,12 +38,12 @@ export type ChatThread = {
 export const chatThreadsStore = writable<Record<string, ChatThread[]>>({});
 
 export const chatThreadsActions = {
-	createThread(projectId: string, title?: string) {
-		const id = crypto.randomUUID();
+	createThread(projectId: string, title?: string, id?: string) {
+		const threadId = id || crypto.randomUUID();
 		const now = new Date().toISOString();
 		const thread: ChatThread = {
-			id,
-			title: title ?? `Thread ${now}`,
+			id: threadId,
+			title: title ?? `New Thread`,
 			projectId,
 			messages: [],
 			createdAt: now,
@@ -53,12 +53,13 @@ export const chatThreadsActions = {
 
 		chatThreadsStore.update((store) => {
 			const list = store[projectId] ?? [];
+			// Deselect all other threads
 			const newList = list.map((t) => ({ ...t, selected: false })).concat(thread);
 			store[projectId] = newList;
 			return { ...store };
 		});
 
-		return id;
+		return threadId;
 	},
 
 	getThreads(projectId: string) {
@@ -73,7 +74,16 @@ export const chatThreadsActions = {
 	selectThread(projectId: string, threadId: string) {
 		chatThreadsStore.update((store) => {
 			const list = store[projectId] ?? [];
-			store[projectId] = list.map((t) => ({ ...t, selected: t.id === threadId }));
+			// Check if already selected to prevent unnecessary updates
+			const currentlySelected = list.find((t) => t.selected);
+			if (currentlySelected?.id === threadId) {
+				// Already selected, no update needed
+				return store;
+			}
+
+			// Create new array with updated selection
+			const updatedList = list.map((t) => ({ ...t, selected: t.id === threadId }));
+			store[projectId] = updatedList;
 			return { ...store };
 		});
 	},
@@ -112,9 +122,14 @@ export const chatThreadsActions = {
 					.concat(newThread);
 				return { ...store };
 			}
-			list[i].messages.push(msg);
-			list[i].updatedAt = new Date().toISOString();
-			store[projectId] = list.map((t) => ({ ...t, selected: t.id === threadId }));
+			// Create new array to trigger reactivity
+			const updatedList = [...list];
+			updatedList[i] = {
+				...updatedList[i],
+				messages: [...updatedList[i].messages, msg],
+				updatedAt: new Date().toISOString()
+			};
+			store[projectId] = updatedList.map((t) => ({ ...t, selected: t.id === threadId }));
 			return { ...store };
 		});
 		return msg.id;
@@ -130,20 +145,49 @@ export const chatThreadsActions = {
 		chatThreadsStore.update((store) => {
 			const list = store[projectId] ?? [];
 			const threadIndex = list.findIndex((t) => t.id === threadId);
-			if (threadIndex === -1) return { ...store };
+			if (threadIndex === -1) return store;
 
 			const messageIndex = list[threadIndex].messages.findIndex((m) => m.id === messageId);
-			if (messageIndex === -1) return { ...store };
+			if (messageIndex === -1) return store;
 
-			list[threadIndex].messages[messageIndex].content = content;
-			if (metadata) {
-				list[threadIndex].messages[messageIndex].metadata = {
-					...list[threadIndex].messages[messageIndex].metadata,
-					...metadata
-				};
+			// Check if content actually changed
+			const existingMessage = list[threadIndex].messages[messageIndex];
+			if (
+				existingMessage.content === content &&
+				JSON.stringify(existingMessage.metadata) === JSON.stringify(metadata)
+			) {
+				// No changes, skip update
+				return store;
 			}
-			list[threadIndex].updatedAt = new Date().toISOString();
-			store[projectId] = [...list];
+
+			// Create new message object to trigger reactivity
+			const updatedMessage = {
+				...existingMessage,
+				content,
+				metadata: metadata
+					? {
+							...existingMessage.metadata,
+							...metadata
+						}
+					: existingMessage.metadata
+			};
+
+			// Create new messages array
+			const updatedMessages = [...list[threadIndex].messages];
+			updatedMessages[messageIndex] = updatedMessage;
+
+			// Create new thread object
+			const updatedThread = {
+				...list[threadIndex],
+				messages: updatedMessages,
+				updatedAt: new Date().toISOString()
+			};
+
+			// Create new list
+			const updatedList = [...list];
+			updatedList[threadIndex] = updatedThread;
+
+			store[projectId] = updatedList;
 			return { ...store };
 		});
 	},
@@ -153,10 +197,15 @@ export const chatThreadsActions = {
 			const list = store[projectId] ?? [];
 			const i = list.findIndex((t) => t.id === threadId);
 			if (i > -1) {
-				list[i].title = title;
-				list[i].updatedAt = new Date().toISOString();
+				// Create new array to trigger reactivity
+				const updatedList = [...list];
+				updatedList[i] = {
+					...updatedList[i],
+					title,
+					updatedAt: new Date().toISOString()
+				};
+				store[projectId] = updatedList;
 			}
-			store[projectId] = list;
 			return { ...store };
 		});
 	},

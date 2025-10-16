@@ -39,7 +39,7 @@ export interface AgentMessage {
 
 // Core agent state
 export const agentState = writable<AgentState>({
-	status: 'disconnected',
+	status: 'idle',
 	lastActivity: new Date(),
 	toolsExecuting: []
 });
@@ -53,7 +53,7 @@ export const connectionState = writable<{
 	connecting: boolean;
 	error?: string;
 	lastConnected?: Date;
-}>({ connected: false, connecting: false });
+}>({ connected: true, connecting: false });
 
 // Derived states for easy UI consumption
 export const isAgentBusy = derived(agentState, ($state) =>
@@ -94,7 +94,8 @@ export const agentStatusDisplay = derived(agentState, ($state) => {
 // Can the agent work?
 export const canAgentWork = derived(
 	[agentState, connectionState],
-	([$agent, $connection]) => $agent.status === 'idle' && $connection.connected
+	([$agent, $connection]) =>
+		($agent.status === 'idle' || $agent.status === 'connected') && $connection.connected
 );
 
 // Alias for backward compatibility
