@@ -8,6 +8,20 @@ export type ChatMessage = {
 	metadata?: {
 		agentModel?: string;
 		tokens?: number;
+		isStreaming?: boolean;
+		hasToolCalls?: boolean;
+		toolCallCount?: number;
+		toolCalls?: Array<{
+			name: string;
+			arguments: Record<string, any>;
+			id?: string;
+		}>;
+		toolResults?: Array<{
+			success: boolean;
+			message: string;
+			tool_name?: string;
+			tool_call_id?: string;
+		}>;
 		agentInterrupt?: {
 			toolCalls: Array<{
 				name: string;

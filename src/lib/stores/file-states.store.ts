@@ -1,4 +1,3 @@
-import { fileOperationsAPI } from '@/services/file-operations-api.service';
 import type { FileEditorState } from '@/types/editor-state';
 import type { CursorPosition, SelectionRange } from '@/types/files';
 import { derived, get, writable } from 'svelte/store';
@@ -248,16 +247,13 @@ export const fileStateActions = {
 	},
 
 	// Save file (mark as not dirty and update last saved time)
-	async saveFile(fileId: string, projectId?: string): Promise<boolean> {
+	async saveFile(
+		fileId: string,
+		projectId?: string,
+		sandboxId?: string,
+		sandboxProvider?: string
+	): Promise<boolean> {
 		try {
-			// Get current project ID if not provided
-			if (!projectId) {
-				const { projectActions } = await import('./current-project.store.js');
-				projectId = projectActions.getCurrentProject() || undefined;
-			}
-
-			console.log('💾 Saving file with project ID:', projectId);
-
 			// Get file from store
 			const files = get(filesStore);
 			const file = files.get(fileId);
@@ -277,16 +273,59 @@ export const fileStateActions = {
 				return false;
 			}
 
-			// Call the API directly
-			const result = await fileOperationsAPI.saveFile({
-				path: file.path,
-				content: file.content || '',
-				projectId,
-				metadata: {
-					modifiedAt: new Date().toISOString(),
-					size: (file.content || '').length
+			// Get project context if not provided
+			if (!projectId || !sandboxId) {
+				// Try to get from URL or global context
+				if (typeof window !== 'undefined') {
+					const urlParts = window.location.pathname.split('/');
+					const editorIndex = urlParts.indexOf('editor');
+					if (editorIndex !== -1 && urlParts[editorIndex + 1]) {
+						projectId = projectId || urlParts[editorIndex + 1];
+					}
 				}
+
+				// Get from current project store if available
+				if (!projectId) {
+					const { projectActions } = await import('./current-project.store.js');
+					projectId = projectActions.getCurrentProject() || undefined;
+				}
+			}
+
+			console.log('💾 Saving file:', {
+				path: file.path,
+				projectId,
+				sandboxId,
+				sandboxProvider,
+				contentLength: (file.content || '').length
 			});
+
+			// Call the API with all required data
+			const response = await fetch('/api/files', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					operation: 'update',
+					path: file.path,
+					content: file.content || '',
+					projectId,
+					sandboxId,
+					sandboxProvider,
+					metadata: {
+						modifiedAt: new Date().toISOString(),
+						size: (file.content || '').length
+					}
+				})
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				console.error('❌ Failed to save file:', errorData);
+				return false;
+			}
+
+			const result = await response.json();
 
 			if (result.success) {
 				// Update local state to mark as saved
@@ -294,7 +333,7 @@ export const fileStateActions = {
 				fileStateActions.updateFileState(fileId, {
 					lastSaved: new Date()
 				});
-				console.log('✅ File saved successfully');
+				console.log('✅ File saved successfully:', result.data);
 				return true;
 			} else {
 				console.error('❌ Failed to save file:', result.error);
