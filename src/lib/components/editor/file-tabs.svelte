@@ -1,11 +1,5 @@
 <script lang="ts">
-	import {
-		activeFileId,
-		filesStore,
-		openFiles,
-		tabActions,
-		fileActions
-	} from '$lib/stores/editor.js';
+	import { activeFileId, filesStore, openFiles, tabActions } from '$lib/stores/editor.js';
 	import { fileStateActions } from '$lib/stores/file-states.store.js';
 	import type { Project } from '$lib/types';
 	import Icon from '@iconify/svelte';
@@ -70,7 +64,12 @@
 	// Save current file
 	const handleSave = async () => {
 		if ($activeFileId && fileStateActions.isFileDirty($activeFileId)) {
-			await fileStateActions.saveFile($activeFileId);
+			await fileStateActions.saveFile(
+				$activeFileId,
+				project?.id,
+				project?.sandboxId,
+				project?.sandboxProvider
+			);
 		}
 	};
 </script>
@@ -91,22 +90,22 @@
 						class="group flex max-w-48 min-w-fit items-center gap-2 border-r border-border bg-transparent px-3 py-2 text-sm transition-colors hover:bg-muted/50
 							{isActive
 							? 'border-b-2 border-b-primary bg-muted text-foreground'
-							: 'text-muted-foreground hover:text-foreground'}"
+							: 'text-muted-foreground hover:text-foreground'}
+							{isLoading ? 'cursor-wait opacity-70' : ''}"
 						onclick={() => handleTabClick(fileId)}
 						type="button"
-						title="{file.path}{isDirty ? ' (modified)' : ''}"
+						title="{file.path}{isDirty ? ' (modified)' : ''}{isLoading ? ' (loading...)' : ''}"
+						disabled={isLoading}
 					>
-						<Icon icon={getFileIcon(file.name)} />
+						<Icon icon={getFileIcon(file.name)} class={isLoading ? 'opacity-50' : ''} />
 
 						<span class="min-w-0 flex-1 truncate">
 							{file.name}
 						</span>
 
 						{#if isLoading}
-							<Loader2 class="h-3 w-3 animate-spin text-muted-foreground" />
-						{/if}
-
-						{#if isDirty}
+							<Loader2 class="h-3 w-3 animate-spin text-primary" />
+						{:else if isDirty}
 							<span class="font-bold text-orange-500" title="Unsaved changes">•</span>
 						{/if}
 

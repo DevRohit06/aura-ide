@@ -7,7 +7,9 @@
 	import { fileWatcher, type FileChangeEvent } from '$lib/services/file-watcher.client';
 	import { filesStore, fileStateActions, tabActions } from '$lib/stores/editor.ts';
 	import { fileActions, recentlyChangedFiles } from '$lib/stores/files.store.js';
+	import { getLanguageFromPath } from '$lib/utils/file-tree.js';
 	import type { Directory, File, FileSystemItem } from '@/types/files';
+	import Icon from '@iconify/svelte';
 	import FilePlusIcon from '@lucide/svelte/icons/file-plus';
 	import CollapseIcon from '@lucide/svelte/icons/fold-vertical';
 	import FolderPlusIcon from '@lucide/svelte/icons/folder-plus';
@@ -34,6 +36,11 @@
 	let retryAttempts = $state(0);
 	let retryTimeout: ReturnType<typeof setTimeout> | null = null;
 	let fileWatcherUnsubscribe: (() => void) | null = null;
+
+	// Inline creation state
+	let creatingInline: { type: 'file' | 'folder'; parentId: string | null } | null = $state(null);
+	let inlineInputValue = $state('');
+	let inlineInputRef: HTMLInputElement | null = $state(null);
 
 	// Load project files from API
 	async function loadProjectFiles() {
@@ -303,24 +310,184 @@
 
 	// Context menu actions
 	async function handleCreateFile(parentId?: string) {
-		const fileName = prompt('Enter file name:');
-		if (!fileName) return;
+		// Start inline creation
+		const parent = parentId ? $filesStore.get(parentId) : null;
+		if (parent && parent.type === 'directory' && !expandedFolders.has(parent.path)) {
+			expandedFolders.add(parent.path);
+			expandedFolders = new Set(expandedFolders);
+		}
+
+		creatingInline = { type: 'file', parentId: parentId || null };
+		inlineInputValue = '';
+
+		// Focus the input after a short delay to ensure it's rendered
+		setTimeout(() => {
+			inlineInputRef?.focus();
+		}, 50);
+	}
+
+	async function handleCreateFolder(parentId?: string) {
+		// Start inline creation
+		const parent = parentId ? $filesStore.get(parentId) : null;
+		if (parent && parent.type === 'directory' && !expandedFolders.has(parent.path)) {
+			expandedFolders.add(parent.path);
+			expandedFolders = new Set(expandedFolders);
+		}
+
+		creatingInline = { type: 'folder', parentId: parentId || null };
+		inlineInputValue = '';
+
+		// Focus the input after a short delay to ensure it's rendered
+		setTimeout(() => {
+			inlineInputRef?.focus();
+		}, 50);
+	}
+
+	// Confirm inline creation
+	async function confirmInlineCreation() {
+		if (!creatingInline || !inlineInputValue.trim()) {
+			cancelInlineCreation();
+			return;
+		}
+
+		const name = inlineInputValue.trim();
+		const { type, parentId } = creatingInline;
 
 		try {
-			const parent = parentId ? $filesStore.get(parentId) : null;
-			const parentPath = parent?.path || '';
-			const filePath = parentPath ? `${parentPath}/${fileName}` : fileName;
+			if (type === 'file') {
+				await createFileFromInline(name, parentId);
+			} else {
+				await createFolderFromInline(name, parentId);
+			}
+			cancelInlineCreation();
+		} catch (error) {
+			console.error(`Failed to create ${type}:`, error);
+			alert(
+				`Failed to create ${type}: ${error instanceof Error ? error.message : 'Unknown error'}`
+			);
+		}
+	}
 
+	// Cancel inline creation
+	function cancelInlineCreation() {
+		creatingInline = null;
+		inlineInputValue = '';
+		inlineInputRef = null;
+	}
+
+	// Create file from inline input
+	async function createFileFromInline(fileName: string, parentId: string | null) {
+		const parent = parentId ? $filesStore.get(parentId) : null;
+		const parentPath = parent?.path || '';
+
+		// Support nested paths like "folder/subfolder/file.txt"
+		let fullPath = parentPath ? `${parentPath}/${fileName}` : fileName;
+		let actualFileName = fileName;
+		let actualParentId = parentId;
+
+		// Check if fileName contains directory separators
+		if (fileName.includes('/')) {
+			const pathParts = fileName.split('/');
+			actualFileName = pathParts[pathParts.length - 1];
+
+			// Create parent directories if they don't exist
+			let currentPath = parentPath;
+			for (let i = 0; i < pathParts.length - 1; i++) {
+				const dirName = pathParts[i];
+				const dirPath = currentPath ? `${currentPath}/${dirName}` : dirName;
+
+				// Check if directory exists
+				if (!$filesStore.has(dirPath)) {
+					console.log('📁 [createFileFromInline] Creating missing directory:', dirPath);
+					const newDir: Directory = {
+						id: dirPath,
+						name: dirName,
+						type: 'directory',
+						path: dirPath,
+						content: '',
+						children: [],
+						modifiedAt: new Date(),
+						createdAt: new Date(),
+						parentId: currentPath || null,
+						permissions: {
+							read: true,
+							write: true,
+							execute: false,
+							delete: true,
+							share: true,
+							owner: 'current-user',
+							collaborators: []
+						},
+						isExpanded: true,
+						isRoot: false
+					};
+					fileActions.addFile(newDir);
+					// Auto-expand the new directory
+					expandedFolders.add(dirPath);
+				} else {
+					// Ensure the directory is expanded
+					expandedFolders.add(dirPath);
+				}
+
+				currentPath = dirPath;
+			}
+
+			// Update parentId to the deepest directory
+			actualParentId = currentPath || null;
+			fullPath = currentPath ? `${currentPath}/${actualFileName}` : actualFileName;
+		}
+
+		console.log('🆕 Creating file:', {
+			fileName: actualFileName,
+			fullPath,
+			projectId: project?.id,
+			sandboxId: project?.sandboxId,
+			sandboxProvider: project?.sandboxProvider
+		});
+
+		// Call the API to create the file
+		const response = await fetch('/api/files', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({
+				operation: 'create',
+				path: fullPath,
+				content: '',
+				projectId: project?.id,
+				sandboxId: project?.sandboxId,
+				sandboxProvider: project?.sandboxProvider,
+				metadata: {
+					createdAt: new Date().toISOString(),
+					size: 0
+				}
+			})
+		});
+
+		if (!response.ok) {
+			const errorData = await response.json();
+			console.error('❌ Failed to create file:', errorData);
+			throw new Error(errorData.message || errorData.error);
+		}
+
+		const result = await response.json();
+
+		if (result.success) {
+			console.log('✅ File created successfully:', result.data);
+
+			// Create the file object for local store
+			const ext = actualFileName.split('.').pop()?.toLowerCase() || '';
 			const newFile: File = {
-				id: `file-${Date.now()}`,
-				name: fileName,
+				id: fullPath,
+				name: actualFileName,
 				type: 'file',
-				path: filePath,
+				path: fullPath,
 				content: '',
 				size: 0,
 				modifiedAt: new Date(),
 				createdAt: new Date(),
-				parentId: parentId || null,
+				parentId: actualParentId,
 				permissions: {
 					read: true,
 					write: true,
@@ -330,13 +497,13 @@
 					owner: 'current-user',
 					collaborators: []
 				},
-				language: 'plaintext',
+				language: getLanguageFromPath(fullPath),
 				encoding: 'utf-8',
 				mimeType: 'text/plain',
 				isDirty: false,
 				isReadOnly: false,
 				metadata: {
-					extension: '',
+					extension: ext,
 					lineCount: 0,
 					characterCount: 0,
 					wordCount: 0,
@@ -348,23 +515,118 @@
 				}
 			};
 
+			// Add to local store
 			fileActions.addFile(newFile);
-		} catch (error) {
-			console.error('Failed to create file:', error);
+
+			// Force reactivity update
+			expandedFolders = new Set(expandedFolders);
+
+			// Open the file in editor
+			tabActions.openFile(fullPath);
+		} else {
+			throw new Error(result.message || result.error);
 		}
 	}
 
-	async function handleCreateFolder(parentId?: string) {
-		const folderName = prompt('Enter folder name:');
-		if (!folderName) return;
+	// Create folder from inline input
+	async function createFolderFromInline(folderName: string, parentId: string | null) {
+		const parent = parentId ? $filesStore.get(parentId) : null;
+		const parentPath = parent?.path || '';
 
-		try {
-			const parent = parentId ? $filesStore.get(parentId) : null;
-			const parentPath = parent?.path || '';
+		// Support nested paths like "folder/subfolder/newdir"
+		let actualParentId = parentId;
+		let currentPath = parentPath;
+
+		// Check if folderName contains directory separators
+		if (folderName.includes('/')) {
+			const pathParts = folderName.split('/');
+
+			// Create all directories in the path
+			for (let i = 0; i < pathParts.length; i++) {
+				const dirName = pathParts[i];
+				const dirPath = currentPath ? `${currentPath}/${dirName}` : dirName;
+
+				// Check if directory exists
+				if (!$filesStore.has(dirPath)) {
+					console.log('📁 [createFolderFromInline] Creating directory:', dirPath);
+					const newDir: Directory = {
+						id: dirPath,
+						name: dirName,
+						type: 'directory',
+						path: dirPath,
+						content: '',
+						children: [],
+						modifiedAt: new Date(),
+						createdAt: new Date(),
+						parentId: currentPath || null,
+						permissions: {
+							read: true,
+							write: true,
+							execute: false,
+							delete: true,
+							share: true,
+							owner: 'current-user',
+							collaborators: []
+						},
+						isExpanded: true,
+						isRoot: false
+					};
+					fileActions.addFile(newDir);
+
+					// Auto-expand the new directory
+					expandedFolders.add(dirPath);
+
+					// Optionally create .gitkeep file for the deepest directory
+					if (i === pathParts.length - 1 && project?.id && project?.sandboxId) {
+						try {
+							const gitkeepPath = `${dirPath}/.gitkeep`;
+							const response = await fetch('/api/files', {
+								method: 'POST',
+								headers: {
+									'Content-Type': 'application/json'
+								},
+								body: JSON.stringify({
+									operation: 'create',
+									path: gitkeepPath,
+									content: '# This file ensures the directory exists in version control',
+									projectId: project.id,
+									sandboxId: project.sandboxId,
+									sandboxProvider: project.sandboxProvider,
+									metadata: {
+										createdAt: new Date().toISOString(),
+										size: 0
+									}
+								})
+							});
+
+							if (response.ok) {
+								console.log('✅ Created .gitkeep file for folder persistence');
+							}
+						} catch (err) {
+							console.warn('⚠️ Could not create .gitkeep file:', err);
+						}
+					}
+				} else {
+					// Ensure the directory is expanded
+					expandedFolders.add(dirPath);
+				}
+
+				currentPath = dirPath;
+			}
+		} else {
+			// Simple folder name without path separators
 			const folderPath = parentPath ? `${parentPath}/${folderName}` : folderName;
 
+			console.log('📁 Creating folder:', {
+				folderName,
+				folderPath,
+				projectId: project?.id,
+				sandboxId: project?.sandboxId,
+				sandboxProvider: project?.sandboxProvider
+			});
+
 			const newFolder: Directory = {
-				id: `folder-${Date.now()}`,
+				id: folderPath,
 				name: folderName,
 				type: 'directory',
 				path: folderPath,
@@ -382,14 +644,50 @@
 					owner: 'current-user',
 					collaborators: []
 				},
-				isExpanded: false,
+				isExpanded: true,
 				isRoot: false
 			};
 
 			fileActions.addFile(newFolder);
-		} catch (error) {
-			console.error('Failed to create folder:', error);
+			console.log('✅ Folder created in local store:', folderPath);
+
+			// Auto-expand the folder
+			expandedFolders.add(folderPath);
+
+			// Optionally create .gitkeep file to ensure directory exists in sandbox/R2
+			if (project?.id && project?.sandboxId) {
+				try {
+					const gitkeepPath = `${folderPath}/.gitkeep`;
+					const response = await fetch('/api/files', {
+						method: 'POST',
+						headers: {
+							'Content-Type': 'application/json'
+						},
+						body: JSON.stringify({
+							operation: 'create',
+							path: gitkeepPath,
+							content: '# This file ensures the directory exists in version control',
+							projectId: project.id,
+							sandboxId: project.sandboxId,
+							sandboxProvider: project.sandboxProvider,
+							metadata: {
+								createdAt: new Date().toISOString(),
+								size: 0
+							}
+						})
+					});
+
+					if (response.ok) {
+						console.log('✅ Created .gitkeep file for folder persistence');
+					}
+				} catch (err) {
+					console.warn('⚠️ Could not create .gitkeep file:', err);
+				}
+			}
 		}
+
+		// Force reactivity update
+		expandedFolders = new Set(expandedFolders);
 	}
 
 	async function handleRename(item: FileSystemItem) {
@@ -711,6 +1009,35 @@
 			{/each}
 		{:else}
 			<div class="px-2">
+				<!-- Inline creation at root level -->
+				{#if creatingInline && creatingInline.parentId === null}
+					<div class="flex items-center px-2 py-1" style="padding-left: 4px">
+						{#if creatingInline.type === 'file'}
+							<Icon icon="vscode-icons:default-file" class="mr-2 h-3.5 w-3.5 shrink-0" />
+						{:else}
+							<Icon icon="vscode-icons:default-folder" class="mr-2 h-3.5 w-3.5 shrink-0" />
+						{/if}
+						<input
+							bind:this={inlineInputRef}
+							bind:value={inlineInputValue}
+							type="text"
+							class="flex-1 bg-accent px-1 py-0.5 text-sm outline-none focus:ring-1 focus:ring-ring"
+							placeholder={creatingInline.type === 'file' ? 'filename.ext' : 'folder-name'}
+							onkeydown={(e) => {
+								if (e.key === 'Enter') {
+									confirmInlineCreation();
+								} else if (e.key === 'Escape') {
+									cancelInlineCreation();
+								}
+							}}
+							onblur={() => {
+								// Small delay to allow click on confirm button
+								setTimeout(cancelInlineCreation, 150);
+							}}
+						/>
+					</div>
+				{/if}
+
 				{#each fileTree as item (item.path)}
 					{@render renderFileTreeItem(item, 0)}
 				{/each}
@@ -750,6 +1077,35 @@
 
 	{#if item.type === 'directory' && expandedFolders.has(item.path)}
 		<div class="children" style="margin-left: calc(8px + {level} * 16px + 7px);">
+			<!-- Inline creation inside directory -->
+			{#if creatingInline && creatingInline.parentId === item.id}
+				<div class="flex items-center px-2 py-1" style="padding-left: 4px">
+					{#if creatingInline.type === 'file'}
+						<Icon icon="vscode-icons:default-file" class="mr-2 h-3.5 w-3.5 shrink-0" />
+					{:else}
+						<Icon icon="vscode-icons:default-folder" class="mr-2 h-3.5 w-3.5 shrink-0" />
+					{/if}
+					<input
+						bind:this={inlineInputRef}
+						bind:value={inlineInputValue}
+						type="text"
+						class="flex-1 bg-accent px-1 py-0.5 text-sm outline-none focus:ring-1 focus:ring-ring"
+						placeholder={creatingInline.type === 'file' ? 'filename.ext' : 'folder-name'}
+						onkeydown={(e) => {
+							if (e.key === 'Enter') {
+								confirmInlineCreation();
+							} else if (e.key === 'Escape') {
+								cancelInlineCreation();
+							}
+						}}
+						onblur={() => {
+							// Small delay to allow click on confirm button
+							setTimeout(cancelInlineCreation, 150);
+						}}
+					/>
+				</div>
+			{/if}
+
 			{#each getChildren(item.id, $filesStore) as child (child.id)}
 				{@render renderFileTreeItem(child, level + 1)}
 			{/each}

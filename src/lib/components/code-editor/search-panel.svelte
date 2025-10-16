@@ -45,16 +45,20 @@
 	let useRegex = $derived($searchStore.useRegex);
 
 	// Update search in CodeMirror
-	function updateSearch() {
+	function updateSearch(includeReplace: boolean = false) {
 		if (!editorView || !searchValue) {
 			return;
 		}
+
+		// Always include replace text if replace panel is shown and we have a replace value
+		const shouldIncludeReplace = includeReplace || (showReplace && replaceValue);
 
 		const query = new SearchQuery({
 			search: searchValue,
 			caseSensitive,
 			literal: !useRegex,
-			wholeWord
+			wholeWord,
+			replace: shouldIncludeReplace ? replaceValue : undefined
 		});
 
 		editorView.dispatch({
@@ -140,18 +144,26 @@
 
 	function handleReplace() {
 		if (editorView && searchValue) {
-			updateSearch();
+			updateSearch(true); // Include replace text in search query
 			replaceNext(editorView);
-			updateMatchCount();
+			// Re-apply search after replacement to keep search active
+			setTimeout(() => {
+				updateSearch();
+				updateMatchCount();
+			}, 50);
 			searchActions.addToReplaceHistory(replaceValue);
 		}
 	}
 
 	function handleReplaceAll() {
 		if (editorView && searchValue) {
-			updateSearch();
+			updateSearch(true); // Include replace text in search query
 			replaceAll(editorView);
-			updateMatchCount();
+			// Re-apply search after replacement to keep search active
+			setTimeout(() => {
+				updateSearch();
+				updateMatchCount();
+			}, 50);
 			searchActions.addToReplaceHistory(replaceValue);
 		}
 	}

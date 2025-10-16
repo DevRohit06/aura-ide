@@ -28,11 +28,15 @@
 	// Handle file click - open file and navigate to match
 	async function handleFileClick(result: FileSearchResult, match?: SearchMatch) {
 		const file = result.file;
+		const filePath = file.path;
+
+		// Open the file in a tab immediately (will show loading state)
+		tabActions.openFile(filePath);
 
 		// Load file content if not already loaded
 		if (!file.content || file.content === '') {
 			try {
-				fileStateActions.setFileLoading(file.id, true);
+				fileStateActions.setFileLoading(filePath, true);
 
 				const response = await fetch('/api/files', {
 					method: 'POST',
@@ -55,18 +59,15 @@
 							typeof apiResult.data.content === 'string'
 								? apiResult.data.content
 								: String(apiResult.data.content || '');
-						fileActions.updateFileContent(file.id, content);
+						fileActions.updateFileContent(filePath, content);
 					}
 				}
 			} catch (error) {
 				console.error('Error loading file content:', error);
 			} finally {
-				fileStateActions.setFileLoading(file.id, false);
+				fileStateActions.setFileLoading(filePath, false);
 			}
 		}
-
-		// Open the file in a new tab
-		tabActions.openFile(result.file.id);
 
 		// If a specific match was clicked, we would navigate to that line
 		// This would be handled by the editor component

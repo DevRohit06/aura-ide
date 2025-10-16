@@ -26,8 +26,6 @@
 	import { layoutActions } from '$lib/stores/layout.store.js';
 	import Icon from '@iconify/svelte';
 	import ClockIcon from '@lucide/svelte/icons/clock';
-	import FilePlusIcon from '@lucide/svelte/icons/file-plus';
-	import FolderPlusIcon from '@lucide/svelte/icons/folder-plus';
 	import LayoutIcon from '@lucide/svelte/icons/layout';
 	import PaletteIcon from '@lucide/svelte/icons/palette';
 	import RefreshIcon from '@lucide/svelte/icons/refresh-ccw';
@@ -50,58 +48,108 @@
 	let searchValue = $state('');
 	let selectedIndex = $state(0);
 
+	// Load file content helper function
+	async function loadFileContent(filePath: string) {
+		const file = $filesStore.get(filePath);
+		if (!file || file.type !== 'file') return;
+
+		try {
+			fileStateActions.setFileLoading(filePath, true);
+
+			const controller = new AbortController();
+			const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+			const response = await fetch('/api/files', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					operation: 'read',
+					sandboxId: project?.sandboxId || 'current-sandbox',
+					projectId: project?.id,
+					path: file.path,
+					sandboxProvider: project?.sandboxProvider
+				}),
+				signal: controller.signal
+			});
+
+			clearTimeout(timeoutId);
+
+			if (response.ok) {
+				const result = await response.json();
+				if (result.success && result.data !== undefined) {
+					const content =
+						typeof result.data.content === 'string'
+							? result.data.content
+							: String(result.data.content || '');
+					fileActions.updateFileContent(filePath, content);
+				}
+			}
+		} catch (error) {
+			console.error('Error loading file content:', error);
+		} finally {
+			fileStateActions.setFileLoading(filePath, false);
+		}
+	}
+
+	// Handle file opening with proper loading
+	async function handleFileOpen(filePath: string) {
+		console.log('[Command Palette] Opening file:', filePath);
+
+		const file = $filesStore.get(filePath);
+		if (!file) {
+			console.error('[Command Palette] File not found:', filePath);
+			console.log(
+				'[Command Palette] Available files:',
+				Array.from($filesStore.keys()).slice(0, 10)
+			);
+			return;
+		}
+
+		if (file.type !== 'file') {
+			console.error('[Command Palette] Not a file:', filePath, file.type);
+			return;
+		}
+
+		console.log('[Command Palette] File details:', {
+			id: file.id,
+			name: file.name,
+			path: file.path,
+			hasContent: !!file.content
+		});
+
+		// Open tab immediately using file path (will show loading state)
+		tabActions.openFile(filePath);
+		console.log('[Command Palette] Tab opened for:', filePath);
+
+		// Close dialog
+		open = false;
+
+		// Load content if not already loaded
+		if (!file.content || file.content === '') {
+			console.log('[Command Palette] Loading content for:', filePath);
+			await loadFileContent(filePath);
+		} else {
+			console.log('[Command Palette] Content already loaded for:', filePath);
+		}
+	}
+
 	// Get recent files from tabs store
 	function getRecentFiles() {
 		return $tabsStore.openFiles
 			.slice(0, maxRecentFiles)
-			.map((fileId) => {
-				const file = $filesStore.get(fileId);
+			.map((filePath) => {
+				const file = $filesStore.get(filePath);
 				if (!file) return null;
 				return {
-					id: `recent-${file.id}`,
+					id: `recent-${file.path}`,
 					title: file.name,
 					description: file.path,
 					icon: getFileIcon(file.name),
 					category: 'Recent Files',
 					action: async () => {
-						// Load file content if not already loaded
-						if (!file.content || file.content === '') {
-							try {
-								fileStateActions.setFileLoading(file.id, true);
-
-								const response = await fetch('/api/files', {
-									method: 'POST',
-									headers: {
-										'Content-Type': 'application/json'
-									},
-									body: JSON.stringify({
-										operation: 'read',
-										sandboxId: project?.sandboxId || 'current-sandbox',
-										projectId: project?.id,
-										path: file.path,
-										sandboxProvider: project?.sandboxProvider
-									})
-								});
-
-								if (response.ok) {
-									const result = await response.json();
-									if (result.success && result.data !== undefined) {
-										const content =
-											typeof result.data.content === 'string'
-												? result.data.content
-												: String(result.data.content || '');
-										fileActions.updateFileContent(file.id, content);
-									}
-								}
-							} catch (error) {
-								console.error('Error loading file content:', error);
-							} finally {
-								fileStateActions.setFileLoading(file.id, false);
-							}
-						}
-
-						tabActions.openFile(file.id);
-						open = false;
+						await handleFileOpen(file.path);
 					},
 					keywords: [file.name, file.path, 'recent', 'file']
 				};
@@ -113,33 +161,6 @@
 			id: 'file-actions',
 			title: 'File Actions',
 			items: [
-				{
-					id: 'new-file',
-					title: 'New File',
-					description: 'Create a new file',
-					icon: FilePlusIcon,
-					shortcut: '⌘N',
-					category: 'file',
-					keywords: ['create', 'file', 'new'],
-					action: () => {
-						// TODO: Implement new file creation
-						console.log('Creating new file');
-						open = false;
-					}
-				},
-				{
-					id: 'new-folder',
-					title: 'New Folder',
-					description: 'Create a new folder',
-					icon: FolderPlusIcon,
-					category: 'file',
-					keywords: ['create', 'folder', 'directory', 'new'],
-					action: () => {
-						// TODO: Implement new folder creation
-						console.log('Creating new folder');
-						open = false;
-					}
-				},
 				{
 					id: 'save-file',
 					title: 'Save File',
@@ -348,19 +369,21 @@
 			{#if showRecent && recentFiles.length > 0}
 				<Command.Group heading="Recent Files">
 					{#each recentFiles as item (item?.id)}
-						<Command.Item
-							value="recent-{item?.id}"
-							onSelect={() => {
-								tabActions.openFile(item?.id);
-								open = false;
-							}}
-						>
-							<ClockIcon class="mr-2 h-4 w-4 text-muted-foreground" />
-							<Icon icon={getFileIcon(item?.title)} class="mr-2 h-4 w-4" />
-							<div class="min-w-0 flex-1">
-								<div class="truncate">{item?.title}</div>
-							</div>
-						</Command.Item>
+						{#if item}
+							{@const filePath = item.id.replace('recent-', '')}
+							<Command.Item
+								value="recent-{item.id}"
+								onSelect={() => {
+									handleFileOpen(filePath);
+								}}
+							>
+								<ClockIcon class="mr-2 h-4 w-4 text-muted-foreground" />
+								<Icon icon={getFileIcon(item.title)} class="mr-2 h-4 w-4" />
+								<div class="min-w-0 flex-1">
+									<div class="truncate">{item.title}</div>
+								</div>
+							</Command.Item>
+						{/if}
 					{/each}
 				</Command.Group>
 			{/if}
@@ -368,12 +391,12 @@
 			<!-- File Search Results -->
 			{#if showFiles && filteredFiles.length > 0}
 				<Command.Group heading="Files">
-					{#each filteredFiles as file (file.id)}
+					{#each filteredFiles as file (file.path)}
 						<Command.Item
-							value="file-{file.id}"
+							value="file-{file.path}"
 							onSelect={() => {
-								tabActions.openFile(file.id);
-								open = false;
+								console.log('[Command Palette] File selected:', file.path, file.name);
+								handleFileOpen(file.path);
 							}}
 						>
 							<Icon icon={getFileIcon(file.name)} class="mr-2 h-4 w-4" />
@@ -381,8 +404,11 @@
 								<div class="truncate">{file.name}</div>
 								<div class="truncate text-xs text-muted-foreground">{file.path}</div>
 							</div>
-							{#if fileStateActions.isFileDirty(file.id)}
+							{#if fileStateActions.isFileDirty(file.path)}
 								<Badge variant="secondary" class="ml-2 text-xs">Modified</Badge>
+							{/if}
+							{#if fileStateActions.isFileLoading(file.path)}
+								<Badge variant="outline" class="ml-2 text-xs">Loading...</Badge>
 							{/if}
 						</Command.Item>
 					{/each}

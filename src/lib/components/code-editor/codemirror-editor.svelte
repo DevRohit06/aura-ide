@@ -240,11 +240,6 @@
 				return false;
 			}
 
-			if (!fileStateActions.isFileDirty(currentFileId)) {
-				console.log('File is not dirty, no need to save');
-				return true;
-			}
-
 			// Format on save if enabled (before saving)
 			const settings = $comprehensiveSettingsStore;
 			if (settings?.editor?.formatOnSave && editorView) {
@@ -272,7 +267,12 @@
 
 			// Perform the save operation using the unified save function
 			try {
-				const success = await fileStateActions.saveFile(currentFileId);
+				const success = await fileStateActions.saveFile(
+					currentFileId,
+					project?.id,
+					project?.sandboxId,
+					project?.sandboxProvider
+				);
 				if (success) {
 					console.log('File saved successfully');
 				} else {
