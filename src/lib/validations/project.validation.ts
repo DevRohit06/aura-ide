@@ -98,12 +98,23 @@ const configurationSchema = z.object({
 	additionalDependencies: additionalDependenciesSchema.default([]).optional()
 });
 
+// Custom repository schema
+const customRepoSchema = z
+	.object({
+		owner: z.string().min(1, 'Repository owner is required'),
+		repo: z.string().min(1, 'Repository name is required'),
+		branch: z.string().optional(),
+		path: z.string().optional()
+	})
+	.optional();
+
 // Main project setup schema
 export const projectSetupSchema = z.object({
 	name: projectNameSchema,
 	description: projectDescriptionSchema,
 	framework: frameworkSchema,
 	sandboxProvider: sandboxProviderSchema,
+	customRepo: customRepoSchema,
 	configuration: configurationSchema
 });
 
