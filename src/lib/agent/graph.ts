@@ -214,11 +214,11 @@ async function humanReviewNode(state: typeof AgentState.State) {
 		if (validToolCalls.some((tc: any) => tc?.name && sensitive.has(tc.name))) {
 			// Log the raw tool call structure for debugging
 			logger.info('Raw tool calls before sanitization:', JSON.stringify(validToolCalls, null, 2));
-			
+
 			logger.info(
 				'Requesting human review for tool calls:',
-				validToolCalls.map((tc) => ({ 
-					name: tc?.name, 
+				validToolCalls.map((tc) => ({
+					name: tc?.name,
 					// LangChain should normalize to 'args', but we check fallbacks
 					args: tc?.args || tc?.arguments || tc?.input || {},
 					hasArgs: !!tc?.args,
