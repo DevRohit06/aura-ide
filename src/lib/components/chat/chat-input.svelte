@@ -12,14 +12,10 @@
 		voice: void;
 	}>();
 
-	// Model selection
-	let selectedModel = $state($selectedModelStore);
-
 	let { disabled = false }: { disabled?: boolean } = $props();
 
 	function handleModelChange(modelId: string) {
 		modelActions.setModel(modelId);
-		selectedModel = modelId;
 	}
 
 	let input = $state('');
@@ -85,7 +81,7 @@
 		<!-- Model selector header -->
 		<div class="flex items-center justify-between border-b border-border/30 px-3 py-2">
 			<CompactModelSelector
-				bind:value={selectedModel}
+				value={$selectedModelStore}
 				onValueChange={handleModelChange}
 				placeholder="Sonnet 4"
 			/>
@@ -105,12 +101,12 @@
 			</Button>
 
 			<!-- Input area -->
-			<div class="relative flex min-h-[32px] flex-1 items-center">
+			<div class="relative flex min-h-[36px] flex-1 items-center">
 				<textarea
 					bind:this={textareaElement}
 					bind:value={input}
-					placeholder="How can I help you today?"
-					class="max-h-32 min-h-[24px] w-full resize-none border-0 bg-transparent py-1 text-sm leading-6 placeholder:text-muted-foreground/70 focus:outline-none"
+					placeholder="Ask me anything..."
+					class="max-h-40 min-h-[24px] w-full resize-none border-0 bg-transparent py-1 text-sm leading-6 placeholder:text-muted-foreground/60 focus:outline-none"
 					rows={1}
 					{disabled}
 					onkeydown={handleKeyDown}
@@ -137,26 +133,28 @@
 				<!-- Send button -->
 				<Button
 					size="icon"
-					class="h-8 w-8 rounded-lg bg-primary text-primary-foreground transition-all duration-200 hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-muted/50 disabled:text-muted-foreground"
+					class="h-9 w-9 rounded-lg bg-primary text-primary-foreground transition-all duration-200 hover:scale-105 hover:bg-primary/90 disabled:scale-100 disabled:cursor-not-allowed disabled:bg-muted/50 disabled:text-muted-foreground"
 					disabled={disabled || !input.trim()}
 					onclick={handleSend}
-					title="Send message"
+					title="Send message (Enter)"
 				>
-					<ArrowUp />
+					<ArrowUp class="h-4 w-4" />
 				</Button>
 			</div>
 		</div>
 	</div>
 
 	<!-- Subtle tips -->
-	<div class="mt-2 flex items-center justify-center gap-4 px-1 text-xs text-muted-foreground/60">
-		<span
-			>Press <kbd class="rounded bg-muted/50 px-1.5 py-0.5 font-mono text-xs">⏎</kbd> to send</span
-		>
-		<span>•</span>
-		<span
-			><kbd class="rounded bg-muted/50 px-1.5 py-0.5 font-mono text-xs">⇧⏎</kbd> for new line</span
-		>
+	<div class="mt-2 flex items-center justify-center gap-3 px-1 text-xs text-muted-foreground/50">
+		<span class="flex items-center gap-1.5">
+			<kbd class="rounded border bg-muted/30 px-1.5 py-0.5 font-mono text-[10px] shadow-sm">⏎</kbd>
+			Send
+		</span>
+		<span class="text-muted-foreground/30">•</span>
+		<span class="flex items-center gap-1.5">
+			<kbd class="rounded border bg-muted/30 px-1.5 py-0.5 font-mono text-[10px] shadow-sm">⇧⏎</kbd>
+			New line
+		</span>
 	</div>
 
 	<!-- Add a small toggle and optional query input -->
