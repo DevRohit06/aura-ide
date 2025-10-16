@@ -4,6 +4,7 @@
 		AutomaticR2FileSyncManager,
 		type FileTreeEvent
 	} from '$lib/services/automatic-r2-file-sync.service';
+	import { fileWatcher, type FileChangeEvent } from '$lib/services/file-watcher.client';
 	import type { Project } from '$lib/types';
 	import type { FileSystemItem } from '$lib/types/files';
 	import { onDestroy, onMount } from 'svelte';
@@ -49,6 +50,7 @@
 
 	// Real-time event state
 	let unsubscribeCallback: (() => void) | null = null;
+	let fileWatcherUnsubscribe: (() => void) | null = null;
 	let autoSyncEnabled = $state(true);
 	let watchersActive = $state({ daytona: false, r2: false });
 
@@ -329,17 +331,132 @@
 	onMount(async () => {
 		await refreshFiles();
 		await initializeFileSync();
+
+		// Subscribe to real-time file watcher for agent changes
+		console.log('📡 [FileTree] Subscribing to file watcher for project:', project.id);
+		fileWatcherUnsubscribe = fileWatcher.subscribe((event: FileChangeEvent) => {
+			console.log('📡 [FileTree] Received file change event:', event);
+
+			// Handle different event types
+			switch (event.type) {
+				case 'created':
+				case 'modified':
+					// Add or update file in the tree
+					if (event.content !== undefined) {
+						handleAgentFileChange(event.path, event.content, event.type);
+					}
+					break;
+				case 'deleted':
+					// Remove file from tree
+					handleAgentFileDelete(event.path);
+					break;
+			}
+		});
 	});
 
 	onDestroy(() => {
 		if (unsubscribeCallback) {
 			unsubscribeCallback();
 		}
+		if (fileWatcherUnsubscribe) {
+			fileWatcherUnsubscribe();
+		}
 		if (project && userId) {
 			AutomaticR2FileSyncManager.stopProjectSync(userId, project.id);
 		}
 		clearTimeout(refreshTimeout);
 	});
+
+	/**
+	 * Handle file changes from agent (via file watcher)
+	 */
+	function handleAgentFileChange(
+		path: string,
+		content: string,
+		type: 'created' | 'modified'
+	): void {
+		console.log(`📡 [FileTree] Handling agent file ${type}:`, path);
+
+		// Check if file already exists in tree
+		const existingFile = files.find((f) => f.path === path);
+
+		if (existingFile) {
+			// Update existing file
+			console.log('📡 [FileTree] Updating existing file:', path);
+			files = files.map((f) => {
+				if (f.path === path && f.type === 'file') {
+					return {
+						...f,
+						content: content,
+						modifiedAt: new Date(),
+						size: content.length
+					};
+				}
+				return f;
+			});
+		} else {
+			// Add new file to tree
+			console.log('📡 [FileTree] Adding new file to tree:', path);
+			const newFile: FileSystemItem = {
+				id: path,
+				name: path.split('/').pop() || path,
+				path: path,
+				type: 'file',
+				content: content,
+				parentId: null,
+				language: path.split('.').pop() || 'plaintext',
+				encoding: 'utf-8',
+				mimeType: 'text/plain',
+				isDirty: false,
+				isReadOnly: false,
+				createdAt: new Date(),
+				modifiedAt: new Date(),
+				size: content.length,
+				permissions: {
+					read: true,
+					write: true,
+					execute: false,
+					delete: true,
+					share: false,
+					owner: userId,
+					collaborators: []
+				},
+				metadata: {
+					extension: path.split('.').pop() || '',
+					lineCount: content.split('\n').length,
+					characterCount: content.length,
+					wordCount: content.split(/\s+/).length,
+					lastCursor: null,
+					bookmarks: [],
+					breakpoints: [],
+					folds: [],
+					searchHistory: []
+				}
+			};
+
+			files = [...files, newFile];
+		}
+
+		// Add to file events for visual indicator
+		fileEvents = [
+			...fileEvents,
+			{
+				eventType: type as any,
+				filePath: path,
+				timestamp: new Date(),
+				syncStatus: 'synced' as any,
+				message: `File ${type} by agent`
+			}
+		];
+	}
+
+	/**
+	 * Handle file deletion from agent
+	 */
+	function handleAgentFileDelete(path: string): void {
+		console.log('📡 [FileTree] Handling agent file delete:', path);
+		files = files.filter((f) => f.path !== path);
+	}
 
 	/**
 	 * Render tree node recursively
