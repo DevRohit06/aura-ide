@@ -467,7 +467,8 @@ class ChatService {
 							assistantContent = event.data.chunk;
 							chatThreadsActions.addMessage(projectId, threadId, 'assistant', assistantContent, {
 								messageId: streamingMessageId,
-								isStreaming: true
+								isStreaming: true,
+								agentModel: currentModelName // Include current model in metadata
 							});
 						} else if (streamingMessageId && event.data.chunk) {
 							// Append chunk to streaming content
@@ -477,7 +478,7 @@ class ChatService {
 								threadId,
 								streamingMessageId,
 								assistantContent,
-								{ isStreaming: true }
+								{ isStreaming: true, agentModel: currentModelName }
 							);
 						}
 						break;
@@ -526,7 +527,7 @@ class ChatService {
 								threadId,
 								streamingMessageId,
 								assistantContent,
-								{ isStreaming: false }
+								{ isStreaming: false, agentModel: currentModelName }
 							);
 						}
 
@@ -550,8 +551,9 @@ class ChatService {
 				}
 			});
 
-			// Get current model
+			// Get current model - store it for use in streaming metadata
 			const modelName = get(selectedModelStore);
+			const currentModelName = modelName; // Store for closure
 			const fileContext = get(chatFileContext);
 
 			// Send message via SSE stream
