@@ -1,10 +1,15 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { activeFile } from '$lib/stores/editor.js';
+	import { previewURLActions } from '$lib/stores/preview-url.store';
 	import type { Framework } from '$lib/types/index.js';
+	import { terminalBridge } from '@/services/terminal-bridge.client';
 	import { onMount } from 'svelte';
 
-	let { project } = $props<{ project: any }>();
+	let { project, onOpenBrowserMode } = $props<{
+		project: any;
+		onOpenBrowserMode?: () => void;
+	}>();
 
 	// Status states
 	let isOnline = $state(true);
@@ -18,24 +23,16 @@
 	let serverUrl = $state<string | null>(null);
 	let isInstallingDeps = $state(false);
 
-	// Function to actually test network connectivity
 	async function checkNetworkConnectivity() {
 		try {
-			// First check navigator.onLine as a quick check
 			if (!navigator.onLine) {
 				return false;
 			}
 
-			// Try to fetch a small resource with a timeout
 			const controller = new AbortController();
-			const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+			const timeoutId = setTimeout(() => controller.abort(), 3000);
 
-			// Try multiple endpoints for better reliability
-			const endpoints = [
-				'/', // Current domain root
-				'/api/health', // Health check endpoint if it exists
-				'https://www.google.com/favicon.ico' // External fallback
-			];
+			const endpoints = ['/', '/api/health', 'https://www.google.com/favicon.ico'];
 
 			for (const endpoint of endpoints) {
 				try {
@@ -47,10 +44,8 @@
 					});
 
 					clearTimeout(timeoutId);
-					// If we get any response (even 404), we're online
 					return true;
 				} catch (error) {
-					// Continue to next endpoint
 					continue;
 				}
 			}
@@ -58,12 +53,10 @@
 			clearTimeout(timeoutId);
 			return false;
 		} catch (error) {
-			// If all fetches fail, we're offline
 			return false;
 		}
 	}
 
-	// Update online status
 	async function updateOnlineStatus() {
 		const newStatus = await checkNetworkConnectivity();
 		if (newStatus !== isOnline) {
@@ -71,39 +64,28 @@
 		}
 	}
 
-	// Update time every second
 	onMount(() => {
 		const interval = setInterval(() => {
 			currentTime = new Date().toLocaleTimeString();
 		}, 1000);
 
-		// Initialize online status
 		if (browser) {
-			// Start with navigator.onLine as initial state
 			isOnline = navigator.onLine;
-
-			// Then do a real connectivity check
 			updateOnlineStatus();
 
-			// Define event handlers for online/offline status
 			const handleOnline = () => {
-				// Set online immediately when browser reports online
 				isOnline = true;
-				// Then double-check with actual network test
 				updateOnlineStatus();
 			};
 
 			const handleOffline = () => {
-				// Immediately set offline when browser reports offline
 				isOnline = false;
 			};
 
-			// Listen to browser events
 			window.addEventListener('online', handleOnline);
 			window.addEventListener('offline', handleOffline);
 
-			// Also check connectivity periodically (less frequently to avoid spam)
-			const connectivityInterval = setInterval(updateOnlineStatus, 30000); // Check every 30 seconds
+			const connectivityInterval = setInterval(updateOnlineStatus, 30000);
 
 			return () => {
 				clearInterval(interval);
@@ -124,8 +106,8 @@
 	let encoding = $state('UTF-8');
 	let lineEnding = $state('LF');
 	let language = $state('');
+	let token = $state('');
 
-	// Reactive language detection
 	$effect(() => {
 		if ($activeFile) {
 			const file = $activeFile;
@@ -191,7 +173,6 @@
 		console.log('Cursor position clicked');
 	}
 
-	// Server management functions
 	function getServerCommand(framework: Framework): { install: string; dev: string; port: number } {
 		const commands: Record<Framework, { install: string; dev: string; port: number }> = {
 			react: { install: 'npm install', dev: 'npm run dev', port: 3000 },
@@ -219,8 +200,13 @@
 			serverStatus = 'starting';
 			const { install, dev, port } = getServerCommand(project.framework);
 
-			// First, check if npm is available and check the working directory
-			console.log('Checking environment...');
+			// Show header in terminal
+			terminalBridge.showSeparator();
+			terminalBridge.showHeader(`Starting ${project.framework || 'Server'}`);
+			terminalBridge.write('\n');
+
+			// Environment check
+			terminalBridge.showAction('Checking environment...');
 			const checkResponse = await fetch(`/api/sandbox/${project.sandboxId}/execute?type=command`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
@@ -232,18 +218,25 @@
 			});
 
 			const checkResult = await checkResponse.json();
-			console.log('Environment check result:', checkResult);
 
 			if (!checkResult.success) {
-				throw new Error(
-					`Environment check failed: ${checkResult.error || checkResult.stdout || 'npm not found'}`
-				);
+				const errorMsg = checkResult.error || checkResult.stdout || 'npm not found';
+				terminalBridge.showError(`Environment check failed: ${errorMsg}`);
+				throw new Error(`Environment check failed: ${errorMsg}`);
 			}
 
-			// Install dependencies if needed
+			// Display environment check output
+			if (checkResult.stdout) {
+				terminalBridge.write(checkResult.stdout + '\n');
+			}
+			terminalBridge.showSuccess('Environment check passed ✓');
+			terminalBridge.write('\n');
+
+			// Install dependencies
 			if (install) {
 				isInstallingDeps = true;
-				console.log('Installing dependencies...');
+				terminalBridge.showAction(`Installing dependencies: ${install}`);
+				terminalBridge.showCommand(install);
 
 				const installResponse = await fetch(
 					`/api/sandbox/${project.sandboxId}/execute?type=command`,
@@ -252,7 +245,7 @@
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify({
 							command: install,
-							timeout: 300000, // 5 minutes for npm install
+							timeout: 300000,
 							workingDir: '/home/daytona'
 						})
 					}
@@ -261,40 +254,56 @@
 				const installResult = await installResponse.json();
 				isInstallingDeps = false;
 
-				console.log('Install result:', installResult);
-
 				if (!installResult.success) {
 					const errorMsg =
 						installResult.stderr ||
 						installResult.error_message ||
 						installResult.stdout ||
 						'Installation failed';
+					terminalBridge.showError(`Dependency installation failed: ${errorMsg}`);
+					if (installResult.stderr) {
+						terminalBridge.write(installResult.stderr + '\n');
+					}
 					throw new Error(`Dependency installation failed: ${errorMsg}`);
 				}
+
+				// Show installation output
+				if (installResult.stdout) {
+					terminalBridge.write(installResult.stdout + '\n');
+				}
+				terminalBridge.showSuccess('Dependencies installed successfully ✓');
+				terminalBridge.write('\n');
 			}
 
-			// Start the development server in background
-			console.log('Starting development server...');
+			// Start dev server
+			terminalBridge.showAction(`Starting development server: ${dev}`);
+			terminalBridge.showCommand(`nohup ${dev} > /tmp/dev-server.log 2>&1 &`);
 
-			// First, try to start the dev server (this might fail if already running, which is ok)
 			const startResponse = await fetch(`/api/sandbox/${project.sandboxId}/execute?type=command`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					command: `nohup ${dev} > /tmp/dev-server.log 2>&1 & echo "Dev server started"`,
-					timeout: 10000, // 10 seconds to start
+					timeout: 10000,
 					workingDir: '/home/daytona'
 				})
 			});
 
 			const startResult = await startResponse.json();
-			console.log('Start server result:', startResult);
 
-			// Check if server is responding on the expected port
-			await new Promise((resolve) => setTimeout(resolve, 3000)); // Wait 3 seconds for server to start
+			if (startResult.stdout) {
+				terminalBridge.write(startResult.stdout + '\n');
+			}
+			if (startResult.stderr) {
+				terminalBridge.write(startResult.stderr + '\n');
+			}
 
-			// Forward the port
-			console.log(`Forwarding port ${port}...`);
+			// Wait for server to initialize
+			terminalBridge.showAction('Waiting for server to initialize...');
+			await new Promise((resolve) => setTimeout(resolve, 3000));
+
+			// Forward port
+			terminalBridge.showAction(`Forwarding port ${port}...`);
 
 			const portResponse = await fetch(`/api/sandbox/${project.sandboxId}/forward-port`, {
 				method: 'POST',
@@ -308,52 +317,118 @@
 			if (portResponse.ok) {
 				const portResult = await portResponse.json();
 				serverPort = portResult.externalPort || port;
+				token = portResult.token || '';
 				serverUrl = portResult.url || `http://localhost:${serverPort}`;
 				serverStatus = 'running';
-				console.log(`Server running at ${serverUrl}`);
+
+				terminalBridge.showSuccess(`Server running at: ${serverUrl}`);
+				terminalBridge.write(`\n  Port: ${serverPort}\n`);
+				terminalBridge.write(`  Framework: ${project.framework || 'Unknown'}\n\n`);
+				terminalBridge.showSeparator();
 			} else {
 				const portError = await portResponse.json();
-				console.error('Port forwarding failed:', portError);
+				terminalBridge.showError(`Failed to forward port: ${portError.error || 'Unknown error'}`);
 				throw new Error(`Failed to forward port: ${portError.error || 'Unknown error'}`);
 			}
 		} catch (error) {
-			console.error('Failed to start server:', error);
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			terminalBridge.showError(`Failed to start server: ${errorMessage}`);
+			terminalBridge.showSeparator();
 			serverStatus = 'error';
 			isInstallingDeps = false;
-			// Reset after 5 seconds to allow retry
 			setTimeout(() => {
 				serverStatus = 'idle';
 			}, 5000);
 		}
 	}
 
-	function openServerUrl() {
-		if (serverUrl) {
-			window.open(serverUrl, '_blank');
+	async function openServerUrl() {
+		if (!serverUrl) return;
+
+		try {
+			terminalBridge.showAction(`Opening server URL: ${serverUrl}`);
+
+			// Store the preview URL first
+			if (project?.id && project?.sandboxId) {
+				previewURLActions.setFromSandbox(
+					project.id,
+					project.sandboxId,
+					serverUrl,
+					`${project.framework || 'Server'} (Port ${serverPort})`
+				);
+			}
+
+			// For browser mode, we need to handle the Daytona warning differently
+			// The iframe will handle the cookie warning on first load
+			if (onOpenBrowserMode) {
+				terminalBridge.showSuccess('Opening in browser mode...');
+				terminalBridge.write(
+					'\nNote: If you see a security warning, click "Accept" in the preview.\n'
+				);
+				onOpenBrowserMode();
+			} else {
+				// For new tab, try to pre-accept the warning
+				try {
+					const acceptWarningUrl = `${serverUrl}/accept-daytona-preview-warning?redirect=${encodeURIComponent(serverUrl + '/')}`;
+
+					// Open the accept URL directly in a new tab
+					// This allows the cookie to be set in the proper context
+					const newWindow = window.open(acceptWarningUrl, '_blank');
+
+					if (newWindow) {
+						terminalBridge.showSuccess('Opening in new tab...');
+					} else {
+						terminalBridge.showError('Popup blocked. Please allow popups for this site.');
+						// Fallback: open the server URL directly
+						window.open(serverUrl, '_blank');
+					}
+				} catch {
+					// Fallback: open server URL directly
+					terminalBridge.showSuccess('Opening in new tab...');
+					window.open(serverUrl, '_blank');
+				}
+			}
+		} catch (error) {
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			terminalBridge.showError(`Failed to open server URL: ${errorMsg}`);
+			// Fallback to direct open
+			if (onOpenBrowserMode) {
+				onOpenBrowserMode();
+			} else {
+				window.open(serverUrl, '_blank');
+			}
 		}
 	}
-
 	function stopServer() {
-		// Implementation for stopping server would go here
+		terminalBridge.showSeparator();
+		terminalBridge.showAction('Stopping development server...');
+		terminalBridge.write(`\n  Previous URL: ${serverUrl}\n`);
+		terminalBridge.write(`  Port: ${serverPort}\n\n`);
+
 		serverStatus = 'idle';
 		serverPort = null;
 		serverUrl = null;
+
+		terminalBridge.showSuccess('Server stopped ✓');
+		terminalBridge.showSeparator();
 	}
 </script>
 
-<div class="flex h-6 items-center justify-between border-t bg-background px-2 text-xs text-white">
+<div
+	class="flex h-6 items-center justify-between border-t border-border bg-muted/50 px-2 text-xs text-muted-foreground"
+>
 	<!-- Left side -->
 	<div class="flex items-center space-x-4">
 		<!-- Online/Offline Status -->
 		<div class="flex items-center space-x-1">
-			<div class="h-2 w-2 rounded-full {isOnline ? 'bg-green-400' : 'bg-red-400'}"></div>
+			<div class="h-2 w-2 rounded-full {isOnline ? 'bg-emerald-500' : 'bg-destructive'}"></div>
 			<span>{isOnline ? 'Online' : 'Offline'}</span>
 		</div>
 
 		<!-- Git Information -->
 		<button
 			onclick={handleGitClick}
-			class="flex items-center space-x-1 rounded px-1 py-0.5 transition-colors hover:bg-primary"
+			class="flex items-center space-x-1 rounded px-1 py-0.5 transition-colors hover:bg-accent hover:text-accent-foreground"
 		>
 			<svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
 				<path
@@ -368,7 +443,7 @@
 
 		<!-- Project Framework -->
 		{#if project?.framework}
-			<span class="text-blue-200">{project.framework}</span>
+			<span class="text-primary">{project.framework}</span>
 		{/if}
 
 		<!-- Server Controls -->
@@ -377,7 +452,7 @@
 				{#if serverStatus === 'idle'}
 					<button
 						onclick={startServer}
-						class="flex items-center space-x-1 rounded bg-green-600 px-2 py-1 text-xs text-white transition-colors hover:bg-green-500"
+						class="flex items-center space-x-1 rounded bg-emerald-600 px-2 py-1 text-xs text-primary-foreground transition-colors hover:bg-emerald-500"
 						title="Start development server"
 					>
 						<svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
@@ -391,10 +466,10 @@
 					</button>
 				{:else if serverStatus === 'starting'}
 					<div
-						class="flex items-center space-x-1 rounded bg-yellow-600 px-2 py-1 text-xs text-white"
+						class="flex items-center space-x-1 rounded bg-amber-600 px-2 py-1 text-xs text-primary-foreground"
 					>
 						<div
-							class="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent"
+							class="h-3 w-3 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent"
 						></div>
 						<span>{isInstallingDeps ? 'Installing...' : 'Starting...'}</span>
 					</div>
@@ -402,10 +477,10 @@
 					<div class="flex items-center space-x-1">
 						<button
 							onclick={openServerUrl}
-							class="flex items-center space-x-1 rounded bg-green-600 px-2 py-1 text-xs text-white transition-colors hover:bg-green-500"
+							class="flex items-center space-x-1 rounded bg-emerald-600 px-2 py-1 text-xs text-primary-foreground transition-colors hover:bg-emerald-500"
 							title="Open server URL"
 						>
-							<div class="h-2 w-2 animate-pulse rounded-full bg-green-300"></div>
+							<div class="h-2 w-2 animate-pulse rounded-full bg-emerald-300"></div>
 							<span>Server Running</span>
 							<svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path
@@ -418,10 +493,11 @@
 						</button>
 						<button
 							onclick={stopServer}
-							class="flex items-center space-x-1 rounded bg-red-600 px-2 py-1 text-xs text-white transition-colors hover:bg-red-500"
+							class="flex items-center space-x-1 rounded bg-destructive px-2 py-1 text-xs text-destructive-foreground transition-colors hover:bg-destructive/90"
 							title="Stop server"
+							aria-label="Stop development server"
 						>
-							<svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+							<svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
 								<path
 									fill-rule="evenodd"
 									d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z"
@@ -433,7 +509,7 @@
 				{:else if serverStatus === 'error'}
 					<button
 						onclick={startServer}
-						class="flex items-center space-x-1 rounded bg-red-600 px-2 py-1 text-xs text-white transition-colors hover:bg-red-500"
+						class="flex items-center space-x-1 rounded bg-destructive px-2 py-1 text-xs text-destructive-foreground transition-colors hover:bg-destructive/90"
 						title="Server error - click to retry"
 					>
 						<svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
@@ -453,7 +529,6 @@
 	<!-- Center - Current File Info -->
 	{#if $activeFile}
 		<div class="flex items-center space-x-4">
-			<!-- Selection Count -->
 			{#if selectionCount > 0}
 				<span>({selectionCount} selected)</span>
 			{/if}
@@ -462,43 +537,38 @@
 
 	<!-- Right side -->
 	<div class="flex items-center space-x-4">
-		<!-- Cursor Position -->
 		{#if $activeFile}
 			<button
 				onclick={handleCursorClick}
-				class="rounded px-1 py-0.5 transition-colors hover:bg-primary"
+				class="rounded px-1 py-0.5 transition-colors hover:bg-accent hover:text-accent-foreground"
 			>
 				Ln {cursorPosition.line}, Col {cursorPosition.column}
 			</button>
 		{/if}
 
-		<!-- Language -->
 		{#if language}
 			<button
 				onclick={handleLanguageClick}
-				class="rounded px-1 py-0.5 transition-colors hover:bg-primary"
+				class="rounded px-1 py-0.5 transition-colors hover:bg-accent hover:text-accent-foreground"
 			>
 				{language}
 			</button>
 		{/if}
 
-		<!-- Encoding -->
 		<button
 			onclick={handleEncodingClick}
-			class="rounded px-1 py-0.5 transition-colors hover:bg-primary"
+			class="rounded px-1 py-0.5 transition-colors hover:bg-accent hover:text-accent-foreground"
 		>
 			{encoding}
 		</button>
 
-		<!-- Line Ending -->
 		<button
 			onclick={handleLineEndingClick}
-			class="rounded px-1 py-0.5 transition-colors hover:bg-primary"
+			class="rounded px-1 py-0.5 transition-colors hover:bg-accent hover:text-accent-foreground"
 		>
 			{lineEnding}
 		</button>
 
-		<!-- Current Time -->
 		<span class="tabular-nums">{currentTime}</span>
 	</div>
 </div>

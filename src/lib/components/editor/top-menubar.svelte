@@ -2,13 +2,21 @@
 	import { goto } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Menubar from '$lib/components/ui/menubar/index.js';
+	import { Switch } from '$lib/components/ui/switch';
+	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { fileActions, tabActions } from '$lib/stores/editor.js';
 	import { sidebarPanelActions, sidebarPanelsStore } from '$lib/stores/sidebar-panels.store';
+	import GlobeIcon from '@lucide/svelte/icons/globe';
 	import MessageSquareIcon from '@lucide/svelte/icons/message-square';
 	import SearchIcon from '@lucide/svelte/icons/search';
 
-	let { project, onOpenCommandPalette } = $props<{
+	let {
+		project,
+		browserMode = $bindable(false),
+		onOpenCommandPalette
+	} = $props<{
 		project: any;
+		browserMode?: boolean;
 		onOpenCommandPalette?: () => void;
 	}>();
 
@@ -19,6 +27,10 @@
 
 	// Reactive state for chat sidebar visibility
 	let chatSidebarVisible = $derived($sidebarPanelsStore.panels.rightSidebarVisible);
+
+	function toggleBrowserMode() {
+		browserMode = !browserMode;
+	}
 
 	function handleNewFile() {
 		// Create a new untitled file
@@ -256,5 +268,20 @@
 		<div class="px-4 text-xs text-muted-foreground">
 			{project?.name || 'Untitled Project'}
 		</div>
+
+		<!-- Browser Mode Toggle -->
+		<Tooltip.Provider>
+			<Tooltip.Root>
+				<Tooltip.Trigger>
+					<div class="flex items-center gap-2 border-l pl-3">
+						<GlobeIcon class="h-3.5 w-3.5 text-muted-foreground" />
+						<Switch checked={browserMode} onCheckedChange={toggleBrowserMode} />
+					</div>
+				</Tooltip.Trigger>
+				<Tooltip.Content>
+					<p>Toggle Browser Preview Mode</p>
+				</Tooltip.Content>
+			</Tooltip.Root>
+		</Tooltip.Provider>
 	</div>
 </div>
