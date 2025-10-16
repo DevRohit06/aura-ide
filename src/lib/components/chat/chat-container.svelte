@@ -34,9 +34,16 @@
 	interface Props {
 		messages?: MessageType[];
 		isLoading?: boolean;
+		user?: {
+			id: string;
+			email: string;
+			username?: string;
+			name?: string;
+			image?: string | null;
+		};
 	}
 
-	let { messages = [], isLoading = false }: Props = $props();
+	let { messages = [], isLoading = false, user = undefined }: Props = $props();
 
 	// Forward interrupt events from Message components
 	const dispatch = createEventDispatcher<{
@@ -226,6 +233,7 @@
 					{#each messages as message, index (message.id)}
 						<Message
 							{message}
+							{user}
 							isLast={index === messages.length - 1}
 							on:approveInterrupt={(e) => dispatch('approveInterrupt', e.detail)}
 							on:rejectInterrupt={() => dispatch('rejectInterrupt')}
@@ -234,8 +242,9 @@
 					{/each}
 				</div>
 
-				<!-- Loading indicator -->
-				{#if isLoading}
+				<!-- Loading indicator - only show when loading but NOT streaming -->
+				{@const hasStreamingMessage = messages.some((m) => m.metadata?.isStreaming)}
+				{#if isLoading && !hasStreamingMessage}
 					<div class="mx-4 mb-4 flex gap-3 rounded-lg border bg-muted/30 p-4">
 						<div
 							class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10"

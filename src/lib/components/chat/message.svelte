@@ -30,9 +30,16 @@
 	interface Props {
 		message: MessageType;
 		isLast?: boolean;
+		user?: {
+			id: string;
+			email: string;
+			username?: string;
+			name?: string;
+			image?: string | null;
+		};
 	}
 
-	let { message, isLast = false }: Props = $props();
+	let { message, isLast = false, user = undefined }: Props = $props();
 
 	let showPlan = $state(false);
 	let isProcessingDecision = $state(false);
@@ -59,9 +66,11 @@
 		showPlan = !showPlan;
 	}
 
-	import { Avatar, AvatarFallback } from '$lib/components/ui/avatar';
+	import { Avatar } from '$lib/components/ui/avatar';
 	import { Badge } from '$lib/components/ui/badge';
 	import modelCatalog from '$lib/data/models.json';
+	import { getModelImageUrl, getModelInitials } from '$lib/utils/model-image';
+	import ProfilePicture from '../shared/profile-picture.svelte';
 	import HumanInTheLoop from './human-in-the-loop.svelte';
 	import Markdown from './markdown.svelte';
 
@@ -265,9 +274,16 @@
 	<div class="flex-1 space-y-2">
 		<div class="flex items-center gap-2">
 			<Avatar class="h-8 w-8 shrink-0">
-				<AvatarFallback class="text-xs">
-					{message.role === 'user' ? 'U' : 'AI'}
-				</AvatarFallback>
+				{#if message.role === 'user'}
+					<ProfilePicture name={user?.name || user?.username || 'User'} src={user?.image || ''} />
+				{:else}
+					<!-- Assistant/AI Avatar -->
+					{@const modelImageUrl = getModelImageUrl(message.metadata?.model)}
+					<ProfilePicture
+						name={getModelInitials(getModelDisplay(message.metadata?.model) || 'AI')}
+						src={modelImageUrl}
+					/>
+				{/if}
 			</Avatar>
 			<Badge variant={message.role === 'user' ? 'default' : 'secondary'} class="text-xs">
 				{message.role === 'user' ? 'You' : 'Assistant'}
@@ -282,6 +298,21 @@
 			{#if message.metadata?.hasToolCalls && message.metadata?.toolCallCount}
 				<Badge variant="secondary" class="ml-2 text-xs">
 					🔧 {message.metadata.toolCallCount} tool{message.metadata.toolCallCount > 1 ? 's' : ''}
+				</Badge>
+			{/if}
+
+			{#if message.metadata?.isStreaming}
+				<Badge variant="outline" class="ml-2 animate-pulse text-xs">
+					<div class="mr-1 flex space-x-0.5">
+						<div
+							class="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.3s]"
+						></div>
+						<div
+							class="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.15s]"
+						></div>
+						<div class="h-1 w-1 animate-bounce rounded-full bg-current"></div>
+					</div>
+					Streaming...
 				</Badge>
 			{/if}
 
@@ -304,7 +335,13 @@
 			</div>
 		{:else}
 			<div class="space-y-4 text-sm leading-relaxed">
-				<Markdown content={message.content} messageId={message.id} data={{}} id={message.id} />
+				<Markdown
+					content={message.content}
+					messageId={message.id}
+					data={{}}
+					id={message.id}
+					streaming={message.metadata?.isStreaming}
+				/>
 
 				<!-- Tool Calls Display -->
 				{#if message.metadata?.toolCalls && message.metadata.toolCalls.length > 0}

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import modelCatalog from '$lib/data/models.json';
+	import { getModelImageUrl } from '$lib/utils/model-image';
 	import { Check, ChevronDown } from 'lucide-svelte';
 	import { createEventDispatcher } from 'svelte';
 
@@ -67,7 +68,7 @@
 	// Get display name for selected model
 	const displayName = $derived.by(() => {
 		if (!selectedModel) return placeholder;
-		const name = selectedModel.modelName || selectedModel.name || selectedModel.modelId;
+		const name = selectedModel.modelName || selectedModel.modelId;
 		// For Claude models, show just the model name without "Claude"
 		if (name?.includes('Claude')) return name.replace('Claude ', '');
 		return name;
@@ -94,8 +95,19 @@
 
 <DropdownMenu.Root bind:open>
 	<DropdownMenu.Trigger
-		class="flex cursor-pointer items-center gap-1 text-sm font-medium text-foreground transition-colors hover:text-primary"
+		class="flex cursor-pointer items-center gap-2 text-sm font-medium text-foreground transition-colors hover:text-primary"
 	>
+		{#if selectedModel}
+			<img
+				src={getModelImageUrl(selectedModel.providerModelId)}
+				alt={displayName}
+				class="h-4 w-4 rounded-full object-cover"
+				onerror={(e) => {
+					const target = e.currentTarget as HTMLImageElement;
+					target.style.display = 'none';
+				}}
+			/>
+		{/if}
 		<span>{displayName}</span>
 		<ChevronDown class="h-3 w-3 text-muted-foreground" />
 	</DropdownMenu.Trigger>
@@ -108,12 +120,23 @@
 				</div>
 				{#each provider.models as model (model.modelId + '-' + model.providerModelId)}
 					<DropdownMenu.Item
-						class="flex cursor-pointer items-center justify-between rounded px-2 py-1.5 text-sm hover:bg-muted"
+						class="flex cursor-pointer items-center justify-between gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted"
 						onclick={() => selectModel(model.providerModelId)}
 					>
-						<span class="truncate">{model.modelName}</span>
+						<div class="flex min-w-0 flex-1 items-center gap-2">
+							<img
+								src={getModelImageUrl(model.providerModelId)}
+								alt={model.modelName}
+								class="h-5 w-5 shrink-0 rounded-full object-cover"
+								onerror={(e) => {
+									const target = e.currentTarget as HTMLImageElement;
+									target.style.display = 'none';
+								}}
+							/>
+							<span class="truncate">{model.modelName}</span>
+						</div>
 						{#if value === model.providerModelId}
-							<Check class="h-3 w-3 text-primary" />
+							<Check class="h-3 w-3 shrink-0 text-primary" />
 						{/if}
 					</DropdownMenu.Item>
 				{/each}

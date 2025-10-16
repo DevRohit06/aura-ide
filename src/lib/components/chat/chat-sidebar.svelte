@@ -21,9 +21,16 @@
 
 	interface Props {
 		project?: Project;
+		user?: {
+			id: string;
+			email: string;
+			username?: string;
+			name?: string;
+			image?: string | null;
+		};
 	}
 
-	let { project = undefined }: Props = $props();
+	let { project = undefined, user = undefined }: Props = $props();
 
 	const dispatch = createEventDispatcher<{
 		close: void;
@@ -334,6 +341,7 @@
 		<ChatContainer
 			messages={$messages}
 			isLoading={$isLoading}
+			{user}
 			on:approveInterrupt={handleInterruptDecision}
 			on:rejectInterrupt={handleInterruptDecision}
 			on:modifyInterrupt={handleInterruptDecision}
