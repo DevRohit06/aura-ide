@@ -29,8 +29,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			return json({ error: 'Unauthorized' }, { status: 401 });
 		}
 
-		const { name, framework, templateId, description, configuration, sandboxProvider } =
+		const { name, framework, templateId, description, configuration, sandboxProvider, customRepo } =
 			await request.json();
+
+		// Debug logging
+		console.log('🔍 API DEBUG: Received project creation request:');
+		console.log('  - framework:', framework);
+		console.log('  - customRepo:', JSON.stringify(customRepo, null, 2));
+		console.log('  - templateId:', templateId);
 
 		// Validate required fields
 		if (!name || !framework || !sandboxProvider) {
@@ -48,8 +54,42 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			);
 		}
 
+		// Validate custom repository if provided
+		if (customRepo) {
+			if (!customRepo.owner || !customRepo.repo) {
+				return json({ error: 'Custom repository must include owner and repo' }, { status: 400 });
+			}
+
+			// Validate owner and repo names
+			const validNamePattern = /^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$/;
+			const validRepoPattern = /^[a-zA-Z0-9._-]+$/;
+
+			if (!validNamePattern.test(customRepo.owner)) {
+				return json({ error: 'Invalid GitHub username/organization name' }, { status: 400 });
+			}
+
+			if (!validRepoPattern.test(customRepo.repo)) {
+				return json({ error: 'Invalid repository name' }, { status: 400 });
+			}
+
+			// Validate branch if provided
+			if (customRepo.branch) {
+				const validBranchPattern = /^[a-zA-Z0-9._/-]+$/;
+				if (!validBranchPattern.test(customRepo.branch)) {
+					return json({ error: 'Invalid branch name' }, { status: 400 });
+				}
+			}
+		}
+
 		// Map framework to proper StackBlitz starter name
-		const getTemplateId = (framework: string, providedTemplateId?: string): string => {
+		const getTemplateId = (
+			framework: string,
+			providedTemplateId?: string,
+			hasCustomRepo?: boolean
+		): string => {
+			// If using custom repo, use a placeholder template ID
+			if (hasCustomRepo) return 'custom-repo';
+
 			if (providedTemplateId) return providedTemplateId;
 
 			// Map common frameworks to their StackBlitz starter folder paths
@@ -73,11 +113,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		// Use project initialization service for complete setup with chosen sandbox provider
 		const initializationResult = await projectInitializationService.initializeProject({
 			name: name.trim(),
-			templateId: getTemplateId(framework, templateId),
+			templateId: getTemplateId(framework, templateId, !!customRepo),
 			framework,
 			userId: locals.user.id,
 			description: description?.trim() || `${framework} project`,
 			sandboxProvider,
+			customRepo: customRepo || undefined,
 			configuration: {
 				typescript: configuration?.typescript ?? false,
 				eslint: configuration?.eslint ?? true,

@@ -184,6 +184,17 @@ export const GET: RequestHandler = async () => {
 				tags: ['typescript', 'vanilla', 'frontend'],
 				features: ['Type Safety', 'No Dependencies', 'Modern Features', 'Full Control'],
 				stackblitzId: stackblitzTemplates['vanilla-ts']
+			},
+			{
+				id: 'static',
+				name: 'Static HTML',
+				description: 'Plain HTML, CSS, and JavaScript - no build tools required',
+				version: 'ES2023',
+				category: 'static',
+				icon: 'html5',
+				tags: ['html', 'css', 'javascript', 'static', 'landing-page'],
+				features: ['No Dependencies', 'Fast Loading', 'SEO Friendly', 'Simple & Direct'],
+				stackblitzId: stackblitzTemplates.static
 			}
 		];
 

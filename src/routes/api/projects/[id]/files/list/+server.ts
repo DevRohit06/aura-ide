@@ -43,15 +43,11 @@ export const GET: RequestHandler = async ({ params, url, locals }) => {
 					`📁 Loading files for Daytona project ${projectId} with sandbox ${project.sandboxId}`
 				);
 
-				const filesResult = await listFilesService(
-					{ projectId: project.id, sandboxId: project.sandboxId, path },
-					{
-						includeSnippets: includeContent ? 'sync' : false,
-						batchSize: 50,
-						fastMode
-					}
-				);
-
+				const filesResult = await listFilesService({
+					projectId: project.id,
+					sandboxId: project.sandboxId,
+					path
+				});
 				projectFiles = Array.isArray(filesResult?.files) ? filesResult.files : [];
 				logger.info(`✅ Loaded ${projectFiles.length} files from Daytona sandbox`);
 			} catch (err) {
