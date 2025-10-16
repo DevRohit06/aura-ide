@@ -185,10 +185,143 @@ export function getStackBlitzTemplate(framework: string): string {
 export function getGitHubTemplate(templateId: string): {
 	owner: string;
 	repo: string;
-	path: string;
+	path?: string;
 } | null {
 	const template = githubTemplates[templateId as keyof typeof githubTemplates];
 	return template || null;
+}
+
+/**
+ * Parse custom GitHub URL and create template config
+ * Supports formats:
+ * - https://github.com/owner/repo
+ * - github.com/owner/repo
+ * - owner/repo
+ * - owner/repo@branch (with specific branch)
+ */
+export function parseCustomGitHubUrl(url: string): {
+	owner: string;
+	repo: string;
+	branch?: string;
+	path?: string;
+} | null {
+	if (!url || !url.trim()) {
+		return null;
+	}
+
+	// Remove trailing slashes and .git suffix
+	url = url
+		.trim()
+		.replace(/\.git$/, '')
+		.replace(/\/$/, '');
+
+	let owner = '';
+	let repo = '';
+	let branch: string | undefined;
+	let path: string | undefined;
+
+	// Extract branch if specified with @ or #
+	let branchMatch = url.match(/@([^\/]+)$/);
+	if (!branchMatch) {
+		branchMatch = url.match(/#([^\/]+)$/);
+	}
+	if (branchMatch) {
+		branch = branchMatch[1];
+		url = url.replace(/@[^\/]+$/, '').replace(/#[^\/]+$/, '');
+	}
+
+	// Try to parse various formats
+	// Format 1: https://github.com/owner/repo or https://github.com/owner/repo/tree/branch/path
+	const fullUrlMatch = url.match(
+		/^https?:\/\/github\.com\/([^\/]+)\/([^\/]+)(?:\/tree\/([^\/]+)\/(.+))?/
+	);
+	if (fullUrlMatch) {
+		owner = fullUrlMatch[1];
+		repo = fullUrlMatch[2];
+		if (fullUrlMatch[3] && !branch) {
+			branch = fullUrlMatch[3];
+		}
+		if (fullUrlMatch[4]) {
+			path = fullUrlMatch[4];
+		}
+	} else {
+		// Format 2: github.com/owner/repo
+		const domainMatch = url.match(/^github\.com\/([^\/]+)\/([^\/]+)/);
+		if (domainMatch) {
+			owner = domainMatch[1];
+			repo = domainMatch[2];
+		} else {
+			// Format 3: owner/repo
+			const shortMatch = url.match(/^([^\/]+)\/([^\/]+)$/);
+			if (shortMatch) {
+				owner = shortMatch[1];
+				repo = shortMatch[2];
+			}
+		}
+	}
+
+	if (!owner || !repo) {
+		return null;
+	}
+
+	return { owner, repo, branch, path };
+}
+
+/**
+ * Validate custom GitHub repository URL
+ */
+export function validateCustomGitHubUrl(url: string): {
+	isValid: boolean;
+	error?: string;
+	parsed?: {
+		owner: string;
+		repo: string;
+		branch?: string;
+		path?: string;
+	};
+} {
+	const parsed = parseCustomGitHubUrl(url);
+
+	if (!parsed) {
+		return {
+			isValid: false,
+			error: 'Invalid GitHub URL format. Use: owner/repo or https://github.com/owner/repo'
+		};
+	}
+
+	// Validate owner and repo names (GitHub username/repo rules)
+	const validNamePattern = /^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$/;
+	const validRepoPattern = /^[a-zA-Z0-9._-]+$/;
+
+	if (!validNamePattern.test(parsed.owner)) {
+		return {
+			isValid: false,
+			error: 'Invalid GitHub username/organization name'
+		};
+	}
+
+	if (!validRepoPattern.test(parsed.repo)) {
+		return {
+			isValid: false,
+			error: 'Invalid repository name'
+		};
+	}
+
+	if (parsed.branch) {
+		// Basic branch name validation
+		const validBranchPattern = /^[a-zA-Z0-9._/-]+$/;
+		if (!validBranchPattern.test(parsed.branch)) {
+			return {
+				isValid: false,
+				error: 'Invalid branch name'
+			};
+		}
+	}
+
+	return {
+		isValid: true,
+		parsed
+	};
 }
 
 /**
