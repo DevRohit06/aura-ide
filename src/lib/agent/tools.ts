@@ -16,20 +16,22 @@ export const webSearchTool = tool(
 			return 'Web search is not configured. Please set TAVILY_API_KEY environment variable.';
 		}
 		const maxResults = 5;
-		const tavily = new TavilySearch({ tavilyApiKey: env.TAVILY_API_KEY, maxResults });
+		const tavily = new TavilySearch({ 
+			apiKey: env.TAVILY_API_KEY, 
+			maxResults 
+		});
+		
 		try {
-			let results: any;
-			if (typeof (tavily as any).run === 'function') {
-				results = await (tavily as any).run(query);
-			} else if (typeof (tavily as any).search === 'function') {
-				results = await (tavily as any).search(query);
-			} else {
-				results = await (tavily as any)(query);
-			}
-			const resultData = {
-				answer: results?.answer ?? null,
-				results: results?.results ?? results ?? []
-			};
+			// TavilySearch has invoke() method for LangChain compatibility
+			const results = await tavily.invoke(query);
+			
+			// Results should be a string or object with search results
+			const resultData = typeof results === 'string' 
+				? { answer: results, results: [] }
+				: {
+					answer: results?.answer ?? null,
+					results: results?.results ?? results ?? []
+				};
 
 			if (!resultData.answer && (!resultData.results || resultData.results.length === 0)) {
 				return 'No web search results found for the query.';
