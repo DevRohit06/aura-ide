@@ -41,6 +41,8 @@ RUN apk add --no-cache dumb-init
 RUN addgroup -g 1001 -S nodejs
 RUN adduser -S aura -u 1001
 
+ENV NODE_OPTIONS="--max_old_space_size=5120"
+
 # Set working directory
 WORKDIR /app
 
