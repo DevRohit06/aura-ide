@@ -142,6 +142,7 @@
 		"marked": "^16.3.0",
 		"minimatch": "^10.0.3",
 		"mongodb": "^6.19.0",
+		"nanoid": "^5.1.6",
 		"node-pty": "^1.0.0",
 		"sveltekit-superforms": "^2.27.1",
 		"thememirror": "^2.0.1",
