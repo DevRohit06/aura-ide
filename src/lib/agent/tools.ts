@@ -122,6 +122,33 @@ export const writeFileTool = tool(
 			filePath: string;
 			content: string;
 		};
+
+		// Validate required parameters
+		if (!sandboxId) {
+			return JSON.stringify({
+				success: false,
+				error: 'Missing required parameter: sandboxId',
+				message: 'sandboxId is required to write a file'
+			});
+		}
+
+		if (!filePath) {
+			return JSON.stringify({
+				success: false,
+				error: 'Missing required parameter: filePath',
+				message: 'filePath is required to write a file'
+			});
+		}
+
+		if (content === undefined || content === null) {
+			return JSON.stringify({
+				success: false,
+				error: 'Missing required parameter: content',
+				message:
+					'content is required to write a file. Please provide the complete file content as a string.'
+			});
+		}
+
 		try {
 			const provider = sandboxType as any;
 
@@ -151,12 +178,23 @@ export const writeFileTool = tool(
 	}) as any,
 	{
 		name: 'write_file',
-		description: 'Write or update a file in the sandbox.',
+		description:
+			'Write or update a file in the sandbox. IMPORTANT: You MUST provide the complete file content in the "content" parameter. This is the full text content of the file you want to create or update.',
 		schema: z.object({
-			sandboxId: z.string(),
-			sandboxType: z.string().optional(),
-			filePath: z.string(),
-			content: z.string()
+			sandboxId: z
+				.string()
+				.describe('The ID of the sandbox where the file should be written (required)'),
+			sandboxType: z.string().optional().describe('The type of sandbox (e.g., "daytona" or "e2b")'),
+			filePath: z
+				.string()
+				.describe(
+					'The path to the file relative to the sandbox root (required, e.g., "app/page.tsx")'
+				),
+			content: z
+				.string()
+				.describe(
+					'The COMPLETE content of the file as a string (required). This should be the full file content you want to write.'
+				)
 		})
 	}
 );

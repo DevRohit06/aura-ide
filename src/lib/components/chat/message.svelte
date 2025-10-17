@@ -70,6 +70,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import modelCatalog from '$lib/data/models.json';
 	import { getModelImageUrl, getModelInitials } from '$lib/utils/model-image';
+	import { selectedModelStore } from '@/stores/model';
 	import ProfilePicture from '../shared/profile-picture.svelte';
 	import HumanInTheLoop from './human-in-the-loop.svelte';
 	import Markdown from './markdown.svelte';
@@ -278,22 +279,20 @@
 					<ProfilePicture name={user?.name || user?.username || 'User'} src={user?.image || ''} />
 				{:else}
 					<!-- Assistant/AI Avatar -->
-					{@const modelImageUrl = getModelImageUrl(message.metadata?.model)}
+					{@const modelImageUrl = getModelImageUrl(
+						message.metadata?.agentModel || $selectedModelStore
+					)}
 					<ProfilePicture
-						name={getModelInitials(getModelDisplay(message.metadata?.model) || 'AI')}
+						name={getModelInitials(getModelDisplay(message.metadata?.agentModel) || 'AI')}
 						src={modelImageUrl}
 					/>
 				{/if}
 			</Avatar>
 			<Badge variant={message.role === 'user' ? 'default' : 'secondary'} class="text-xs">
-				{message.role === 'user' ? 'You' : 'Assistant'}
+				{message.role === 'user'
+					? 'You'
+					: getModelDisplay(message.metadata.agentModel) || 'Assistant'}
 			</Badge>
-
-			{#if message.role === 'assistant' && message.metadata?.agentModel}
-				<Badge variant="outline" class="ml-2 text-xs">
-					{getModelDisplay(message.metadata.agentModel)}
-				</Badge>
-			{/if}
 
 			{#if message.metadata?.hasToolCalls && message.metadata?.toolCallCount}
 				<Badge variant="secondary" class="ml-2 text-xs">
@@ -312,7 +311,6 @@
 						></div>
 						<div class="h-1 w-1 animate-bounce rounded-full bg-current"></div>
 					</div>
-					Streaming...
 				</Badge>
 			{/if}
 

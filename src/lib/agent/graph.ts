@@ -38,6 +38,21 @@ async function toolsNode(state: typeof AgentState.State) {
 				} else if (typeof msg.content !== 'string') {
 					msg.content = JSON.stringify(msg.content);
 				}
+
+				// Parse tool result to check for validation errors and make them more actionable
+				try {
+					const parsedContent = JSON.parse(msg.content);
+					if (parsedContent && !parsedContent.success && parsedContent.error) {
+						logger.warn(`Tool execution returned error: ${parsedContent.error}`);
+						// Enhance error message for missing parameters
+						if (parsedContent.error.includes('Missing required parameter')) {
+							parsedContent.message = `${parsedContent.message} Please retry the tool call with all required parameters included.`;
+							msg.content = JSON.stringify(parsedContent);
+						}
+					}
+				} catch (parseError) {
+					// Content is not JSON, that's fine - leave as is
+				}
 			});
 
 			// Log tool results for debugging
@@ -70,7 +85,31 @@ async function toolsNode(state: typeof AgentState.State) {
 }
 
 async function agentNode(state: typeof AgentState.State) {
-	const systemPrompt = `You are an expert coding assistant with access to sandboxes, semantic search and web search. Current file: ${state.currentFile || 'None'}\n\nCurrent Sandbox: ${state.sandboxId ? `ID: ${state.sandboxId}, Type: ${state.sandboxType || 'unknown'}` : 'None'}\n\nCurrent Model: ${state.modelConfig?.provider || 'openai'}/${state.modelConfig?.model || 'gpt-4o'}`;
+	const systemPrompt = `You are an expert coding assistant with access to sandboxes, semantic search and web search.
+
+Current Context:
+- Current file: ${state.currentFile || 'None'}
+- Sandbox: ${state.sandboxId ? `ID: ${state.sandboxId}, Type: ${state.sandboxType || 'unknown'}` : 'None'}
+- Model: ${state.modelConfig?.provider || 'openai'}/${state.modelConfig?.model || 'gpt-4o'}
+
+Tool Usage Guidelines:
+1. When using write_file, ALWAYS include ALL required parameters:
+   - sandboxId: The sandbox ID where the file should be written
+   - filePath: The path to the file (e.g., "app/page.tsx")
+   - content: The COMPLETE file content as a string
+   - sandboxType: Optional, the type of sandbox (e.g., "daytona" or "e2b")
+
+2. When using read_file, include:
+   - sandboxId: The sandbox ID
+   - filePath: The path to the file to read
+   - sandboxType: Optional sandbox type
+
+3. When using execute_code or exec_in_sandbox, include:
+   - sandboxId: The sandbox ID
+   - command: The shell command to execute
+   - sandboxType: Optional sandbox type
+
+IMPORTANT: Never call write_file without providing the complete file content in the "content" parameter. If you need to see the current content first, use read_file before write_file.`;
 
 	const messages = [new HumanMessage(systemPrompt), ...(state.messages || [])];
 
@@ -229,12 +268,30 @@ async function humanReviewNode(state: typeof AgentState.State) {
 
 			// Sanitize tool calls to only include serializable properties
 			// LangChain normalizes to "args", but we support fallbacks for safety
-			const sanitizedToolCalls = validToolCalls.map((tc) => ({
-				name: tc?.name || '',
-				args: tc?.args || tc?.arguments || tc?.input || {},
-				id: tc?.id || '',
-				type: tc?.type || 'tool_call'
-			}));
+			const sanitizedToolCalls = validToolCalls.map((tc) => {
+				const args = tc?.args || tc?.arguments || tc?.input || {};
+
+				// Validate write_file has required parameters
+				if (tc?.name === 'write_file') {
+					if (!args.content) {
+						logger.warn(`Tool call ${tc?.name} is missing required parameter: content`);
+						logger.warn('Full args object:', JSON.stringify(args, null, 2));
+					}
+					if (!args.sandboxId) {
+						logger.warn(`Tool call ${tc?.name} is missing required parameter: sandboxId`);
+					}
+					if (!args.filePath) {
+						logger.warn(`Tool call ${tc?.name} is missing required parameter: filePath`);
+					}
+				}
+
+				return {
+					name: tc?.name || '',
+					args,
+					id: tc?.id || '',
+					type: tc?.type || 'tool_call'
+				};
+			});
 
 			// Use LangGraph's interrupt() function for proper human-in-the-loop
 			const humanDecision = interrupt({
