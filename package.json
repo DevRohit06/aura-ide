@@ -112,6 +112,7 @@
 		"@octokit/rest": "^22.0.0",
 		"@qdrant/js-client-rest": "^1.15.1",
 		"@replit/codemirror-lang-svelte": "^6.0.0",
+		"@tavily/core": "^0.5.12",
 		"@types/joi": "^17.2.2",
 		"@types/jsonwebtoken": "^9.0.10",
 		"@types/marked": "^5.0.2",
