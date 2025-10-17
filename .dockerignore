@@ -1,0 +1,73 @@
+# Node modules
+node_modules
+npm-debug.log
+yarn-error.log
+pnpm-debug.log
+
+# Build output
+build
+.svelte-kit
+dist
+
+# Development files
+.env
+.env.local
+.env.*.local
+
+# Git
+.git
+.gitignore
+.github
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+.cursor
+.kiro
+
+# Testing
+coverage
+.nyc_output
+tests
+*.test.js
+*.spec.js
+
+# Documentation
+docs
+*.md
+!README.md
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Monitoring
+monitoring
+
+# Temporary files
+tmp
+*.tmp
+.cache
+
+# Sandbox
+sandbox
+
+# Local storage
+qdrant_storage
+
+# Scripts (unless needed)
+scripts/*.test.js
