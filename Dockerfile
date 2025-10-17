@@ -2,10 +2,19 @@
 # Optimized for production deployment
 
 # Build stage
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 # Set working directory
 WORKDIR /app
+
+# Set required build-time environment variables
+ARG NODE_ENV=production
+ARG PUBLIC_ORIGIN=http://localhost:3000
+ARG ORIGIN=http://localhost:3000
+
+ENV NODE_ENV=$NODE_ENV
+ENV PUBLIC_ORIGIN=$PUBLIC_ORIGIN
+ENV ORIGIN=$ORIGIN
 
 # Copy package files
 COPY package*.json ./
@@ -23,7 +32,7 @@ RUN pnpm run build
 RUN pnpm prune --prod
 
 # Production stage
-FROM node:20-alpine AS production
+FROM node:22-alpine AS production
 
 # Install dumb-init for proper signal handling
 RUN apk add --no-cache dumb-init
