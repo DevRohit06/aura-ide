@@ -1,10 +1,10 @@
 import { fileOperationsAPI } from '$lib/services/file-operations-api.service';
 import type {
-	CreateFileData,
-	DeleteFileData,
-	FileValidationResult,
-	MoveFileData,
-	RenameFileData
+    CreateFileData,
+    DeleteFileData,
+    FileValidationResult,
+    MoveFileData,
+    RenameFileData
 } from '$lib/types/file-operations';
 import type { Directory, File, FileSystemItem } from '$lib/types/files';
 import { toast } from 'svelte-sonner';
@@ -14,7 +14,6 @@ import { fileActions, filesStore } from './files.store';
 import { currentSandboxId } from './sandbox.store';
 import { tabActions } from './tabs.store';
 // Dynamic imports for SSR compatibility
-// import { r2StorageService } from '$lib/services/r2-storage.service'; // Import dynamically to avoid SSR issues
 // import { SandboxManager } from '$lib/services/sandbox/sandbox-manager'; // Import dynamically to avoid SSR issues
 
 // Enhanced file operations state
@@ -408,7 +407,7 @@ export const enhancedFileActions = {
 					fileActions.updateFile(parentId, {
 						children: [...parent.children, fileId],
 						modifiedAt: now
-					});
+					} as any);
 				}
 			}
 
@@ -505,7 +504,7 @@ export const enhancedFileActions = {
 					fileActions.updateFile(fileToDelete.parentId, {
 						children: parent.children.filter((id) => id !== data.id),
 						modifiedAt: new Date()
-					});
+					} as any);
 				}
 			}
 
@@ -709,7 +708,7 @@ export const enhancedFileActions = {
 					fileActions.updateFile(oldParentId, {
 						children: oldParent.children.filter((id) => id !== data.id),
 						modifiedAt: new Date()
-					});
+					} as any);
 				}
 			}
 
@@ -718,10 +717,10 @@ export const enhancedFileActions = {
 			// Add to new parent
 			if (data.newParentId) {
 				const newParentDir = newParent as Directory;
-				fileActions.updateFile(data.newParentId, {
-					children: [...newParentDir.children, data.id],
-					modifiedAt: new Date()
-				});
+					fileActions.updateFile(data.newParentId, {
+						children: [...newParentDir.children, data.id],
+						modifiedAt: new Date()
+					} as any);
 			}
 
 			enhancedFileActions.setOperationState({ operationProgress: 60 });
