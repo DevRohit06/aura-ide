@@ -1,11 +1,11 @@
 import { logger } from '$lib/utils/logger';
-import { tool } from '@langchain/core/tools';
+import { tool } from 'ai';
 import { z } from 'zod';
 import { mcpManager, type MCPTool } from './mcp-manager.service';
 
 /**
  * MCP Tools Service
- * Converts MCP tools to LangChain-compatible tools
+ * Converts MCP tools to AI SDK-compatible tools
  */
 class MCPToolsService {
 	/**
@@ -61,13 +61,15 @@ class MCPToolsService {
 	}
 
 	/**
-	 * Convert MCP tool to LangChain tool
+	 * Convert MCP tool to AI SDK tool
 	 */
-	convertMCPToolToLangChain(mcpTool: MCPTool) {
+	convertMCPToolToAISDK(mcpTool: MCPTool) {
 		const zodSchema = this.convertSchemaToZod(mcpTool.inputSchema);
 
-		return tool(
-			async (input: any) => {
+		return tool({
+			description: `[MCP:${mcpTool.server}] ${mcpTool.description}`,
+			parameters: zodSchema,
+			execute: async (input: any) => {
 				try {
 					logger.info(`Executing MCP tool: ${mcpTool.name}`, { server: mcpTool.server });
 
@@ -87,29 +89,24 @@ class MCPToolsService {
 					logger.error(`MCP tool execution failed: ${mcpTool.name}`, { error });
 					return `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
 				}
-			},
-			{
-				name: `mcp_${mcpTool.server}_${mcpTool.name}`,
-				description: `[MCP:${mcpTool.server}] ${mcpTool.description}`,
-				schema: zodSchema
 			}
-		);
+		});
 	}
 
 	/**
-	 * Get all MCP tools as LangChain tools
+	 * Get all MCP tools as AI SDK tools
 	 */
-	getAllLangChainTools() {
+	getAllAISDKTools() {
 		const mcpTools = mcpManager.getAllTools();
-		return mcpTools.map((tool) => this.convertMCPToolToLangChain(tool));
-	}
-
-	/**
-	 * Get MCP tools for a specific server as LangChain tools
-	 */
-	getLangChainToolsForServer(serverName: string) {
-		const mcpTools = mcpManager.getToolsForServer(serverName);
-		return mcpTools.map((tool) => this.convertMCPToolToLangChain(tool));
+		const tools: Record<string, any> = {};
+		
+		for (const tool of mcpTools) {
+			// Create a unique name for the tool
+			const toolName = `mcp_${tool.server}_${tool.name}`;
+			tools[toolName] = this.convertMCPToolToAISDK(tool);
+		}
+		
+		return tools;
 	}
 
 	/**
@@ -137,31 +134,36 @@ class MCPToolsService {
 	 * Create Context7 documentation search tool
 	 */
 	createContext7Tool() {
-		return tool(
-			async (input: any) => {
+		return tool({
+			description:
+				'Search programming documentation across 200+ languages using Context7. Use this to find API documentation, code examples, and programming guides.',
+			parameters: z.object({
+				query: z.string().describe('The search query for documentation'),
+				language: z
+					.string()
+					.optional()
+					.describe('Optional programming language to filter results')
+			}),
+			execute: async (input: any) => {
 				return await this.searchDocumentation(input.query, input.language);
-			},
-			{
-				name: 'search_documentation',
-				description:
-					'Search programming documentation across 200+ languages using Context7. Use this to find API documentation, code examples, and programming guides.',
-				schema: z.object({
-					query: z.string().describe('The search query for documentation'),
-					language: z
-						.string()
-						.optional()
-						.describe('Optional programming language to filter results')
-				})
 			}
-		);
+		});
 	}
 
 	/**
 	 * Create memory storage tool
 	 */
 	createMemoryTool() {
-		return tool(
-			async (input: any) => {
+		return tool({
+			description:
+				'Store, retrieve, and search memories using the knowledge graph memory system. Actions: store, retrieve, search.',
+			parameters: z.object({
+				action: z.enum(['store', 'retrieve', 'search']).describe('The action to perform'),
+				key: z.string().optional().describe('Key for store/retrieve operations'),
+				value: z.any().optional().describe('Value to store'),
+				query: z.string().optional().describe('Search query for search operation')
+			}),
+			execute: async (input: any) => {
 				try {
 					if (!mcpManager.isServerConnected('memory')) {
 						return 'Memory server is not available. Please enable the Memory MCP server.';
@@ -195,19 +197,8 @@ class MCPToolsService {
 					logger.error('Memory tool execution failed', { error });
 					return `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
 				}
-			},
-			{
-				name: 'memory_operations',
-				description:
-					'Store, retrieve, and search memories using the knowledge graph memory system. Actions: store, retrieve, search.',
-				schema: z.object({
-					action: z.enum(['store', 'retrieve', 'search']).describe('The action to perform'),
-					key: z.string().optional().describe('Key for store/retrieve operations'),
-					value: z.any().optional().describe('Value to store'),
-					query: z.string().optional().describe('Search query for search operation')
-				})
 			}
-		);
+		});
 	}
 }
 
