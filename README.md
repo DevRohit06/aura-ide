@@ -1,5 +1,7 @@
 # 🌟 Aura IDE
 
+![Aura IDE](./images/hero.png)
+
 > **⚠️ EXPERIMENTAL PROJECT** - This project is currently in early development (MVP stage). Features may be incomplete, flows might not work as expected, and the codebase is actively evolving. This will be polished over time.
 
 **Your AI-powered cloud IDE to accelerate coding and debugging with intelligent assistance.**
