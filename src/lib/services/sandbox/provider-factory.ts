@@ -1,13 +1,11 @@
 /**
  * Sandbox Provider Factory
- * Creates and manages sandbox provider instances
+ * Creates and manages sandbox provider instances (Daytona only)
  */
 
 import type { SandboxProvider } from '$lib/types/sandbox.js';
 import { sandboxConfig } from '../../config/sandbox.config.js';
 import { DaytonaProvider } from './daytona-provider.js';
-import { E2BProvider } from './e2b-provider.js';
-import { LocalProvider } from './local-provider.js';
 import type { ISandboxProvider, ISandboxProviderFactory } from './sandbox-provider.interface.js';
 
 /**
@@ -39,14 +37,6 @@ export class SandboxProviderFactory implements ISandboxProviderFactory {
 				provider = new DaytonaProvider(config || sandboxConfig.daytona);
 				break;
 
-			case 'e2b':
-				provider = new E2BProvider(config || sandboxConfig.e2b);
-				break;
-
-			case 'local':
-				provider = new LocalProvider(config || sandboxConfig.local);
-				break;
-
 			default:
 				throw new Error(`Unsupported provider type: ${type}`);
 		}
@@ -68,16 +58,6 @@ export class SandboxProviderFactory implements ISandboxProviderFactory {
 			available.push('daytona');
 		}
 
-		// Check E2B
-		if (sandboxConfig.e2b.apiKey) {
-			available.push('e2b');
-		}
-
-		// Check Local
-		if (sandboxConfig.local.enabled) {
-			available.push('local');
-		}
-
 		return available;
 	}
 
@@ -85,12 +65,6 @@ export class SandboxProviderFactory implements ISandboxProviderFactory {
 		switch (type) {
 			case 'daytona':
 				return !!(config.apiKey && config.apiUrl);
-
-			case 'e2b':
-				return !!(config.apiKey && config.baseUrl);
-
-			case 'local':
-				return !!(config.enabled && config.basePath);
 
 			default:
 				return false;

@@ -1,11 +1,9 @@
 /**
  * Project Initialization Service
- * Based on the demo sandbox integration flow - handles complete project lifecycle:
+ * Handles complete project lifecycle:
  * 1. GitHub template cloning
- * 2. R2 storage upload
- * 3. Sandbox creation (Daytona/E2B)
- * 4. File synchronization
- * 5. Status tracking
+ * 2. Sandbox creation (Daytona)
+ * 3. Status tracking
  */
 
 import type { Project } from '$lib/types/index.js';
@@ -13,7 +11,6 @@ import { logger } from '$lib/utils/logger.js';
 import { nanoid } from 'nanoid';
 import { DatabaseService } from './database.service.js';
 import { GitHubApiService } from './github-api.service.js';
-import { R2StorageService } from './r2-storage.service.js';
 
 export interface ProjectInitializationOptions {
 	name: string;
@@ -21,7 +18,7 @@ export interface ProjectInitializationOptions {
 	framework: string;
 	userId: string;
 	description?: string;
-	sandboxProvider: 'daytona' | 'e2b'; // Required: choose sandbox provider
+	sandboxProvider: 'daytona';
 	customRepo?: {
 		owner: string;
 		repo: string;
@@ -37,16 +34,10 @@ export interface ProjectInitializationOptions {
 		additionalDependencies?: string[];
 	};
 	sandboxOptions?: {
-		createDaytona?: boolean;
-		createE2B?: boolean;
 		daytonaConfig?: {
 			memory?: string;
 			cpu?: string;
 			keepAlive?: boolean;
-		};
-		e2bConfig?: {
-			template?: string;
-			timeout?: number;
 		};
 	};
 }
@@ -62,37 +53,21 @@ export interface ProjectInitializationResult {
 	project: Project;
 	files: ProjectFile[];
 	sandboxResult?: {
-		provider: 'daytona' | 'e2b';
+		provider: 'daytona';
 		sandboxId: string;
 		url?: string;
 		status: string;
-		storage?: {
-			key: string;
-			url: string;
-			size: number;
-		};
 	};
 }
 
 export interface ProjectStatus {
-	phase: 'initializing' | 'downloading' | 'uploading' | 'creating-sandboxes' | 'ready' | 'error';
+	phase: 'initializing' | 'downloading' | 'creating-sandboxes' | 'ready' | 'error';
 	progress: number; // 0-100
 	message: string;
 	details?: {
 		filesDownloaded?: number;
 		totalFiles?: number;
-		uploadProgress?: number;
 		sandboxStatus?: Record<string, string>;
-		currentFile?: {
-			name: string;
-			size: number;
-			index: number;
-		};
-		recentFiles?: Array<{
-			name: string;
-			size: number;
-			status: 'downloading' | 'uploaded' | 'complete';
-		}>;
 	};
 	error?: string;
 }
@@ -101,17 +76,15 @@ export interface ProjectStatus {
  * Project Initialization Service Class
  */
 export class ProjectInitializationService {
-	private r2Service: R2StorageService;
 	private githubService: GitHubApiService;
 	private projectStatuses = new Map<string, ProjectStatus>();
 
 	constructor() {
-		this.r2Service = new R2StorageService();
 		this.githubService = new GitHubApiService();
 	}
 
 	/**
-	 * Initialize a complete project with cloning, storage, and sandbox creation
+	 * Initialize a complete project with cloning and sandbox creation
 	 */
 	async initializeProject(
 		options: ProjectInitializationOptions
@@ -145,34 +118,35 @@ export class ProjectInitializationService {
 					? `🎯 Using custom repository: ${options.customRepo.owner}/${options.customRepo.repo}`
 					: `📦 Using predefined template: ${options.templateId} for framework: ${options.framework}`
 			);
-			logger.info(`🔍 DEBUG: customRepo =`, JSON.stringify(options.customRepo, null, 2));
-			logger.info(`🔍 DEBUG: templateId = ${options.templateId}, framework = ${options.framework}`);
 
 			const files = await Promise.race([
-				this.downloadTemplateFiles(
-					projectId,
-					options.templateId,
-					options.framework,
-					options.customRepo
-				),
+				this.downloadTemplateFiles(options.templateId, options.framework, options.customRepo),
 				new Promise<never>((_, reject) =>
 					setTimeout(() => reject(new Error('Template download timeout')), 30000)
 				)
 			]);
-			logger.info(
-				`Downloaded ${files.length} files from ${options.customRepo ? 'custom repository' : 'template'}`
-			);
+			
+			this.updateProjectStatus(projectId, {
+				phase: 'downloading',
+				progress: 40,
+				message: `Downloaded ${files.length} files from template`,
+				details: {
+					filesDownloaded: files.length,
+					totalFiles: files.length
+				}
+			});
 
-			// Step 4: Create sandbox based on provider
+			// Step 3: Create Daytona sandbox
+			this.updateProjectStatus(projectId, {
+				phase: 'creating-sandboxes',
+				progress: 60,
+				message: 'Creating Daytona workspace and cloning project...'
+			});
+
+			logger.info(`Creating Daytona workspace for project ${projectId}`);
 			let sandboxResult;
-			if (options.sandboxProvider === 'daytona') {
-				this.updateProjectStatus(projectId, {
-					phase: 'creating-sandboxes',
-					progress: 80,
-					message: 'Creating Daytona workspace and cloning project...'
-				});
-
-				logger.info(`Creating Daytona workspace for project ${projectId}`);
+			
+			try {
 				sandboxResult = await Promise.race([
 					this.createDaytonaSandbox(projectId, options, files),
 					new Promise<never>((_, reject) =>
@@ -180,35 +154,12 @@ export class ProjectInitializationService {
 					)
 				]);
 				logger.info(`Daytona workspace created:`, sandboxResult);
-			} else if (options.sandboxProvider === 'e2b') {
-				// Step 4a: Upload to R2 storage (for E2B flow)
-				logger.info(`Uploading ${files.length} files to R2 storage for E2B`);
-				const storageResult = await Promise.race([
-					this.uploadToR2Storage(projectId, files),
-					new Promise<never>((_, reject) =>
-						setTimeout(() => reject(new Error('R2 upload timeout')), 30000)
-					)
-				]);
-				logger.info(`Upload completed: ${storageResult.key}`);
-
-				// Step 4b: Create E2B sandbox
-				this.updateProjectStatus(projectId, {
-					phase: 'creating-sandboxes',
-					progress: 80,
-					message: 'Creating E2B sandbox environment...'
-				});
-
-				logger.info(`Creating E2B sandbox for project ${projectId}`);
-				sandboxResult = await Promise.race([
-					this.createE2BSandbox(projectId, options, files),
-					new Promise<never>((_, reject) =>
-						setTimeout(() => reject(new Error('E2B sandbox creation timeout')), 60000)
-					)
-				]);
-				logger.info(`E2B sandbox created:`, sandboxResult);
+			} catch (err) {
+				logger.error('Failed to create Daytona sandbox:', err);
+				throw err;
 			}
 
-			// Step 5: Update project with final details
+			// Step 4: Finalize project
 			logger.info(`Finalizing project ${projectId}`);
 			const updatedProject = await this.finalizeProject(project, {
 				files,
@@ -238,6 +189,16 @@ export class ProjectInitializationService {
 				error: error instanceof Error ? error.message : 'Unknown error'
 			});
 
+			// If project created but initialization failed, mark as error
+			try {
+				await DatabaseService.updateProject(projectId, {
+					status: 'error',
+					updatedAt: new Date()
+				});
+			} catch (dbError) {
+				logger.error('Failed to update project status to error:', dbError);
+			}
+
 			throw error;
 		}
 	}
@@ -247,6 +208,14 @@ export class ProjectInitializationService {
 	 */
 	getProjectStatus(projectId: string): ProjectStatus | null {
 		return this.projectStatuses.get(projectId) || null;
+	}
+
+	/**
+	 * Update project initialization status
+	 */
+	private updateProjectStatus(projectId: string, status: ProjectStatus): void {
+		this.projectStatuses.set(projectId, status);
+		// In a real app, you might want to broadcast this via SSE or WebSocket
 	}
 
 	/**
@@ -285,11 +254,9 @@ export class ProjectInitializationService {
 	}
 
 	/**
-	 * Download template files from GitHub using GitHub API service
-	 * Supports both predefined templates and custom GitHub repositories
+	 * Download template files from GitHub
 	 */
 	private async downloadTemplateFiles(
-		projectId: string,
 		templateId: string,
 		framework: string,
 		customRepo?: {
@@ -311,9 +278,6 @@ export class ProjectInitializationService {
 				repo = customRepo.repo;
 				branch = customRepo.branch;
 				path = customRepo.path;
-				logger.info(
-					`🔷 CUSTOM REPO MODE: Downloading from GitHub: ${owner}/${repo}${branch ? `@${branch}` : ''}${path ? ` (path: ${path})` : ''}`
-				);
 			} else {
 				// Get the GitHub template configuration
 				const { getGitHubTemplate } = await import('$lib/config/template.config.js');
@@ -326,15 +290,14 @@ export class ProjectInitializationService {
 				owner = templateConfig.owner;
 				repo = templateConfig.repo;
 				path = templateConfig.path;
-				logger.info(`Downloading template from GitHub: ${owner}/${repo}`);
 			}
 
 			// Download the template files from GitHub
 			const files = await this.githubService.downloadRepositoryFiles(
 				owner,
 				repo,
-				branch, // Use custom branch or default
-				path // Use path filter if specified
+				branch,
+				path
 			);
 
 			if (!files || Object.keys(files).length === 0) {
@@ -346,202 +309,20 @@ export class ProjectInitializationService {
 			}
 
 			// Convert files object to ProjectFile array format
-			const projectFiles: ProjectFile[] = Object.entries(files).map(
-				([filePath, content], index) => ({
-					path: filePath,
-					content,
-					size: content?.length || 0,
-					sha: ''
-				})
-			);
-
-			// Track file downloads - update status with recent files
-			const recentFiles = projectFiles.slice(-5).map((f) => ({
-				name: f.path.split('/').pop() || f.path,
-				size: f.size,
-				status: 'complete' as const
+			let projectFiles: ProjectFile[] = Object.entries(files).map(([path, content]) => ({
+				path,
+				content,
+				size: content?.length || 0,
+				sha: ''
 			}));
 
-			this.updateProjectStatus(projectId, {
-				phase: 'downloading',
-				progress: 40,
-				message: `Downloaded ${projectFiles.length} files from template`,
-				details: {
-					filesDownloaded: projectFiles.length,
-					totalFiles: projectFiles.length,
-					recentFiles
-				}
-			});
+			// Patch framework configuration files
+			projectFiles = this.patchFrameworkConfigs(projectFiles, framework);
 
-			logger.info(
-				`Successfully downloaded ${projectFiles.length} files from ${customRepo ? 'custom repository' : 'template'}`
-			);
 			return projectFiles;
 		} catch (error) {
-			logger.error(
-				`Failed to download ${customRepo ? 'custom repository' : `template ${templateId}`}:`,
-				error
-			);
-			throw new Error(
-				`Template download failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-			);
-		}
-	}
-
-	/**
-	 * Upload project files to R2 storage
-	 */
-	private async uploadToR2Storage(
-		projectId: string,
-		files: ProjectFile[]
-	): Promise<{
-		key: string;
-		url: string;
-		size: number;
-	}> {
-		try {
-			// Convert ProjectFile[] to Record<string, string> format required by R2Service
-			const fileMap: Record<string, string> = {};
-			for (const file of files) {
-				fileMap[file.path] = file.content;
-			}
-
-			// Track recent files being uploaded for UI display
-			const recentFiles = files.slice(-5).map((f) => ({
-				name: f.path.split('/').pop() || f.path,
-				size: f.size,
-				status: 'downloading' as const
-			}));
-
-			this.updateProjectStatus(projectId, {
-				phase: 'uploading',
-				progress: 55,
-				message: `Uploading ${files.length} files to R2 storage...`,
-				details: {
-					totalFiles: files.length,
-					uploadProgress: 50,
-					recentFiles
-				}
-			});
-
-			const result = await this.r2Service.uploadProject(projectId, fileMap);
-
-			// Update to complete
-			const completeFiles = files.slice(-5).map((f) => ({
-				name: f.path.split('/').pop() || f.path,
-				size: f.size,
-				status: 'uploaded' as const
-			}));
-
-			this.updateProjectStatus(projectId, {
-				phase: 'uploading',
-				progress: 70,
-				message: 'Files uploaded to cloud storage',
-				details: {
-					totalFiles: files.length,
-					uploadProgress: 100,
-					recentFiles: completeFiles
-				}
-			});
-
-			return {
-				key: result.storage_key,
-				url: `https://storage.aura-ide.com/${result.storage_key}`,
-				size: result.total_size_bytes
-			};
-		} catch (error) {
-			logger.error(`R2 upload failed for project ${projectId}:`, error);
-			throw new Error(
-				`Storage upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-			);
-		}
-	}
-
-	/**
-	 * Create sandbox environments (Daytona/E2B)
-	 */
-	private async createSandboxes(
-		projectId: string,
-		options: ProjectInitializationOptions,
-		files: ProjectFile[]
-	): Promise<{
-		daytona?: { id: string; url: string; status: string };
-		e2b?: { id: string; url: string; status: string };
-	}> {
-		const sandboxes: any = {};
-
-		try {
-			// Create Daytona sandbox if requested
-			if (options.sandboxOptions?.createDaytona) {
-				try {
-					const { DaytonaService } = await import('./sandbox/daytona.service.js');
-					const daytonaService = new DaytonaService();
-
-					const daytonaSandbox = await daytonaService.createSandbox({
-						projectId,
-						options: {
-							type: options.framework,
-							memory: options.sandboxOptions.daytonaConfig?.memory || '4GB',
-							cpu: options.sandboxOptions.daytonaConfig?.cpu || '2vcpu',
-							keepAlive: options.sandboxOptions.daytonaConfig?.keepAlive || true
-						}
-					});
-
-					// Upload files to Daytona
-					await daytonaService.loadProjectFiles(daytonaSandbox.id, `projects/${projectId}`, files);
-
-					sandboxes.daytona = {
-						id: daytonaSandbox.id,
-						url: daytonaSandbox.url,
-						status: daytonaSandbox.status
-					};
-
-					logger.info(`Daytona sandbox created: ${daytonaSandbox.id}`);
-				} catch (error) {
-					logger.error(`Daytona sandbox creation failed:`, error);
-					// Continue with other sandboxes
-				}
-			}
-
-			// Create E2B sandbox if requested
-			if (options.sandboxOptions?.createE2B) {
-				try {
-					const { E2BService } = await import('./sandbox/e2b.service.js');
-					const e2bService = new E2BService();
-
-					const e2bSandbox = await e2bService.createSandbox({
-						projectId,
-						options: {
-							template: options.sandboxOptions.e2bConfig?.template || 'base',
-							timeout: options.sandboxOptions.e2bConfig?.timeout || 600,
-							metadata: {
-								type: options.framework,
-								name: options.name
-							}
-						}
-					});
-
-					// Upload files to E2B
-					await e2bService.uploadFiles(e2bSandbox.id, files);
-
-					sandboxes.e2b = {
-						id: e2bSandbox.id,
-						url: e2bSandbox.url,
-						status: e2bSandbox.status
-					};
-
-					logger.info(`E2B sandbox created: ${e2bSandbox.id}`);
-				} catch (error) {
-					logger.error(`E2B sandbox creation failed:`, error);
-					// Continue anyway
-				}
-			}
-
-			return sandboxes;
-		} catch (error) {
-			logger.error(`Sandbox creation failed for project ${projectId}:`, error);
-			// Return what we have, even if partial
-			return sandboxes;
+			logger.error('Failed to download template files:', error);
+			throw error;
 		}
 	}
 
@@ -589,131 +370,93 @@ export class ProjectInitializationService {
 	}
 
 	/**
-	 * Create E2B sandbox using R2 + E2B flow
-	 */
-	private async createE2BSandbox(
-		projectId: string,
-		options: ProjectInitializationOptions,
-		files: ProjectFile[]
-	): Promise<{
-		provider: 'e2b';
-		sandboxId: string;
-		url: string;
-		status: string;
-		storage: {
-			key: string;
-			url: string;
-			size: number;
-		};
-	}> {
-		try {
-			// Upload to R2 first
-			const storageResult = await this.uploadToR2Storage(projectId, files);
-
-			const { E2BService } = await import('./sandbox/e2b.service.js');
-			const e2bService = new E2BService();
-
-			const e2bSandbox = await e2bService.createSandbox({
-				projectId,
-				options: {
-					template: options.sandboxOptions?.e2bConfig?.template || 'base',
-					timeout: options.sandboxOptions?.e2bConfig?.timeout || 600,
-					metadata: {
-						type: options.framework,
-						name: options.name
-					}
-				}
-			});
-
-			// Upload files to E2B
-			await e2bService.uploadFiles(e2bSandbox.id, files);
-
-			return {
-				provider: 'e2b',
-				sandboxId: e2bSandbox.id,
-				url: e2bSandbox.url,
-				status: e2bSandbox.status,
-				storage: storageResult
-			};
-		} catch (error) {
-			logger.error(`E2B sandbox creation failed:`, error);
-			throw error;
-		}
-	}
-
-	/**
-	 * Finalize project with all initialization results
+	 * Finalize project initialization
 	 */
 	private async finalizeProject(
 		project: Project,
-		results: {
+		result: {
 			files: ProjectFile[];
-			sandboxResult?: {
-				provider: 'daytona' | 'e2b';
-				sandboxId: string;
-				url?: string;
-				status: string;
-				storage?: {
-					key: string;
-					url: string;
-					size: number;
-				};
-			};
+			sandboxResult?: any;
 		}
 	): Promise<Project> {
-		const updatedProject: Project = {
-			...project,
+		const updates: Partial<Project> = {
 			status: 'ready',
-			sandboxId: results.sandboxResult?.sandboxId,
 			updatedAt: new Date(),
 			metadata: {
 				...project.metadata,
-				fileCount: results.files.length,
-				totalSize: results.files.reduce((sum, file) => sum + file.size, 0),
-				sandboxResult: results.sandboxResult,
-				initializationCompleted: new Date().toISOString()
+				initializationCompleted: new Date().toISOString(),
+				fileCount: result.files.length,
+				sandboxes: result.sandboxResult ? {
+					[result.sandboxResult.provider]: {
+						id: result.sandboxResult.sandboxId,
+						url: result.sandboxResult.url,
+						status: result.sandboxResult.status,
+						createdAt: new Date().toISOString()
+					}
+				} : undefined
 			}
 		};
 
-		await DatabaseService.updateProject(project.id, updatedProject);
-		return updatedProject;
+		if (result.sandboxResult) {
+			updates.sandboxProvider = result.sandboxResult.provider;
+			updates.sandboxId = result.sandboxResult.sandboxId;
+		}
+
+		return await DatabaseService.updateProject(project.id, updates) as Project;
 	}
 
 	/**
-	 * Update project status
+	 * Patch framework configuration files to ensure dev servers work with proxy
 	 */
-	private updateProjectStatus(projectId: string, status: ProjectStatus): void {
-		this.projectStatuses.set(projectId, status);
-		logger.info(
-			`Project ${projectId} status: ${status.phase} (${status.progress}%) - ${status.message}`
-		);
+	private patchFrameworkConfigs(files: ProjectFile[], framework: string): ProjectFile[] {
+		const patchedFiles = [...files];
 
-		// Also update the project status in the database for real-time polling
-		DatabaseService.updateProject(projectId, {
-			status: status.phase === 'ready' ? 'ready' : 'initializing',
-			updatedAt: new Date(),
-			metadata: {
-				initializationStatus: status
+		// Simple helper to replace or add content
+		const ensureConfig = (content: string, search: RegExp | string, replace: string, append: string) => {
+			if (content.match(search) || content.includes(search as string)) {
+				return content.replace(search, replace);
 			}
-		}).catch((error) => {
-			logger.error(`Failed to update project status in database:`, error);
-		});
-	}
+			// basic append logic (not robust but sufficient for simple configs)
+			const lastBrace = content.lastIndexOf('}');
+			if (lastBrace > -1) {
+				return content.slice(0, lastBrace) + append + content.slice(lastBrace);
+			}
+			return content;
+		};
 
-	/**
-	 * Cleanup project status after completion or error
-	 */
-	cleanupProjectStatus(projectId: string): void {
-		this.projectStatuses.delete(projectId);
-	}
+		if (framework === 'astro' || framework?.includes('astro')) {
+			const configIndex = patchedFiles.findIndex(f => f.path.includes('astro.config'));
+			if (configIndex !== -1) {
+				let content = patchedFiles[configIndex].content;
+				// Ensure 0.0.0.0 host
+				if (!content.includes('0.0.0.0')) {
+					content = ensureConfig(
+						content, 
+						/server:\s*\{/, 
+						`server: {\n\t\thost: '0.0.0.0',`, 
+						`,\n\tserver: {\n\t\thost: '0.0.0.0',\n\t\tport: 4321\n\t}`
+					);
+					patchedFiles[configIndex].content = content;
+				}
+			}
+		} else if (['react', 'vue', 'svelte', 'vite'].some(f => framework.includes(f))) {
+			const configIndex = patchedFiles.findIndex(f => f.path.includes('vite.config'));
+			if (configIndex !== -1) {
+				let content = patchedFiles[configIndex].content;
+				if (!content.includes('0.0.0.0')) {
+					content = ensureConfig(
+						content,
+						/server:\s*\{/,
+						`server: {\n\t\thost: '0.0.0.0',`,
+						`,\n\tserver: {\n\t\thost: '0.0.0.0'\n\t}`
+					);
+					patchedFiles[configIndex].content = content;
+				}
+			}
+		}
 
-	/**
-	 * Get all active project statuses
-	 */
-	getAllProjectStatuses(): Map<string, ProjectStatus> {
-		return new Map(this.projectStatuses);
+		return patchedFiles;
 	}
 }
 
-// Export singleton instance
 export const projectInitializationService = new ProjectInitializationService();

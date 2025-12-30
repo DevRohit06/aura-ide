@@ -4,7 +4,6 @@
  * Prevents reactivity issues by providing memoized, stable references
  */
 
-import { sseService, type SSEEvent } from '$lib/services/sse.service';
 import { terminalBridge } from '$lib/services/terminal-bridge.service';
 import { agentActions } from '$lib/stores/agent-state.store';
 import type { ChatMessage, ChatThread } from '$lib/stores/chatThreads';
@@ -343,16 +342,10 @@ class ChatService {
 	}
 
 	/**
-	 * Send a message with SSE streaming
+	 * Send a message using AI SDK data stream format
 	 */
 	async sendMessage(payload: SendMessagePayload): Promise<void> {
 		const { content, projectId, ...restPayload } = payload;
-
-		// Clean up any existing SSE subscription
-		if (this.activeSSEUnsubscribe) {
-			this.activeSSEUnsubscribe();
-			this.activeSSEUnsubscribe = null;
-		}
 
 		let threadId: string;
 		let isNewThread = false;
@@ -370,10 +363,7 @@ class ChatService {
 		// Add user message to UI immediately
 		chatThreadsActions.addMessage(projectId, threadId, 'user', content, {});
 
-		// Persist user message to database (async, don't wait)
-		this.persistMessage(threadId, projectId, content, 'user').catch(console.error);
-
-		// Reset interrupt flag and set loading state
+		// Reset state and set loading
 		this.isWaitingForInterruptApproval = false;
 		this.isLoadingMessages.set(true);
 		this.errorMessage.set(null);
@@ -381,192 +371,266 @@ class ChatService {
 
 		const startTime = Date.now();
 		let assistantContent = '';
-		let streamingMessageId: string | null = null;
+		const streamingMessageId = `stream-${Date.now()}`;
+		const currentModelName = get(selectedModelStore);
+		const fileContext = get(chatFileContext);
+
+		// Collect tool calls and results for metadata
+		const toolCalls: any[] = [];
+		const toolResults: any[] = [];
 
 		try {
-			// Set up SSE event handlers
-			this.activeSSEUnsubscribe = sseService.subscribeAll((event: SSEEvent) => {
-				// Pass all events to terminal bridge for display
-				terminalBridge.handleSSEEvent(event);
+			const response = await fetch('/api/agent/stream', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					message: content,
+					threadId: isNewThread ? undefined : threadId,
+					projectId,
+					modelName: currentModelName,
+					currentFile: fileContext.isActive ? fileContext.filePath : null,
+					...restPayload
+				})
+			});
 
-				switch (event.type) {
-					case 'start':
-						agentActions.setStatus('thinking', 'Agent started processing...');
-						break;
+			if (!response.ok) {
+				throw new Error(`Stream request failed: ${response.status}`);
+			}
 
-					case 'thinking':
-						agentActions.setStatus('thinking', event.data.message || 'Agent is thinking...');
-						break;
+			// Extract thread ID from headers if available
+			const serverThreadId = response.headers.get('X-Thread-Id');
+			if (serverThreadId) {
+				threadId = serverThreadId;
+				agentActions.setActiveThread(threadId);
+			}
 
-					case 'tool_call':
-						// Check if this is an interrupt requiring human review
-						if (event.data.interrupt) {
-							console.log('[ChatService] Human review interrupt detected:', event.data);
-							agentActions.setStatus('waiting_approval', 'Awaiting human approval...');
+			const reader = response.body?.getReader();
+			if (!reader) {
+				throw new Error('No response body');
+			}
 
-							// Set flag to prevent reloading messages from DB
-							this.isWaitingForInterruptApproval = true;
+			const decoder = new TextDecoder();
+			let buffer = '';
+			let messageCreated = false;
 
-							// Create message with agentInterrupt metadata
-							const interruptMessageId = `interrupt-${Date.now()}`;
-							const interruptContent =
-								event.data.reason || 'Agent is requesting approval for the following actions:';
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
 
-							// Normalize tool calls format
-							const normalizedToolCalls = (event.data.toolCalls || []).map((tc: any) => ({
-								name: tc.name,
-								args: tc.args || tc.parameters || {},
-								id: tc.id
-							}));
+				buffer += decoder.decode(value, { stream: true });
+				const lines = buffer.split('\n');
+				buffer = lines.pop() || ''; // Keep incomplete line in buffer
 
-							console.log(
-								'[ChatService] Creating interrupt message with toolCalls:',
-								normalizedToolCalls
-							);
+				for (const line of lines) {
+					if (!line.trim()) continue;
 
-							const interruptMetadata = {
-								messageId: interruptMessageId,
-								isStreaming: false,
-								agentInterrupt: {
-									toolCalls: normalizedToolCalls,
-									stateSnapshot: event.data.stateSnapshot || {},
-									reason: event.data.reason || 'Human approval required'
-								}
-							};
+					try {
+						// AI SDK v6 UI Message Stream format: data: {"type":"...", ...}
+						// Handle SSE format
+						if (line.startsWith('data: ')) {
+							const jsonStr = line.substring(6); // Remove 'data: ' prefix
+							
+							// Handle [DONE] marker
+							if (jsonStr === '[DONE]') {
+								continue;
+							}
 
-							// Add to UI store
-							chatThreadsActions.addMessage(
-								projectId,
-								threadId,
-								'assistant',
-								interruptContent,
-								interruptMetadata
-							);
+							const event = JSON.parse(jsonStr);
+							
+							switch (event.type) {
+								case 'start':
+									// Stream started
+									agentActions.setStatus('thinking', 'Processing...');
+									break;
 
-							// Persist interrupt message to database with full metadata
-							this.persistMessage(
-								threadId,
-								projectId,
-								interruptContent,
-								'assistant',
-								interruptMetadata
-							).catch((err) => console.error('Failed to persist interrupt message:', err));
+								case 'start-step':
+									// New step started (could be tool call or text generation)
+									agentActions.setStatus('thinking', 'Working...');
+									break;
 
-							// Stop loading state to allow user interaction
-							this.isLoadingMessages.set(false);
+								case 'text-start':
+									// Text part starting
+									break;
+
+								case 'text-delta':
+									// Text chunk received
+									const textChunk = event.delta || '';
+									assistantContent += textChunk;
+									
+									if (!messageCreated) {
+										// Create streaming message on first chunk
+										chatThreadsActions.addMessage(projectId, threadId, 'assistant', assistantContent, {
+											messageId: streamingMessageId,
+											isStreaming: true,
+											agentModel: currentModelName
+										});
+										messageCreated = true;
+									} else {
+										chatThreadsActions.updateMessage(
+											projectId,
+											threadId,
+											streamingMessageId,
+											assistantContent,
+											{ isStreaming: true, agentModel: currentModelName }
+										);
+									}
+									break;
+
+								case 'text-end':
+									// Text part ended
+									break;
+
+								case 'tool-input-start':
+									// Tool call starting
+									agentActions.setStatus('executing', `Starting tool...`);
+									break;
+
+								case 'tool-input-delta':
+									// Tool input streaming
+									break;
+
+								case 'tool-input-available':
+									// Tool call with full input available
+									agentActions.setStatus('executing', `Executing ${event.toolName || 'tool'}...`);
+									toolCalls.push({
+										id: event.toolCallId,
+										name: event.toolName,
+										arguments: event.input
+									});
+									terminalBridge.handleSSEEvent({
+										type: 'tool_call',
+										data: { toolCalls: [{ id: event.toolCallId, name: event.toolName, arguments: event.input }] },
+										timestamp: Date.now()
+									});
+									break;
+
+								case 'tool-output-available':
+									// Tool result available
+									toolResults.push({
+										tool_call_id: event.toolCallId,
+										output: event.output,
+										success: true
+									});
+									terminalBridge.handleSSEEvent({
+										type: 'tool_result',
+										data: { tool_call_id: event.toolCallId, output: event.output },
+										timestamp: Date.now()
+									});
+									agentActions.setStatus('thinking', 'Processing tool result...');
+									break;
+
+								case 'finish-step':
+									// Step finished (will be followed by another step if agent continues)
+									break;
+
+								case 'finish':
+									// Message finished
+									break;
+
+								case 'error':
+									// Error occurred
+									throw new Error(event.message || event.error || 'Stream error');
+							}
 						} else {
-							// Regular tool call without interrupt
-							agentActions.setStatus('executing', 'Executing tools...');
-							agentActions.addExecutingTool('tool', event.data.toolCalls?.[0]?.name || 'tool');
-						}
-						break;
-					case 'content':
-						if (!streamingMessageId && event.data.chunk) {
-							// Create streaming assistant message on first chunk
-							streamingMessageId = `stream-${Date.now()}`;
-							assistantContent = event.data.chunk;
-							chatThreadsActions.addMessage(projectId, threadId, 'assistant', assistantContent, {
-								messageId: streamingMessageId,
-								isStreaming: true,
-								agentModel: currentModelName // Include current model in metadata
-							});
-						} else if (streamingMessageId && event.data.chunk) {
-							// Append chunk to streaming content
-							assistantContent += event.data.chunk;
-							chatThreadsActions.updateMessage(
-								projectId,
-								threadId,
-								streamingMessageId,
-								assistantContent,
-								{ isStreaming: true, agentModel: currentModelName }
-							);
-						}
-						break;
+							// Fallback: Try old format (type:data) for backwards compatibility
+							const colonIndex = line.indexOf(':');
+							if (colonIndex === -1) continue;
 
-					case 'complete':
-						const responseTime = Date.now() - startTime;
-						agentActions.recordResponseTime(responseTime);
+							const type = line.substring(0, colonIndex);
+							const data = line.substring(colonIndex + 1);
 
-						// Don't set to idle if waiting for interrupt approval
-						if (!this.isWaitingForInterruptApproval) {
-							agentActions.setStatus('idle');
-						}
+							switch (type) {
+								case '0': // Text delta (old format)
+									const textChunk = JSON.parse(data);
+									assistantContent += textChunk;
+									
+									if (!messageCreated) {
+										chatThreadsActions.addMessage(projectId, threadId, 'assistant', assistantContent, {
+											messageId: streamingMessageId,
+											isStreaming: true,
+											agentModel: currentModelName
+										});
+										messageCreated = true;
+									} else {
+										chatThreadsActions.updateMessage(
+											projectId,
+											threadId,
+											streamingMessageId,
+											assistantContent,
+											{ isStreaming: true, agentModel: currentModelName }
+										);
+									}
+									break;
 
-						// Handle thread ID synchronization
-						if (event.data.threadId && isNewThread) {
-							const serverThreadId = event.data.threadId;
-							const tempThreadId = threadId;
+								case '9': // Tool call (old format)
+									const toolCallData = JSON.parse(data);
+									agentActions.setStatus('executing', `Executing ${toolCallData.toolName || 'tool'}...`);
+									toolCalls.push({
+										id: toolCallData.toolCallId,
+										name: toolCallData.toolName,
+										arguments: toolCallData.args
+									});
+									break;
 
-							if (tempThreadId !== serverThreadId) {
-								chatThreadsActions.deleteThread(projectId, tempThreadId);
+								case 'a': // Tool result (old format)
+									const toolResultData = JSON.parse(data);
+									toolResults.push({
+										tool_call_id: toolResultData.toolCallId,
+										output: toolResultData.result,
+										success: true
+									});
+									break;
+
+								case 'e': // Error (old format)
+									const errorData = JSON.parse(data);
+									throw new Error(errorData.message || 'Stream error');
 							}
-
-							threadId = serverThreadId;
-							agentActions.setActiveThread(threadId);
-
-							// Only reload if not waiting for interrupt approval
-							if (!this.isWaitingForInterruptApproval) {
-								this.loadThreads(projectId).then(() => {
-									this.selectThread(projectId, threadId);
-									this.loadThreadMessages(threadId, true);
-								});
-							} else {
-								console.log(
-									'[ChatService] Skipping message reload - waiting for interrupt approval'
-								);
-							}
-						} else if (threadId && !this.isWaitingForInterruptApproval) {
-							// Reload messages to get final version from DB (only if not waiting for approval)
-							this.loadThreadMessages(threadId, true);
-						} else if (this.isWaitingForInterruptApproval) {
-							console.log('[ChatService] Skipping message reload - waiting for interrupt approval');
-						} // Mark streaming as complete
-						if (streamingMessageId) {
-							chatThreadsActions.updateMessage(
-								projectId,
-								threadId,
-								streamingMessageId,
-								assistantContent,
-								{ isStreaming: false, agentModel: currentModelName }
-							);
 						}
-
-						this.isLoadingMessages.set(false);
-						this.cleanup();
-						break;
-
-					case 'error':
-						agentActions.setError(`Agent error: ${event.data.error}`);
-						if (event.data.error) {
-							chatThreadsActions.addMessage(
-								projectId,
-								threadId,
-								'assistant',
-								`Error: ${event.data.error}`
-							);
-						}
-						this.isLoadingMessages.set(false);
-						this.cleanup();
-						break;
+					} catch (parseError) {
+						// Ignore parse errors for individual lines
+						console.debug('[ChatService] Parse error for line:', line.substring(0, 50), parseError);
+					}
 				}
-			});
+			}
 
-			// Get current model - store it for use in streaming metadata
-			const modelName = get(selectedModelStore);
-			const currentModelName = modelName; // Store for closure
-			const fileContext = get(chatFileContext);
+			// Finalize the message
+			const responseTime = Date.now() - startTime;
+			agentActions.recordResponseTime(responseTime);
+			agentActions.setStatus('idle');
 
-			// Send message via SSE stream
-			await sseService.streamMessage({
-				message: content,
-				threadId: isNewThread ? undefined : threadId,
-				projectId,
-				modelName,
-				currentFile: fileContext.isActive ? fileContext.filePath : null,
-				...restPayload
-			});
+			if (messageCreated) {
+				chatThreadsActions.updateMessage(
+					projectId,
+					threadId,
+					streamingMessageId,
+					assistantContent,
+					{ 
+						isStreaming: false, 
+						agentModel: currentModelName,
+						hasToolCalls: toolCalls.length > 0,
+						toolCallCount: toolCalls.length,
+						toolCalls,
+						toolResults
+					}
+				);
+			} else if (assistantContent) {
+				// Create message if we have content but message wasn't created
+				chatThreadsActions.addMessage(projectId, threadId, 'assistant', assistantContent, {
+					messageId: streamingMessageId,
+					agentModel: currentModelName,
+					hasToolCalls: toolCalls.length > 0,
+					toolCallCount: toolCalls.length,
+					toolCalls,
+					toolResults
+				});
+			}
+
+			// Reload messages from DB
+			this.loadThreadMessages(threadId, true);
+			this.isLoadingMessages.set(false);
+
 		} catch (err) {
-			console.error('Failed to send message via SSE:', err);
+			console.error('Failed to send message:', err);
 			agentActions.setError(
 				`Network error: ${err instanceof Error ? err.message : 'Unknown error'}`
 			);
@@ -577,7 +641,6 @@ class ChatService {
 				`Error: ${err instanceof Error ? err.message : 'Network error'}`
 			);
 			this.isLoadingMessages.set(false);
-			this.cleanup();
 		}
 	}
 
