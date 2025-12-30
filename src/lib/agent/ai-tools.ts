@@ -47,7 +47,8 @@ export const webSearchTool = tool({
 
 // Semantic Code Search Tool
 export const codeSearchTool = tool({
-	description: 'Search the codebase using semantic similarity to find relevant code snippets and files.',
+	description:
+		'Search the codebase using semantic similarity to find relevant code snippets and files.',
 	inputSchema: z.object({
 		query: z.string().describe('The search query'),
 		topK: z.number().optional().describe('Number of results to return (default: 5)')
@@ -100,28 +101,40 @@ export const readFileTool = tool({
 
 // Write File Tool
 export const writeFileTool = tool({
-	description: 'Write or update a file in the sandbox. IMPORTANT: You MUST provide the complete file content in the "content" parameter.',
+	description:
+		'Write or update a file in the sandbox. IMPORTANT: You MUST provide the complete file content in the "content" parameter.',
 	inputSchema: z.object({
-		sandboxId: z.string().describe('The ID of the sandbox where the file should be written (required)'),
+		sandboxId: z
+			.string()
+			.describe('The ID of the sandbox where the file should be written (required)'),
 		sandboxType: z.string().optional().describe('The type of sandbox (e.g., "daytona")'),
-		filePath: z.string().describe('The path to the file relative to the sandbox root (required, e.g., "app/page.tsx")'),
-		content: z.string().describe('The COMPLETE content of the file as a string (required). This should be the full file content you want to write.')
+		filePath: z
+			.string()
+			.describe(
+				'The path to the file relative to the sandbox root (required, e.g., "app/page.tsx")'
+			),
+		content: z
+			.string()
+			.describe(
+				'The COMPLETE content of the file as a string (required). This should be the full file content you want to write.'
+			)
 	}),
 	execute: async ({ sandboxId, sandboxType, filePath, content }) => {
 		if (!sandboxId) return JSON.stringify({ success: false, error: 'Missing sandboxId' });
 		if (!filePath) return JSON.stringify({ success: false, error: 'Missing filePath' });
-		if (content === undefined || content === null) return JSON.stringify({ success: false, error: 'Missing content' });
+		if (content === undefined || content === null)
+			return JSON.stringify({ success: false, error: 'Missing content' });
 
 		try {
 			const provider = sandboxType as any;
-			// Note: userId/projectId configuration is handled by the caller or context if needed, 
+			// Note: userId/projectId configuration is handled by the caller or context if needed,
 			// but here we just pass the args. If we need context in tools, we might need a richer setup,
-			// but for now we follow the existing pattern which didn't seem to pass user/project ID consistently 
+			// but for now we follow the existing pattern which didn't seem to pass user/project ID consistently
 			// other than via "config" which isn't standard in basic tool execution without binding.
 			// The original tool tried to read from `config.configurable`, which AI SDK tools don't receive directly.
-            // We will assume basic write works for now.
-			
-            const success = await sandboxManager.writeFile(sandboxId, filePath, content, {
+			// We will assume basic write works for now.
+
+			const success = await sandboxManager.writeFile(sandboxId, filePath, content, {
 				provider
 			});
 			return JSON.stringify({
