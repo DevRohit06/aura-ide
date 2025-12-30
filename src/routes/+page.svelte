@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import Icon from '@iconify/svelte';
 	import { Button } from '$lib/components/ui/button';
 	import * as Collapsible from '$lib/components/ui/collapsible';
+	import Icon from '@iconify/svelte';
+	import { onMount } from 'svelte';
 
 	let mounted = $state(false);
 	let scrollY = $state(0);
@@ -34,8 +34,8 @@
 		{
 			icon: 'lucide:box',
 			title: 'Isolated Sandbox Execution',
-			description:
-				'Secure, containerized environments via Daytona and E2B. Test without worrying about breaking production.'
+						description:
+				'Secure, containerized environments via Daytona. Test without worrying about breaking production.'
 		},
 		{
 			icon: 'lucide:code-2',
@@ -59,7 +59,7 @@
 			icon: 'lucide:database',
 			title: 'Persistent Storage',
 			description:
-				'Cloudflare R2 integration ensures your projects are safely stored and versioned.'
+				'Persistent storage ensures your projects are safely stored and versioned within the sandbox.'
 		},
 		{
 			icon: 'lucide:git-branch',
@@ -107,12 +107,12 @@
 		{
 			question: 'What are sandbox environments?',
 			answer:
-				'Sandbox environments are isolated, containerized development spaces powered by Daytona and E2B. They provide a secure testing ground where you can run and test your code without affecting your production environment. Each sandbox is fully configured with the necessary dependencies and tools.'
+				'Sandbox environments are isolated, containerized development spaces powered by Daytona. They provide a secure testing ground where you can run and test your code without affecting your production environment. Each sandbox is fully configured with the necessary dependencies and tools.'
 		},
 		{
 			question: 'Is my code and data secure?',
 			answer:
-				'Yes, security is our top priority. We use enterprise-grade encryption, secure sandbox isolation, and Cloudflare R2 for persistent storage. Your code is stored with version control, and all data transmission is encrypted. We comply with industry-standard security practices and offer 99.9% uptime guarantee.'
+				'Yes, security is our top priority. We use enterprise-grade encryption and secure sandbox isolation. Your code is stored with version control, and all data transmission is encrypted. We comply with industry-standard security practices and offer 99.9% uptime guarantee.'
 		},
 		{
 			question: 'Which programming languages and frameworks are supported?',

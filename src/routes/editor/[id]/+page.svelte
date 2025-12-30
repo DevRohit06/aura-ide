@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import EmptyFileSate from '$lib/assets/file-not-opened.png?url';
 	import { onMount } from 'svelte';
-	// PaneForge
+// PaneForge
 	import { Pane } from 'paneforge';
 	// Light components that can be imported directly
 	import ActivityBar from '$lib/components/editor/activity-bar.svelte';
@@ -19,7 +19,7 @@
 	import EnhancedSidebar from '$lib/components/shared/enhanced-sidebar.svelte';
 	import ProfileModal from '$lib/components/shared/profile-modal.svelte';
 	import ChatSidebar from '@/components/chat/chat-sidebar.svelte';
-	// UI Components
+// UI Components
 	import * as Alert from '$lib/components/ui/alert/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Progress } from '$lib/components/ui/progress/index.js';
@@ -28,11 +28,11 @@
 	import { activeFileId, fileActions, filesStore } from '$lib/stores/editor.js';
 	import { previewURLActions } from '$lib/stores/preview-url.store';
 	import { sidebarPanelActions, sidebarPanelsStore } from '$lib/stores/sidebar-panels.store';
-	// Utils and Services
+// Utils and Services
 	import { terminalBridge } from '$lib/services/terminal-bridge.client';
 	import { indexAllFilesFromStore } from '$lib/services/vector-indexer.client';
 	import { createBreadcrumbs } from '$lib/utils/file-tree';
-	// Icons
+// Icons
 	import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
 	import FolderIcon from '@lucide/svelte/icons/folder';
 	import LoaderIcon from '@lucide/svelte/icons/loader-2';

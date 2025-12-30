@@ -103,9 +103,6 @@ export const load: PageServerLoad = async ({ params, cookies, locals, url }) => 
 										sandboxId: project.sandboxId
 									};
 								}
-							} else if (project.sandboxProvider === 'e2b') {
-								// E2B sandbox logic can be added here if needed
-								return { provider: 'e2b', status: 'unknown', sandboxId: project.sandboxId };
 							}
 						} catch (error) {
 							logger.error(`Failed to spin up sandbox for project ${id}:`, error);

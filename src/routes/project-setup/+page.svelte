@@ -110,12 +110,6 @@
 			label: 'Daytona',
 			description: 'Persistent sandbox with git operations and direct terminal access',
 			features: ['Persistent', 'Git Integration', 'SSH Access', 'VS Code Support']
-		},
-		{
-			value: 'e2b',
-			label: 'E2B',
-			description: 'Cloud-based sandbox with R2 storage integration',
-			features: ['Cloud Storage', 'Fast Startup', 'Session-based', 'API-driven']
 		}
 	];
 
@@ -444,7 +438,7 @@
 			name: projectName.trim(),
 			description: projectDescription.trim() || undefined,
 			framework,
-			sandboxProvider: sandboxProvider as 'daytona' | 'e2b',
+			sandboxProvider: sandboxProvider as 'daytona',
 			customRepo: customRepoData,
 			configuration: {
 				typescript,
@@ -934,42 +928,6 @@
 											<span class="rounded-full bg-muted px-2 py-1 text-xs">Persistent</span>
 											<span class="rounded-full bg-muted px-2 py-1 text-xs">Git Integration</span>
 											<span class="rounded-full bg-muted px-2 py-1 text-xs">SSH Access</span>
-										</div>
-									</div>
-								</button>
-
-								<!-- E2B Provider -->
-								<button
-									class={cn(
-										'relative rounded-lg border p-6 text-left transition-all hover:shadow-md',
-										sandboxProvider === 'e2b'
-											? 'border-foreground bg-foreground/5 ring-1 ring-foreground/20'
-											: 'border-border hover:border-foreground/50'
-									)}
-									onclick={() => (sandboxProvider = 'e2b')}
-								>
-									{#if sandboxProvider === 'e2b'}
-										<div class="absolute top-4 right-4">
-											<div class="h-3 w-3 rounded-full bg-foreground"></div>
-										</div>
-									{/if}
-
-									<div class="space-y-4">
-										<div class="flex items-center gap-3">
-											<img
-												src="https://cdn-1.webcatalog.io/catalog/e2b/e2b-icon-filled-256.webp?v=1757567241849"
-												alt="E2B"
-												class="h-8 w-8 rounded"
-											/>
-											<h3 class="font-semibold">E2B</h3>
-										</div>
-										<p class="text-sm text-muted-foreground">
-											Cloud-based sandbox with R2 storage integration
-										</p>
-										<div class="flex flex-wrap gap-2">
-											<span class="rounded-full bg-muted px-2 py-1 text-xs">Cloud Storage</span>
-											<span class="rounded-full bg-muted px-2 py-1 text-xs">Fast Startup</span>
-											<span class="rounded-full bg-muted px-2 py-1 text-xs">API-driven</span>
 										</div>
 									</div>
 								</button>

@@ -55,20 +55,20 @@
 		}
 	}
 
-	import { indexAllFilesFromStore } from '$lib/services/vector-indexer.client';
+	// import { indexAllFilesFromStore } from '$lib/services/vector-indexer.client';
 	import { onMount } from 'svelte';
 
-	onMount(() => {
-		// Give the file loader a chance to populate the store then kick off indexing
-		setTimeout(async () => {
-			try {
-				await indexAllFilesFromStore({ projectId: 'default', async: true });
-				console.log('Triggered background indexing for current workspace files');
-			} catch (err) {
-				console.warn('Failed to trigger workspace indexing on mount:', err);
-			}
-		}, 50);
-	});
+	// onMount(() => {
+	// 	// Give the file loader a chance to populate the store then kick off indexing
+	// 	setTimeout(async () => {
+	// 		try {
+	// 			await indexAllFilesFromStore({ projectId: 'default', async: true });
+	// 			console.log('Triggered background indexing for current workspace files');
+	// 		} catch (err) {
+	// 			console.warn('Failed to trigger workspace indexing on mount:', err);
+	// 		}
+	// 	}, 50);
+	// });
 </script>
 
 <svelte:head>
