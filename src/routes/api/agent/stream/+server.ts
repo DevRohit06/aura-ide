@@ -1,35 +1,18 @@
 /**
- * Agent Streaming API using Server-Sent Events (SSE)
- * Provides real-time streaming of agent responses and tool executions
+ * Agent Streaming API using AI SDK v6
+ * Returns UI Message Stream format for proper agent loop handling
+ * Supports tool calling with multi-step execution and project context
  */
 
-import { env } from '$env/dynamic/private';
-import { agentGraph } from '$lib/agent/graph';
-import { modelManager } from '$lib/agent/model-manager';
+import { aiSdkTools } from '$lib/agent/ai-tools';
 import { DatabaseService } from '$lib/services/database.service';
 import { logger } from '$lib/utils/logger';
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { anthropic } from '@ai-sdk/anthropic';
+import { openai } from '@ai-sdk/openai';
+import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from 'ai';
 import type { RequestHandler } from './$types';
 
-// Types for SSE events
-interface SSEEvent {
-	type:
-		| 'start'
-		| 'thinking'
-		| 'tool_call'
-		| 'tool_result'
-		| 'content'
-		| 'complete'
-		| 'error'
-		| 'output'
-		| 'stdout'
-		| 'command';
-	data?: any;
-	content?: string;
-	timestamp: number;
-}
-
-// Helper to create message doc (copied from main agent API)
+// Helper to create message doc
 function createMessageDoc(
 	threadId: string,
 	userId: string,
@@ -101,372 +84,218 @@ async function createNewThread(userId: string, projectId?: string): Promise<stri
 	return newThread.id;
 }
 
-// Convert messages to LangChain format
-function convertToLangChainMessages(messages: any[]): (HumanMessage | AIMessage)[] {
-	return messages.map((msg) => {
-		const content = String(msg.content || '');
-		return msg.role === 'assistant' ? new AIMessage(content) : new HumanMessage(content);
-	});
-}
-
-/**
- * Extracts readable text content from LangChain/Anthropic message content
- * Handles both string content and structured content blocks
- */
-function extractMessageContent(content: any): string {
-	if (typeof content === 'string') {
-		return content;
-	}
-
-	if (Array.isArray(content)) {
-		// Handle array of content blocks (Anthropic format)
-		return content
-			.map((block) => {
-				if (typeof block === 'string') return block;
-				if (block && typeof block === 'object' && block.type === 'text') {
-					return block.text || '';
-				}
-				if (block && typeof block === 'object' && block.content) {
-					return String(block.content);
-				}
-				// Ignore tool_use blocks - they're handled separately
-				if (block && typeof block === 'object' && block.type === 'tool_use') {
-					return '';
-				}
-				return String(block);
-			})
-			.filter(Boolean)
-			.join('\n');
-	}
-
-	if (content && typeof content === 'object') {
-		// Try to extract text from common object structures
-		if (content.text) return String(content.text);
-		if (content.content) return String(content.content);
-		if (content.message) return String(content.message);
-
-		// Fallback: stringify
-		try {
-			const str = JSON.stringify(content, null, 2);
-			if (str.length > 500) {
-				return `Response data (${Object.keys(content).length} properties)`;
-			}
-			return str;
-		} catch {
-			return 'Complex response object';
-		}
-	}
-
-	return String(content);
-}
-
-// Resolve model configuration
-function resolveModelConfig(modelName?: string, modelConfig?: any) {
-	if (modelName) {
-		const preset = modelManager.getModelPreset(modelName);
-		if (preset) return preset;
-	}
-
-	if (modelConfig) return modelConfig;
-
+// Resolve AI SDK Model
+function resolveModel(modelName?: string) {
 	if (modelName) {
 		if (modelName.includes('claude') || modelName.includes('anthropic')) {
-			return env.ANTHROPIC_API_KEY
-				? { provider: 'anthropic', model: modelName }
-				: { provider: 'openai', model: 'gpt-4o-mini' };
+			return anthropic(modelName);
 		}
 		if (modelName.includes('gpt') || modelName.includes('openai')) {
-			return { provider: 'openai', model: modelName };
+			return openai(modelName);
 		}
-		if (modelName.includes('groq')) {
-			return { provider: 'groq', model: modelName };
+	}
+	// Default
+	return openai('gpt-4o');
+}
+
+// Fetch project file tree for context
+async function getProjectFileTree(projectId: string): Promise<string> {
+	try {
+		const project = await DatabaseService.findProjectById(projectId);
+		if (!project?.sandboxId) {
+			return '';
 		}
-		return { provider: 'openai', model: modelName };
+
+		const { DaytonaService } = await import('$lib/services/sandbox/daytona.service.js');
+		const daytonaService = DaytonaService.getInstance();
+		
+		const files = await daytonaService.listFiles(project.sandboxId, '/home/daytona');
+		if (!files || !Array.isArray(files)) {
+			return '';
+		}
+
+		// Build simple tree string (top 2 levels)
+		const tree = buildSimpleTree(files, 2);
+		return tree ? `\n\nProject File Structure:\n\`\`\`\n${tree}\`\`\`\n` : '';
+	} catch (error) {
+		logger.warn('Failed to fetch project file tree for context:', error);
+		return '';
+	}
+}
+
+function buildSimpleTree(files: any[], maxDepth: number, depth: number = 0, prefix: string = ''): string {
+	if (depth >= maxDepth) return '';
+	
+	let result = '';
+	const sorted = [...files].sort((a, b) => {
+		if (a.type === 'directory' && b.type !== 'directory') return -1;
+		if (a.type !== 'directory' && b.type === 'directory') return 1;
+		return (a.name || '').localeCompare(b.name || '');
+	});
+
+	for (let i = 0; i < sorted.length && i < 30; i++) { // Limit to 30 items
+		const file = sorted[i];
+		const name = file.name || file.path?.split('/').pop() || '';
+		
+		// Skip hidden and common ignore patterns
+		if (name.startsWith('.') || name === 'node_modules' || name === '__pycache__' || name === 'dist' || name === 'build') {
+			continue;
+		}
+
+		const isLast = i === Math.min(sorted.length, 30) - 1;
+		const icon = file.type === 'directory' ? '📁' : '📄';
+		result += `${prefix}${isLast ? '└── ' : '├── '}${icon} ${name}\n`;
+
+		if (file.type === 'directory' && file.children && depth < maxDepth - 1) {
+			result += buildSimpleTree(file.children, maxDepth, depth + 1, prefix + (isLast ? '    ' : '│   '));
+		}
 	}
 
-	return {
-		provider: 'openai',
-		model: env.OPENAI_API_KEY ? 'gpt-4o-mini' : 'gpt-4o'
-	};
+	return result;
 }
 
 export const POST: RequestHandler = async ({ request, locals }) => {
 	const body = await request.json();
-	const {
-		message,
-		threadId,
-		projectId,
-		currentFile,
-		sandboxId,
-		sandboxType,
-		modelName,
-		modelConfig
-	} = body;
+	const { message, threadId, projectId, currentFile, sandboxId, sandboxType, modelName } = body;
 
 	const userId = locals?.user?.id || 'default';
 
-	// Create SSE stream
-	const stream = new ReadableStream({
-		start(controller) {
-			(async () => {
-				try {
-					// Helper to enqueue SSE events
-					const enqueueEvent = (event: SSEEvent) => {
-						const eventData = `data: ${JSON.stringify(event)}\n\n`;
-						controller.enqueue(new TextEncoder().encode(eventData));
-					};
+	try {
+		// Create or get thread
+		const actualThreadId = threadId || (await createNewThread(userId, projectId));
 
-					// Send start event
-					enqueueEvent({
-						type: 'start',
-						data: { message: 'Agent processing started' },
-						timestamp: Date.now()
-					});
+		// Save user message
+		const userMessageDoc = createMessageDoc(actualThreadId, userId, message, 'user', {
+			projectId,
+			currentFile
+		});
+		await DatabaseService.createChatMessage(userMessageDoc);
 
-					// Ensure we have a thread
-					const actualThreadId = threadId || (await createNewThread(userId, projectId));
+		// Load conversation history
+		const previousMessages = await DatabaseService.findChatMessagesByThreadId(actualThreadId, 20);
+		
+		// Convert to UIMessage format for AI SDK v6
+		const uiMessages: UIMessage[] = previousMessages.map((msg) => ({
+			id: msg.id,
+			role: msg.role as 'user' | 'assistant',
+			parts: [{ type: 'text' as const, text: msg.content }],
+			createdAt: new Date(msg.timestamp)
+		}));
+		
+		// Add current message
+		uiMessages.push({
+			id: crypto.randomUUID(),
+			role: 'user',
+			parts: [{ type: 'text' as const, text: message }],
+			createdAt: new Date()
+		});
 
-					// Save user message
-					const userMessageDoc = createMessageDoc(actualThreadId, userId, message, 'user', {
-						projectId,
-						currentFile
-					});
-					await DatabaseService.createChatMessage(userMessageDoc);
+		// Get project file tree context
+		const fileTreeContext = projectId ? await getProjectFileTree(projectId) : '';
 
-					// Send thinking event
-					enqueueEvent({
-						type: 'thinking',
-						data: { message: 'Agent is thinking...' },
-						timestamp: Date.now()
-					});
+		// Resolve model
+		const model = resolveModel(modelName);
 
-					// Resolve model configuration
-					const finalModelConfig = resolveModelConfig(modelName, modelConfig);
+		// Build system prompt with project context
+		const systemPrompt = `You are an expert coding assistant with full access to development tools and sandboxes.
 
-					// Load conversation history
-					const previousMessages = await DatabaseService.findChatMessagesByThreadId(
+Current Context:
+- Current file: ${currentFile || 'None'}
+- Sandbox ID: ${sandboxId || 'None'}
+- Sandbox Type: ${sandboxType || 'unknown'}
+- Project ID: ${projectId || 'None'}
+${fileTreeContext}
+
+Available Tools:
+- web_search: Search the web for documentation and solutions
+- search_codebase: Semantic search through the project codebase
+- read_file: Read file contents from the sandbox
+- write_file: Write or update files in the sandbox (requires sandboxId, filePath, content)
+- execute_code: Execute commands in the sandbox
+
+IMPORTANT INSTRUCTIONS:
+1. When using write_file, ALWAYS provide the COMPLETE file content in the 'content' parameter
+2. Use the file tree above to understand the project structure
+3. Be specific about file paths when reading or writing files
+4. For code changes, read the existing file first to understand context
+5. After using tools, always provide a clear summary of what you did and the results
+6. If a tool fails, explain the error and suggest alternatives
+
+You are an agentic coding assistant. You should:
+- Read and understand code files before making changes
+- Write and modify code carefully
+- Execute commands to test changes when appropriate
+- Search for documentation and solutions when needed
+- Always explain what you're doing and why`;
+
+		// Convert UIMessages to ModelMessages for streamText
+		const modelMessages = await convertToModelMessages(uiMessages);
+
+		// Use streamText with stopWhen for proper multi-step agent loop
+		const result = streamText({
+			model,
+			system: systemPrompt,
+			messages: modelMessages,
+			tools: aiSdkTools,
+			stopWhen: stepCountIs(15), // Allow up to 15 steps for complex tasks
+			onStepFinish: async ({ toolCalls, toolResults }) => {
+				logger.info('[CodingAgent] Step finished:', {
+					toolCallCount: toolCalls?.length || 0,
+					hasResults: !!toolResults
+				});
+			},
+			onFinish: async ({ text, toolCalls, toolResults }) => {
+				// Save assistant response to database
+				if (text) {
+					const assistantMessageDoc = createMessageDoc(
 						actualThreadId,
-						20
-					);
-					const historyMessages = convertToLangChainMessages(previousMessages);
-					const userMessage = new HumanMessage(String(message || ''));
-					const allMessages = [...historyMessages, userMessage];
-
-					// Prepare initial state
-					const initialState = {
-						messages: allMessages,
-						currentFile: currentFile || null,
-						sandboxId: sandboxId || null,
-						sandboxType: sandboxType || null,
-						useMorph: false,
-						codeContext: [],
-						terminalOutput: [],
-						awaitingHumanInput: false,
-						modelConfig: finalModelConfig
-					};
-
-					// Invoke agent with streaming
-					const config = {
-						configurable: { thread_id: actualThreadId },
-						streamMode: 'values' as const
-					};
-
-					let lastContent = '';
-					let assistantMessage = '';
-					let hadInterrupt = false;
-
-					// Use stream() instead of invoke() to get real-time updates
-					for await (const chunk of await agentGraph.stream(initialState, config)) {
-						logger.info('Stream chunk received:', {
-							hasMessages: !!chunk.messages,
-							messageCount: chunk.messages?.length,
-							lastMessageType: chunk.messages?.[chunk.messages.length - 1]?.constructor?.name
-						});
-
-						// Check for interrupts
-						if ((chunk as any).__interrupt__) {
-							hadInterrupt = true;
-							const interruptData = (chunk as any).__interrupt__[0];
-							enqueueEvent({
-								type: 'tool_call',
-								data: {
-									interrupt: true,
-									toolCalls: interruptData.value?.toolCalls || [],
-									stateSnapshot: interruptData.value?.stateSnapshot || {},
-									reason: interruptData.value?.reason || 'Human approval required'
-								},
-								timestamp: Date.now()
-							});
-							break; // Stop streaming on interrupt
-						}
-
-						// Process messages in the chunk
-						if (chunk.messages && Array.isArray(chunk.messages)) {
-							const lastMessage = chunk.messages[chunk.messages.length - 1];
-
-							// Handle tool messages (command outputs)
-							if (lastMessage && (lastMessage as any).tool_call_id) {
-								const toolMessage = lastMessage as any;
-								const rawContent = toolMessage.content || '';
-
-								// Normalize content to string for logging and display
-								const toolOutput =
-									typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent, null, 2);
-
-								// For logging, create a safe preview
-								const contentPreview =
-									typeof rawContent === 'string'
-										? rawContent.substring(0, 100)
-										: JSON.stringify(rawContent).substring(0, 100);
-
-								logger.info('Tool output detected:', {
-									tool_call_id: toolMessage.tool_call_id,
-									contentType: typeof rawContent,
-									contentLength: toolOutput.length,
-									contentPreview
-								});
-
-								// Emit tool result event with the actual output
-								enqueueEvent({
-									type: 'tool_result',
-									data: {
-										tool_call_id: toolMessage.tool_call_id,
-										output: toolOutput,
-										content: toolOutput
-									},
-									timestamp: Date.now()
-								});
-
-								// Also emit as stdout for terminal display
-								if (toolOutput && toolOutput.trim()) {
-									enqueueEvent({
-										type: 'output',
-										data: toolOutput,
-										content: toolOutput,
-										timestamp: Date.now()
-									});
-								}
-							}
-
-							// Handle AI messages (assistant responses)
-							if (lastMessage && lastMessage.constructor?.name === 'AIMessage') {
-								const rawContent = (lastMessage as any).content || '';
-
-								// Extract text content properly (handles Anthropic structured format)
-								const content = extractMessageContent(rawContent);
-
-								// Get tool calls from LangChain's normalized format
-								// LangChain's bindTools() should already normalize these to have 'args'
-								const toolCallsFromMessage = (lastMessage as any).tool_calls || [];
-
-								// If there are tool calls, emit them
-								// We rely on LangChain's normalization rather than extracting from content
-								if (toolCallsFromMessage.length > 0) {
-									logger.info('Tool calls detected in AI message:', {
-										count: toolCallsFromMessage.length,
-										tools: toolCallsFromMessage.map((tc: any) => tc.name || tc.function?.name),
-										firstToolCall: toolCallsFromMessage[0] // Log first one for debugging
-									});
-
-									enqueueEvent({
-										type: 'tool_call',
-										data: {
-											toolCalls: toolCallsFromMessage.map((tc: any) => ({
-												id: tc.id || '',
-												name: tc.name || tc.function?.name || '',
-												// LangChain should have normalized this to 'args'
-												arguments: tc.args || tc.arguments || tc.function?.arguments || {},
-												type: tc.type || 'function'
-											}))
-										},
-										timestamp: Date.now()
-									});
-								}
-								if (content && content !== lastContent) {
-									// Stream new content
-									const newContent = content.substring(lastContent.length);
-									if (newContent) {
-										const chunkSize = 10;
-										for (let i = 0; i < newContent.length; i += chunkSize) {
-											const textChunk = newContent.slice(i, i + chunkSize);
-											enqueueEvent({
-												type: 'content',
-												data: { chunk: textChunk, isComplete: false },
-												timestamp: Date.now()
-											});
-											await new Promise((resolve) => setTimeout(resolve, 30));
-										}
-									}
-									lastContent = content;
-									assistantMessage = content;
-								}
+						userId,
+						text,
+						'assistant',
+						{
+							projectId,
+							metadata: {
+								model: modelName || 'gpt-4o',
+								hasToolCalls: toolCalls && toolCalls.length > 0,
+								toolCallCount: toolCalls?.length || 0,
+								toolCalls: toolCalls?.map((tc: any) => ({
+									id: tc.toolCallId,
+									name: tc.toolName,
+									arguments: tc.args
+								})),
+								toolResults: toolResults?.map((tr: any) => ({
+									tool_call_id: tr.toolCallId,
+									success: !tr.result?.toString().toLowerCase().includes('error'),
+									output: tr.result
+								}))
 							}
 						}
-					}
-
-					// If we didn't have an interrupt, save the assistant response
-					if (!hadInterrupt && assistantMessage) {
-						// Send final content complete event
-						enqueueEvent({
-							type: 'content',
-							data: { chunk: '', isComplete: true },
-							timestamp: Date.now()
-						});
-
-						// Save assistant response
-						const assistantMessageDoc = createMessageDoc(
-							actualThreadId,
-							userId,
-							assistantMessage,
-							'assistant',
-							{
-								projectId,
-								metadata: {
-									model: `${finalModelConfig.provider}/${finalModelConfig.model}`,
-									provider: finalModelConfig.provider
-								}
-							}
-						);
-						await DatabaseService.createChatMessage(assistantMessageDoc);
-					}
-
-					// Send completion event
-					enqueueEvent({
-						type: 'complete',
-						data: {
-							threadId: actualThreadId,
-							message: 'Response complete'
-						},
-						timestamp: Date.now()
-					});
-				} catch (error) {
-					logger.error('SSE Agent stream error:', error);
-					controller.enqueue(
-						new TextEncoder().encode(
-							`data: ${JSON.stringify({
-								type: 'error',
-								data: {
-									error: error instanceof Error ? error.message : 'Stream error',
-									code: 'STREAM_ERROR'
-								},
-								timestamp: Date.now()
-							})}\n\n`
-						)
 					);
-				} finally {
-					controller.close();
+					await DatabaseService.createChatMessage(assistantMessageDoc);
 				}
-			})();
-		}
-	});
+				
+				logger.info('Agent stream completed', {
+					threadId: actualThreadId,
+					textLength: text?.length || 0,
+					toolCallCount: toolCalls?.length || 0
+				});
+			}
+		});
 
-	return new Response(stream, {
-		headers: {
-			'Content-Type': 'text/event-stream',
-			'Cache-Control': 'no-cache',
-			Connection: 'keep-alive',
-			'Access-Control-Allow-Origin': '*',
-			'Access-Control-Allow-Headers': 'Content-Type'
-		}
-	});
+		// Return UI Message Stream response
+		return result.toUIMessageStreamResponse({
+			headers: {
+				'X-Thread-Id': actualThreadId
+			}
+		});
+	} catch (error: any) {
+		logger.error('Agent stream error', error);
+		return new Response(
+			JSON.stringify({ error: error.message || 'Agent stream failed' }),
+			{
+				status: 500,
+				headers: { 'Content-Type': 'application/json' }
+			}
+		);
+	}
 };

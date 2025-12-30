@@ -30,7 +30,7 @@ export const POST = async ({ request, headers }: { request: Request; headers: He
 					result[p] = buf.toString('utf-8');
 				}
 			} else if (projectId) {
-				// Fall back to reading from R2 or single-file reads
+				// Fall back to reading from file storage or single-file reads
 				const fetches = paths.map(async (p) => {
 					// Use internal files API to leverage existing code paths and auth
 					const res = await fetch('/api/files', {

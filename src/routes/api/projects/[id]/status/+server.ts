@@ -1,5 +1,4 @@
 import { DatabaseService } from '$lib/services/database.service.js';
-import { R2StorageService } from '$lib/services/r2-storage.service.js';
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 
 export const GET: RequestHandler = async ({ params, locals }) => {
@@ -33,7 +32,6 @@ export const GET: RequestHandler = async ({ params, locals }) => {
 				name: project.name,
 				status: project.status,
 				framework: project.framework,
-				e2bSessionId: project.e2bSessionId,
 				sandboxProvider: project.sandboxProvider,
 				sandboxId: project.sandboxId,
 				createdAt: project.createdAt,
@@ -45,40 +43,10 @@ export const GET: RequestHandler = async ({ params, locals }) => {
 				lastActivity: project.updatedAt,
 				...(project.metadata?.initializationStatus || {})
 			},
-			storage: {
-				hasFiles: false,
-				fileCount: 0,
-				lastSync: null as string | null
-			},
 			sandboxes: {
-				daytona: null as any,
-				e2b: null as any
+				daytona: null as any
 			}
 		};
-
-		// Check R2 storage for files if project is initialized
-		if (project.status === 'ready') {
-			try {
-				const r2Service = new R2StorageService();
-				const projectKey = `projects/${project.ownerId}/${project.id}/`;
-
-				// List files in R2 to check if project files exist
-				const result = await r2Service.listFiles({ prefix: projectKey });
-				const objects = result.objects || [];
-				status.storage.hasFiles = objects.length > 0;
-				status.storage.fileCount = objects.length;
-
-				// Get last modified from most recent file
-				if (objects.length > 0) {
-					const sortedFiles = objects.sort(
-						(a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime()
-					);
-					status.storage.lastSync = sortedFiles[0].lastModified.toISOString();
-				}
-			} catch (error) {
-				console.warn('Failed to check R2 storage status:', error);
-			}
-		}
 
 		// Check sandbox status from project metadata
 		if (project.metadata?.sandboxes) {
@@ -92,23 +60,6 @@ export const GET: RequestHandler = async ({ params, locals }) => {
 					createdAt: sandboxes.daytona.createdAt
 				};
 			}
-
-			if (sandboxes.e2b) {
-				status.sandboxes.e2b = {
-					id: sandboxes.e2b.id,
-					url: sandboxes.e2b.url,
-					status: sandboxes.e2b.status || 'unknown',
-					createdAt: sandboxes.e2b.createdAt
-				};
-			}
-		}
-
-		// Also include E2B session ID for backward compatibility
-		if (project.e2bSessionId) {
-			if (!status.sandboxes.e2b) {
-				status.sandboxes.e2b = {};
-			}
-			status.sandboxes.e2b.sessionId = project.e2bSessionId;
 		}
 
 		// Return enhanced project status
@@ -201,7 +152,6 @@ export const PUT: RequestHandler = async ({ params, request, locals }) => {
 				id: updatedProject.id,
 				name: updatedProject.name,
 				framework: updatedProject.framework,
-				e2bSessionId: updatedProject.e2bSessionId,
 				createdAt: updatedProject.createdAt,
 				updatedAt: updatedProject.updatedAt
 			}

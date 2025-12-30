@@ -127,36 +127,31 @@ async function checkFileStorageHealth(): Promise<ServiceHealth> {
 	const startTime = Date.now();
 
 	try {
-		// Test R2 storage connectivity
-		const { r2Config } = await import('$lib/config/r2.config');
-		const { S3Client, ListObjectsV2Command } = await import('@aws-sdk/client-s3');
+		// Test Daytona sandbox availability
+		const { sandboxConfig } = await import('$lib/config/sandbox.config');
 
-		const s3Client = new S3Client({
-			region: r2Config.region,
-			endpoint: r2Config.endpoint,
-			credentials: {
-				accessKeyId: r2Config.accessKeyId || '',
-				secretAccessKey: r2Config.secretAccessKey || ''
-			}
-		});
-
-		// Try to list objects in the bucket (this will fail if credentials are invalid)
-		const listCommand = new ListObjectsV2Command({
-			Bucket: r2Config.defaultBucket,
-			MaxKeys: 1
-		});
-
-		await s3Client.send(listCommand);
+		// Check if Daytona is configured
+		if (!sandboxConfig.daytona.apiKey) {
+			return {
+				status: 'degraded',
+				response_time: Date.now() - startTime,
+				last_check: new Date().toISOString(),
+				details: {
+					storage_type: 'daytona_sandbox',
+					configured: false,
+					message: 'Daytona API key not configured'
+				}
+			};
+		}
 
 		return {
 			status: 'healthy',
 			response_time: Date.now() - startTime,
 			last_check: new Date().toISOString(),
 			details: {
-				storage_type: 'cloudflare_r2',
-				bucket: r2Config.defaultBucket,
-				region: r2Config.region,
-				endpoint: r2Config.endpoint
+				storage_type: 'daytona_sandbox',
+				configured: true,
+				api_url: sandboxConfig.daytona.apiUrl
 			}
 		};
 	} catch (error) {
@@ -164,7 +159,7 @@ async function checkFileStorageHealth(): Promise<ServiceHealth> {
 			status: 'unhealthy',
 			response_time: Date.now() - startTime,
 			last_check: new Date().toISOString(),
-			error: error instanceof Error ? error.message : 'R2 storage check failed'
+			error: error instanceof Error ? error.message : 'Sandbox storage check failed'
 		};
 	}
 }

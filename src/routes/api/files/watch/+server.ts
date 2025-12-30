@@ -67,7 +67,12 @@ export const GET: RequestHandler = async ({ request, url }) => {
 				request.signal.addEventListener('abort', () => {
 					clearInterval(heartbeatInterval);
 					fileChangeBroadcaster.unregisterClient(clientId);
-					controller.close();
+					try {
+						controller.close();
+					} catch (error) {
+						// Controller might already be closed
+						console.log(`Controller already closed for client ${clientId}`);
+					}
 					console.log(`📡 File watch SSE connection closed for client ${clientId}`);
 				});
 			},

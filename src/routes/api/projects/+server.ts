@@ -47,9 +47,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		}
 
 		// Validate sandbox provider
-		if (!['daytona', 'e2b'].includes(sandboxProvider)) {
+		if (sandboxProvider !== 'daytona') {
 			return json(
-				{ error: 'Invalid sandbox provider. Must be "daytona" or "e2b"' },
+				{ error: 'Invalid sandbox provider. Only "daytona" is supported.' },
 				{ status: 400 }
 			);
 		}

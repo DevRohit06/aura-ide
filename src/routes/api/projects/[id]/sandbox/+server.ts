@@ -1,6 +1,5 @@
 import { DatabaseService } from '$lib/services/database.service.js';
 import { DaytonaService } from '$lib/services/sandbox/daytona.service.js';
-import { E2BService } from '$lib/services/sandbox/e2b.service.js';
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 
 export const POST: RequestHandler = async ({ params, request, locals }) => {
@@ -17,10 +16,9 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
 
 		const { provider, config } = await request.json();
 
-		// Validate provider
-		const validProviders = ['daytona', 'e2b'];
-		if (!validProviders.includes(provider)) {
-			return json({ error: 'Invalid sandbox provider' }, { status: 400 });
+		// Validate provider - only daytona is supported
+		if (provider !== 'daytona') {
+			return json({ error: 'Invalid sandbox provider. Only daytona is supported.' }, { status: 400 });
 		}
 
 		// Get project
@@ -34,26 +32,16 @@ export const POST: RequestHandler = async ({ params, request, locals }) => {
 			throw error(403, 'Access denied');
 		}
 
-		// Create sandbox based on provider
+		// Create sandbox with Daytona
 		let sandboxResult;
 		try {
-			if (provider === 'daytona') {
-				const daytonaService = new DaytonaService();
-				sandboxResult = await daytonaService.createSandbox({
-					projectId: project.id,
-					framework: project.framework,
-					gitUrl: `https://github.com/stackblitz/starter-${project.framework}`,
-					...config
-				});
-			} else if (provider === 'e2b') {
-				const e2bService = new E2BService();
-				sandboxResult = await e2bService.createSandbox({
-					projectId: project.id,
-					framework: project.framework,
-					template: project.framework,
-					...config
-				});
-			}
+			const daytonaService = new DaytonaService();
+			sandboxResult = await daytonaService.createSandbox({
+				projectId: project.id,
+				framework: project.framework,
+				gitUrl: `https://github.com/stackblitz/starter-${project.framework}`,
+				...config
+			});
 
 			if (!sandboxResult) {
 				throw new Error('Failed to create sandbox');
@@ -125,10 +113,9 @@ export const DELETE: RequestHandler = async ({ params, request, locals }) => {
 
 		const { provider, sandboxId } = await request.json();
 
-		// Validate provider
-		const validProviders = ['daytona', 'e2b'];
-		if (!validProviders.includes(provider)) {
-			return json({ error: 'Invalid sandbox provider' }, { status: 400 });
+		// Validate provider - only daytona is supported
+		if (provider !== 'daytona') {
+			return json({ error: 'Invalid sandbox provider. Only daytona is supported.' }, { status: 400 });
 		}
 
 		// Get project
@@ -142,15 +129,10 @@ export const DELETE: RequestHandler = async ({ params, request, locals }) => {
 			throw error(403, 'Access denied');
 		}
 
-		// Delete sandbox based on provider
+		// Delete sandbox with Daytona
 		try {
-			if (provider === 'daytona') {
-				const daytonaService = new DaytonaService();
-				await daytonaService.deleteSandbox(sandboxId);
-			} else if (provider === 'e2b') {
-				const e2bService = new E2BService();
-				await e2bService.deleteSandbox(sandboxId);
-			}
+			const daytonaService = new DaytonaService();
+			await daytonaService.deleteSandbox(sandboxId);
 
 			// Remove sandbox info from project metadata
 			const metadata = project.metadata ? { ...project.metadata } : {};
