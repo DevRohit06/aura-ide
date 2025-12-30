@@ -95,9 +95,8 @@ export interface Project {
 	framework: Framework;
 	configuration: ProjectConfiguration;
 	status: 'initializing' | 'ready' | 'error';
-	sandboxProvider?: 'daytona' | 'e2b';
-	sandboxId?: string; // For Daytona: persistent sandbox ID, for E2B: session ID
-	e2bSessionId?: string; // Legacy field, kept for compatibility
+	sandboxProvider?: 'daytona';
+	sandboxId?: string;
 	createdAt: Date;
 	updatedAt: Date;
 	metadata?: Record<string, any>;
@@ -139,7 +138,7 @@ export interface EditorSession {
 	id: string;
 	projectId: string;
 	userId: string;
-	e2bSessionId: string;
+	sandboxSessionId: string;
 	activeFiles: string[];
 	terminalSessions: TerminalSession[];
 	aiConversationId?: string;
@@ -155,9 +154,7 @@ export interface TerminalSession {
 	createdAt: Date;
 }
 
-export interface E2BSessionConfig {
-	template: string;
-	apiKey: string;
+export interface SandboxSessionConfig {
 	timeout: number;
 	environment: Record<string, string>;
 }

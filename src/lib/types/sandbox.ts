@@ -1,7 +1,7 @@
 import { ObjectId } from 'mongodb';
 
 // Core Sandbox Types
-export type SandboxProvider = 'daytona' | 'e2b' | 'local';
+export type SandboxProvider = 'daytona';
 export type SandboxStatus =
 	| 'initializing'
 	| 'running'
@@ -11,11 +11,12 @@ export type SandboxStatus =
 	| 'active'
 	| 'terminating'
 	| 'terminated';
-export type StorageProvider = 'r2' | 'local' | 's3';
+export type StorageProvider = 'sandbox';
 export type UploadStatus = 'pending' | 'uploading' | 'completed' | 'failed';
 export type ExecutionErrorType = 'syntax' | 'runtime' | 'timeout' | 'memory';
 export type FileOperation = 'create' | 'update' | 'delete' | 'rename';
 export type DependencyType = 'runtime' | 'dev' | 'peer';
+
 
 // Project Templates Collection
 export interface ProjectTemplate {

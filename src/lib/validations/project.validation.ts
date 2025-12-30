@@ -58,10 +58,11 @@ const frameworkSchema = z
 
 // Sandbox provider validation
 const sandboxProviderSchema = z
-	.enum(['daytona', 'e2b'])
-	.refine((val) => ['daytona', 'e2b'].includes(val), {
+	.enum(['daytona'])
+	.refine((val) => ['daytona'].includes(val), {
 		message: 'Please select a valid sandbox provider'
 	});
+
 
 // Package manager validation
 const packageManagerSchema = z
