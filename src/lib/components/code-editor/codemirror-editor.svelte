@@ -2,10 +2,9 @@
 	import { history } from '@codemirror/commands';
 	import { indentOnInput } from '@codemirror/language';
 	import { EditorState, type Extension } from '@codemirror/state';
-	import { highlightActiveLine } from '@codemirror/view';
-	import { EditorView } from 'codemirror';
+	import { EditorView, highlightActiveLine } from '@codemirror/view';
 	import { onDestroy, onMount } from 'svelte';
-	// Lazy theme imports
+// Lazy theme imports
 	import ContextMenu from './context-menu.svelte';
 	import SearchPanel from './search-panel.svelte';
 	import {
@@ -14,7 +13,7 @@
 		loadOneDarkTheme,
 		loadTomorrowTheme
 	} from './theme-loader';
-	// Extracted utilities
+// Extracted utilities
 	import {
 		autocompletionCompartment,
 		bracketMatchingCompartment,

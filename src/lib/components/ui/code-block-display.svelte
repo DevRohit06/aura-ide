@@ -7,8 +7,8 @@
 	import { markdown } from '@codemirror/lang-markdown';
 	import { python } from '@codemirror/lang-python';
 	import { oneDark } from '@codemirror/theme-one-dark';
+	import { EditorView } from '@codemirror/view';
 	import { Check, Copy } from '@lucide/svelte';
-	import { EditorView, basicSetup } from 'codemirror';
 	import { mode } from 'mode-watcher';
 	import { onDestroy, onMount } from 'svelte';
 	import { tomorrow } from 'thememirror';
@@ -70,7 +70,10 @@
 		editor = new EditorView({
 			doc: code,
 			extensions: [
-				basicSetup,
+				highlightSpecialChars(),
+				drawSelection(),
+				syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+				keymap.of(defaultKeymap),
 				langExt,
 				isDark ? oneDark : tomorrow,
 				EditorView.editable.of(false), // Make it read-only

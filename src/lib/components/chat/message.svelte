@@ -68,6 +68,7 @@
 
 	import { Avatar } from '$lib/components/ui/avatar';
 	import { Badge } from '$lib/components/ui/badge';
+	import { Skeleton } from '$lib/components/ui/skeleton';
 	import modelCatalog from '$lib/data/models.json';
 	import { getModelImageUrl, getModelInitials } from '$lib/utils/model-image';
 	import { selectedModelStore } from '@/stores/model';
@@ -291,7 +292,7 @@
 			<Badge variant={message.role === 'user' ? 'default' : 'secondary'} class="text-xs">
 				{message.role === 'user'
 					? 'You'
-					: getModelDisplay(message.metadata.agentModel) || 'Assistant'}
+					: getModelDisplay(message.metadata?.agentModel) || 'Assistant'}
 			</Badge>
 
 			{#if message.metadata?.hasToolCalls && message.metadata?.toolCallCount}
@@ -321,15 +322,9 @@
 	</div>
 	<div class="">
 		{#if message.content === '' && message.content.length === 0}
-			<div class="flex items-center gap-2">
-				<div class="flex space-x-1">
-					<div class="h-2 w-2 animate-bounce rounded-full bg-current [animation-delay:-0.3s]"></div>
-					<div
-						class="h-2 w-2 animate-bounce rounded-full bg-current [animation-delay:-0.15s]"
-					></div>
-					<div class="h-2 w-2 animate-bounce rounded-full bg-current"></div>
-				</div>
-				<span class="text-xs text-muted-foreground">Thinking...</span>
+			<div class="max-w-md space-y-2">
+				<Skeleton class="h-4 w-full" />
+				<Skeleton class="h-4 w-3/4" />
 			</div>
 		{:else}
 			<div class="space-y-4 text-sm leading-relaxed">

@@ -7,19 +7,14 @@
 		CardHeader,
 		CardTitle
 	} from '$lib/components/ui/card/index.js';
-	import { Separator } from '$lib/components/ui/separator/index.js';
 	import { cn } from '$lib/utils.js';
 	import {
 		CheckCircle,
-		Clock,
-		Cloud,
-		Database,
 		GitBranch,
 		HardDrive,
 		Monitor,
 		Server,
-		Terminal,
-		Zap
+		Terminal
 	} from 'lucide-svelte';
 
 	interface Provider {
@@ -47,7 +42,7 @@
 
 	let { providers, selectedProvider, onProviderSelect, class: className }: Props = $props();
 
-	// Enhanced provider data
+	// Enhanced provider data - Daytona ONLY
 	const enhancedProviders = [
 		{
 			value: 'daytona',
@@ -75,82 +70,24 @@
 			],
 			advantages: ['Long-running projects', 'Complex workflows', 'Full development environment'],
 			bestFor: 'Production-like development, collaborative coding, complex projects'
-		},
-		{
-			value: 'e2b',
-			label: 'E2B',
-			description: 'Cloud-based sandbox with R2 storage integration',
-			logo: '⚡',
-			color: 'from-purple-500 to-pink-500',
-			setupTime: '~30-60 seconds',
-			specs: {
-				cpu: '4 vCPU',
-				memory: '8GB RAM',
-				storage: '50GB Cloud'
-			},
-			pricing: 'Pay-as-you-go',
-			features: [
-				{ name: 'Cloud Storage', icon: Cloud, description: 'Integrated cloud storage' },
-				{ name: 'Fast Startup', icon: Zap, description: 'Lightning-fast initialization' },
-				{ name: 'Session-based', icon: Clock, description: 'Optimized for short sessions' },
-				{ name: 'API-driven', icon: Database, description: 'Programmatic control' },
-				{ name: 'Auto-scaling', icon: Server, description: 'Scales with your needs' }
-			],
-			advantages: ['Rapid prototyping', 'Quick experiments', 'Auto-scaling resources'],
-			bestFor: 'Quick experiments, learning, rapid prototyping, testing'
 		}
 	];
 
 	function getProviderData(value: string) {
 		return enhancedProviders.find((p) => p.value === value) || enhancedProviders[0];
 	}
-
-	function getComparisonData() {
-		return [
-			{
-				feature: 'Setup Time',
-				daytona: '2-3 min',
-				e2b: '30-60 sec',
-				winner: 'e2b'
-			},
-			{
-				feature: 'Storage',
-				daytona: 'Persistent',
-				e2b: 'Cloud-based',
-				winner: 'daytona'
-			},
-			{
-				feature: 'Git Integration',
-				daytona: 'Full support',
-				e2b: 'API-based',
-				winner: 'daytona'
-			},
-			{
-				feature: 'Resource Scaling',
-				daytona: 'Fixed',
-				e2b: 'Auto-scaling',
-				winner: 'e2b'
-			},
-			{
-				feature: 'Session Type',
-				daytona: 'Long-running',
-				e2b: 'On-demand',
-				winner: 'daytona'
-			}
-		];
-	}
 </script>
 
 <div class={cn('space-y-6', className)}>
 	<!-- Provider Cards -->
-	<div class="grid gap-6 lg:grid-cols-2">
+	<div class="grid gap-6">
 		{#each enhancedProviders as provider}
 			{@const isSelected = selectedProvider === provider.value}
 			<Card
 				class={cn(
 					'group cursor-pointer border-2 transition-all duration-300 hover:shadow-xl',
 					isSelected
-						? 'scale-[1.02] border-primary bg-gradient-to-br from-primary/5 to-primary/10 shadow-lg'
+						? 'scale-[1.01] border-primary bg-gradient-to-br from-primary/5 to-primary/10 shadow-lg'
 						: 'border-muted hover:scale-[1.01] hover:border-primary/50 hover:shadow-lg'
 				)}
 				onclick={() => onProviderSelect(provider.value)}
@@ -258,64 +195,6 @@
 			</Card>
 		{/each}
 	</div>
-
-	<Separator />
-
-	<!-- Feature Comparison Table -->
-	<Card>
-		<CardHeader>
-			<CardTitle class="flex items-center space-x-2">
-				<Monitor class="h-5 w-5 text-primary" />
-				<span>Feature Comparison</span>
-			</CardTitle>
-			<CardDescription>Compare key features between sandbox providers</CardDescription>
-		</CardHeader>
-		<CardContent>
-			<div class="overflow-x-auto">
-				<table class="w-full">
-					<thead>
-						<tr class="border-b">
-							<th class="py-3 text-left font-medium">Feature</th>
-							<th class="py-3 text-center font-medium">🏔️ Daytona</th>
-							<th class="py-3 text-center font-medium">⚡ E2B</th>
-							<th class="py-3 text-center font-medium">Winner</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each getComparisonData() as row}
-							<tr class="border-b hover:bg-muted/50">
-								<td class="py-3 font-medium">{row.feature}</td>
-								<td
-									class={cn(
-										'py-3 text-center',
-										row.winner === 'daytona' ? 'font-semibold text-green-600' : ''
-									)}
-								>
-									{row.daytona}
-								</td>
-								<td
-									class={cn(
-										'py-3 text-center',
-										row.winner === 'e2b' ? 'font-semibold text-green-600' : ''
-									)}
-								>
-									{row.e2b}
-								</td>
-								<td class="py-3 text-center">
-									<Badge
-										variant={row.winner === selectedProvider ? 'default' : 'outline'}
-										class="text-xs"
-									>
-										{row.winner === 'daytona' ? '🏔️' : '⚡'}
-									</Badge>
-								</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
-		</CardContent>
-	</Card>
 
 	<!-- Recommendation -->
 	{#if selectedProvider}
