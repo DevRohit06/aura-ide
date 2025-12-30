@@ -1,11 +1,10 @@
 import { env } from '$env/dynamic/private';
 import { HeliconeConfigManager } from '$lib/config/helicone.config';
 import modelsData from '$lib/data/models.json';
-import { ChatAnthropic } from '@langchain/anthropic';
-import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import { ChatGroq } from '@langchain/groq';
-import { ChatOpenAI } from '@langchain/openai';
-import { logger } from 'better-auth';
+import { logger } from '$lib/utils/logger.js';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { createOpenAI } from '@ai-sdk/openai';
+import { type LanguageModel } from 'ai';
 
 export interface ModelConfig {
 	provider: 'openai' | 'anthropic' | 'groq' | 'openrouter';
@@ -65,10 +64,18 @@ export const MODEL_PRESETS: Record<string, { provider: string; model: string; co
 })();
 
 export class ModelManager {
-	private models: Map<string, BaseChatModel> = new Map();
+	private models: Map<string, LanguageModel> = new Map();
 	private helicone = HeliconeConfigManager.getInstance().getConfig();
 	private providerModelIdToId: Map<string, string> = new Map();
 	private apiModelNameToId: Map<string, string> = new Map();
+
+	private openaiProvider = createOpenAI({
+		apiKey: env.OPENAI_API_KEY
+	});
+	
+	private anthropicProvider = createAnthropic({
+		apiKey: env.ANTHROPIC_API_KEY
+	});
 
 	constructor() {
 		// Build reverse mapping from providerModelId to model id
@@ -98,11 +105,14 @@ export class ModelManager {
 		}
 	}
 
-	getModel(config: ModelConfig): BaseChatModel {
+	getModel(config: ModelConfig): LanguageModel {
 		const provider = config.provider || 'openai';
 		const modelName = config.model;
 		const cacheKey = `${provider}:${modelName}:${config.temperature ?? 0}`;
+		
+		// Note: AI SDK models are lightweight, caching might not be strictly necessary but keeping for consistency
 		if (this.models.has(cacheKey)) return this.models.get(cacheKey)!;
+		
 		logger.info('[ModelManager] Creating model for config:', config);
 		const model = this.createModel(config);
 		this.models.set(cacheKey, model);
@@ -131,15 +141,11 @@ export class ModelManager {
 		return Object.entries(MODEL_PRESETS).map(([name, cfg]) => ({ name, ...cfg }));
 	}
 
-	private createModel(config: ModelConfig): BaseChatModel {
+	private createModel(config: ModelConfig): LanguageModel {
 		const provider = config.provider;
 		const model = config.model;
-		const temperature = config.temperature ?? 0.7;
 
 		const heliconeBase = this.helicone.baseUrl || 'https://oai.helicone.ai/v1';
-		const commonOptions: any = {
-			temperature
-		};
 
 		const headers: Record<string, string> = {
 			'Helicone-Auth': `Bearer ${this.helicone.apiKey}`,
@@ -149,53 +155,42 @@ export class ModelManager {
 
 		switch (provider) {
 			case 'openai':
-				return new ChatOpenAI({
-					model: model,
-					openAIApiKey: env.OPENAI_API_KEY || undefined,
-					configuration: {
-						baseURL: heliconeBase,
-						defaultHeaders: headers
-					},
-					...commonOptions
+				// Re-create provider with headers if needed, or use base one
+				// For Helicone, we need to customize the baseURL and headers
+				const openaiWithHelicone = createOpenAI({
+					apiKey: env.OPENAI_API_KEY,
+					baseURL: heliconeBase,
+					headers: headers
 				});
+				return openaiWithHelicone(model);
 
 			case 'anthropic':
-				return new ChatAnthropic({
-					model: model,
-					anthropicApiKey: env.ANTHROPIC_API_KEY || undefined,
-					clientOptions: {
-						baseURL: 'https://anthropic.helicone.ai',
-						defaultHeaders: headers
-					},
-					...commonOptions
+				const anthropicWithHelicone = createAnthropic({
+					apiKey: env.ANTHROPIC_API_KEY,
+					baseURL: 'https://anthropic.helicone.ai',
+					headers: headers
 				});
+				return anthropicWithHelicone(model);
 
 			case 'groq':
-				return new ChatGroq({
-					// Groq exposes an OpenAI-compatible API; route through Helicone gateway
-					model: model,
-					apiKey: env.GROQ_API_KEY || undefined,
-					configuration: {
-						baseURL: 'https://groq.helicone.ai/openai/v1',
-						defaultHeaders: headers
-					},
-					...commonOptions
+				// Groq via OpenAI compatible interface
+				const groqWithHelicone = createOpenAI({
+					apiKey: env.GROQ_API_KEY,
+					baseURL: 'https://groq.helicone.ai/openai/v1',
+					headers: headers
 				});
+				return groqWithHelicone(model);
 
 			case 'openrouter':
-				return new ChatOpenAI({
-					// OpenRouter also supports OpenAI-like semantics
-					model: model,
-					apiKey: env.OPENROUTER_API_KEY || undefined,
-					configuration: {
-						baseURL: 'https://openrouter.helicone.ai/api/v1',
-						defaultHeaders: {
-							...headers,
-							'HTTP-Referer': env.APP_ORIGIN || 'https://aura.local'
-						}
-					},
-					...commonOptions
+				const openRouterWithHelicone = createOpenAI({
+					apiKey: env.OPENROUTER_API_KEY,
+					baseURL: 'https://openrouter.helicone.ai/api/v1',
+					headers: {
+						...headers,
+						'HTTP-Referer': env.APP_ORIGIN || 'https://aura.local'
+					}
 				});
+				return openRouterWithHelicone(model);
 
 			default:
 				throw new Error(`Unsupported provider: ${provider}`);
