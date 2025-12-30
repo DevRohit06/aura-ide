@@ -1,6 +1,6 @@
 # 🌟 Aura IDE
 
-![Aura IDE](./images/hero.png)
+![Aura IDE](https://raw.githubusercontent.com/DevRohit06/aura-ide/refs/heads/main/images/hero.png)
 
 > **⚠️ EXPERIMENTAL PROJECT** - This project is currently in early development (MVP stage). Features may be incomplete, flows might not work as expected, and the codebase is actively evolving. This will be polished over time.
 
