@@ -1,6 +1,6 @@
 /**
  * Sandbox Configuration
- * Configuration for sandbox providers and settings
+ * Configuration for Daytona sandbox provider
  */
 
 import { env } from '$env/dynamic/private';
@@ -28,63 +28,9 @@ export const daytonaConfig = {
 	}
 } as const;
 
-// E2B Configuration
-export const e2bConfig = {
-	apiKey: env.E2B_API_KEY || '',
-	baseUrl: env.E2B_API_URL || 'https://api.e2b.dev',
-	region: env.E2B_REGION || 'us-east-1',
-	limits: {
-		maxConcurrentSandboxes: parseInt(env.E2B_MAX_SANDBOXES || '10'),
-		maxConcurrentSessions: parseInt(env.E2B_MAX_SESSIONS || '20'),
-		maxFileSize: parseInt(env.E2B_MAX_FILE_SIZE || '52428800'), // 50MB
-		maxExecutionTime: parseInt(env.E2B_MAX_EXEC_TIME || '180000'), // 3 minutes
-		defaultTimeout: parseInt(env.E2B_DEFAULT_TIMEOUT || '3600000') // 1 hour
-	},
-	templates: {
-		node: env.E2B_NODE_TEMPLATE || 'nodejs',
-		python: env.E2B_PYTHON_TEMPLATE || 'python',
-		universal: env.E2B_UNIVERSAL_TEMPLATE || 'ubuntu'
-	},
-	retry: {
-		maxAttempts: parseInt(env.E2B_RETRY_ATTEMPTS || '3'),
-		backoffMs: parseInt(env.E2B_RETRY_BACKOFF || '1000')
-	},
-	monitoring: {
-		metricsInterval: parseInt(env.E2B_METRICS_INTERVAL || '30000'), // 30 seconds
-		healthCheckInterval: parseInt(env.E2B_HEALTH_CHECK_INTERVAL || '60000') // 1 minute
-	}
-} as const;
-
-// Local Sandbox Configuration (for development)
-export const localConfig = {
-	enabled: env.LOCAL_SANDBOX_ENABLED === 'true',
-	basePath: env.LOCAL_SANDBOX_PATH || '/tmp/aura-sandboxes',
-	dockerEnabled: env.LOCAL_DOCKER_ENABLED === 'true',
-	limits: {
-		maxConcurrentSandboxes: parseInt(env.LOCAL_MAX_SANDBOXES || '5'),
-		maxFileSize: parseInt(env.LOCAL_MAX_FILE_SIZE || '104857600'), // 100MB
-		maxExecutionTime: parseInt(env.LOCAL_MAX_EXEC_TIME || '60000'), // 1 minute
-		defaultTimeout: parseInt(env.LOCAL_DEFAULT_TIMEOUT || '300000') // 5 minutes
-	},
-	cleanup: {
-		autoCleanup: env.LOCAL_AUTO_CLEANUP !== 'false',
-		cleanupInterval: parseInt(env.LOCAL_CLEANUP_INTERVAL || '3600000'), // 1 hour
-		maxAge: parseInt(env.LOCAL_MAX_AGE || '86400000') // 24 hours
-	}
-} as const;
-
 // Provider Priority Configuration
 export const providerConfig = {
-	defaultProvider: (env.DEFAULT_SANDBOX_PROVIDER || 'daytona') as 'daytona' | 'e2b' | 'local',
-	fallbackProvider: (env.FALLBACK_SANDBOX_PROVIDER || 'e2b') as 'daytona' | 'e2b' | 'local',
-	loadBalancing: {
-		enabled: env.SANDBOX_LOAD_BALANCING === 'true',
-		strategy: (env.LOAD_BALANCING_STRATEGY || 'round-robin') as
-			| 'round-robin'
-			| 'least-loaded'
-			| 'random',
-		healthCheckRequired: env.HEALTH_CHECK_REQUIRED !== 'false'
-	},
+	defaultProvider: 'daytona' as const,
 	failover: {
 		enabled: env.SANDBOX_FAILOVER !== 'false',
 		maxRetries: parseInt(env.SANDBOX_MAX_RETRIES || '2'),
@@ -252,8 +198,6 @@ export const templateConfig = {
 // Combined sandbox configuration
 export const sandboxConfig = {
 	daytona: daytonaConfig,
-	e2b: e2bConfig,
-	local: localConfig,
 	provider: providerConfig,
 	resources: resourceLimits,
 	security: securityConfig,

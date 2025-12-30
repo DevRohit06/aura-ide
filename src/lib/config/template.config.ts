@@ -78,7 +78,10 @@ export const stackblitzTemplates = {
 	// CSS frameworks
 	bootstrap: 'bootstrap',
 	tailwind: 'tailwindcss',
-	bulma: 'bulma'
+	bulma: 'bulma',
+
+	// Static HTML
+	static: 'vanilla'
 } as const;
 
 /**
@@ -123,7 +126,10 @@ export const githubTemplates = {
 	'vite-vue': { owner: 'stackblitz', repo: 'starters', path: 'vite-vue' },
 	'vite-vue-ts': { owner: 'stackblitz', repo: 'starters', path: 'vite-vue-ts' },
 	'vite-svelte': { owner: 'stackblitz', repo: 'starters', path: 'vite-svelte' },
-	'vite-svelte-ts': { owner: 'stackblitz', repo: 'starters', path: 'vite-svelte-ts' }
+	'vite-svelte-ts': { owner: 'stackblitz', repo: 'starters', path: 'vite-svelte-ts' },
+
+	// Static HTML/CSS/JS
+	static: { owner: 'stackblitz', repo: 'starters', path: 'vanilla' }
 } as const;
 
 /**
@@ -133,7 +139,7 @@ export const templateCategories = {
 	frontend: ['react', 'vue', 'svelte', 'angular', 'vanilla'],
 	fullstack: ['nextjs', 'nuxtjs', 'sveltekit', 'astro'],
 	backend: ['node', 'express', 'fastify', 'nestjs'],
-	static: ['gatsby', 'eleventy', 'jekyll'],
+	static: ['gatsby', 'eleventy', 'jekyll', 'static'],
 	mobile: ['react-native', 'ionic'],
 	desktop: ['electron', 'tauri'],
 	css: ['bootstrap', 'tailwind', 'bulma'],
