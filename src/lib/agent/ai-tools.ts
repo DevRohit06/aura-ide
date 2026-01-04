@@ -8,9 +8,10 @@ import { z } from 'zod';
 
 // Web Search Tool
 export const webSearchTool = tool({
-	description: 'Search the web for documentation, examples, and solutions.',
+	description:
+		'Search the web for documentation, examples, tutorials, and solutions. Use this to find up-to-date information about libraries, APIs, error messages, and best practices.',
 	inputSchema: z.object({
-		query: z.string().describe('The search query')
+		query: z.string().describe('The search query - be specific and include relevant context')
 	}),
 	execute: async ({ query }) => {
 		if (!env.TAVILY_API_KEY) {
@@ -48,14 +49,20 @@ export const webSearchTool = tool({
 // Semantic Code Search Tool
 export const codeSearchTool = tool({
 	description:
-		'Search the codebase using semantic similarity to find relevant code snippets and files.',
+		'Search the codebase using semantic similarity to find relevant code snippets, functions, and files. Use this to understand code patterns, find implementations, or locate where specific functionality exists.',
 	inputSchema: z.object({
-		query: z.string().describe('The search query'),
-		topK: z.number().optional().describe('Number of results to return (default: 5)')
+		query: z
+			.string()
+			.describe(
+				'Natural language description of the code you are looking for (e.g., "user authentication logic", "API endpoint for creating posts")'
+			),
+		topK: z.number().optional().describe('Number of results to return (default: 5, max: 20)')
 	}),
 	execute: async ({ query, topK = 5 }) => {
 		try {
-			const results = await vectorDbService.searchSimilarCode(query, 'global', { limit: topK });
+			const results = await vectorDbService.searchSimilarCode(query, 'global', {
+				limit: Math.min(topK, 20)
+			});
 			const formattedResults = (results || []).map((r) => ({
 				filePath: r.document.filePath,
 				relevance: r.score,
@@ -76,22 +83,217 @@ export const codeSearchTool = tool({
 	}
 });
 
-// Read File Tool
-export const readFileTool = tool({
-	description: 'Read the contents of a file from the sandbox.',
+// List Files Tool
+export const listFilesTool = tool({
+	description:
+		'List files and directories in the sandbox. Use this to explore the project structure and understand what files exist.',
 	inputSchema: z.object({
 		sandboxId: z.string().describe('The ID of the sandbox'),
 		sandboxType: z.string().optional().describe('The type of sandbox (e.g., "daytona")'),
-		filePath: z.string().describe('The path to the file to read')
+		path: z
+			.string()
+			.optional()
+			.describe('The directory path to list (defaults to project root /home/daytona)'),
+		recursive: z.boolean().optional().describe('Whether to list recursively (default: false)'),
+		maxDepth: z
+			.number()
+			.optional()
+			.describe('Maximum depth for recursive listing (default: 2, max: 5)')
 	}),
-	execute: async ({ sandboxId, sandboxType, filePath }) => {
+	execute: async ({ sandboxId, sandboxType, path = '/home/daytona', recursive = false, maxDepth = 2 }) => {
+		try {
+			const provider = sandboxType as any;
+			const files = await sandboxManager.listFiles(sandboxId, path, { provider });
+
+			if (!files || !Array.isArray(files) || files.length === 0) {
+				return `No files found in "${path}" or directory does not exist.`;
+			}
+
+			// Format the file list
+			const formatFiles = (
+				fileList: any[],
+				depth: number = 0,
+				prefix: string = ''
+			): string => {
+				if (depth >= Math.min(maxDepth, 5)) return '';
+
+				let result = '';
+				const sorted = [...fileList].sort((a, b) => {
+					if (a.type === 'directory' && b.type !== 'directory') return -1;
+					if (a.type !== 'directory' && b.type === 'directory') return 1;
+					return (a.name || '').localeCompare(b.name || '');
+				});
+
+				for (let i = 0; i < sorted.length; i++) {
+					const file = sorted[i];
+					const name = file.name || file.path?.split('/').pop() || '';
+
+					// Skip hidden files and common ignore patterns at root level
+					if (
+						name.startsWith('.') ||
+						name === 'node_modules' ||
+						name === '__pycache__' ||
+						name === '.git'
+					) {
+						continue;
+					}
+
+					const isLast = i === sorted.length - 1;
+					const icon = file.type === 'directory' ? '📁' : '📄';
+					const size = file.size ? ` (${formatSize(file.size)})` : '';
+					result += `${prefix}${isLast ? '└── ' : '├── '}${icon} ${name}${size}\n`;
+
+					if (recursive && file.type === 'directory' && file.children && depth < maxDepth - 1) {
+						result += formatFiles(
+							file.children,
+							depth + 1,
+							prefix + (isLast ? '    ' : '│   ')
+						);
+					}
+				}
+
+				return result;
+			};
+
+			const formatSize = (bytes: number): string => {
+				if (bytes < 1024) return `${bytes}B`;
+				if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+				return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+			};
+
+			const tree = formatFiles(files);
+			return `Files in ${path}:\n\`\`\`\n${tree}\`\`\``;
+		} catch (error) {
+			console.error('List files tool error:', error);
+			return `Error listing files in "${path}": ${error instanceof Error ? error.message : String(error)}`;
+		}
+	}
+});
+
+// Grep/Search Tool
+export const grepTool = tool({
+	description:
+		'Search for a pattern (text or regex) in files within the sandbox. Use this to find specific code patterns, function definitions, variable usages, imports, or any text within files.',
+	inputSchema: z.object({
+		sandboxId: z.string().describe('The ID of the sandbox'),
+		sandboxType: z.string().optional().describe('The type of sandbox (e.g., "daytona")'),
+		pattern: z.string().describe('The search pattern (text or regex)'),
+		path: z
+			.string()
+			.optional()
+			.describe('Directory or file path to search in (defaults to project root)'),
+		filePattern: z
+			.string()
+			.optional()
+			.describe('File glob pattern to filter (e.g., "*.ts", "*.{js,jsx}")'),
+		caseSensitive: z.boolean().optional().describe('Case sensitive search (default: false)'),
+		maxResults: z.number().optional().describe('Maximum number of results (default: 50)')
+	}),
+	execute: async ({
+		sandboxId,
+		sandboxType,
+		pattern,
+		path = '/home/daytona',
+		filePattern,
+		caseSensitive = false,
+		maxResults = 50
+	}) => {
+		try {
+			const provider = sandboxType as any;
+
+			// Build grep command
+			let command = 'grep -rn';
+			if (!caseSensitive) command += ' -i';
+			if (filePattern) command += ` --include="${filePattern}"`;
+			command += ` "${pattern.replace(/"/g, '\\"')}" "${path}"`;
+			command += ` | head -n ${maxResults}`;
+
+			const result = await sandboxManager.executeCommand(sandboxId, command, { provider });
+
+			if (!result || (typeof result === 'string' && result.trim() === '')) {
+				return `No matches found for pattern "${pattern}" in ${path}`;
+			}
+
+			// Format the results
+			const lines = (typeof result === 'string' ? result : String(result)).split('\n');
+			const formattedResults = lines
+				.filter((line) => line.trim())
+				.slice(0, maxResults)
+				.map((line) => {
+					const match = line.match(/^([^:]+):(\d+):(.*)$/);
+					if (match) {
+						return {
+							file: match[1].replace('/home/daytona/', ''),
+							line: parseInt(match[2], 10),
+							content: match[3].trim().substring(0, 200)
+						};
+					}
+					return { raw: line.substring(0, 200) };
+				});
+
+			return JSON.stringify(
+				{
+					pattern,
+					matchCount: formattedResults.length,
+					results: formattedResults
+				},
+				null,
+				2
+			);
+		} catch (error) {
+			console.error('Grep tool error:', error);
+			// Grep returns non-zero exit code when no matches found
+			if (String(error).includes('exit code 1')) {
+				return `No matches found for pattern "${pattern}" in ${path}`;
+			}
+			return `Error searching for pattern: ${error instanceof Error ? error.message : String(error)}`;
+		}
+	}
+});
+
+// Read File Tool
+export const readFileTool = tool({
+	description:
+		'Read the contents of a file from the sandbox. Always read a file before modifying it to understand its current content and structure.',
+	inputSchema: z.object({
+		sandboxId: z.string().describe('The ID of the sandbox'),
+		sandboxType: z.string().optional().describe('The type of sandbox (e.g., "daytona")'),
+		filePath: z.string().describe('The path to the file to read'),
+		startLine: z.number().optional().describe('Start reading from this line number (1-indexed)'),
+		endLine: z.number().optional().describe('Stop reading at this line number (inclusive)')
+	}),
+	execute: async ({ sandboxId, sandboxType, filePath, startLine, endLine }) => {
 		try {
 			const provider = sandboxType as any;
 			const file = await sandboxManager.readFile(sandboxId, filePath, { provider });
 			if (!file?.content) {
 				return `File "${filePath}" is empty or could not be read.`;
 			}
-			return file.content;
+
+			let content = file.content;
+
+			// Handle line range if specified
+			if (startLine || endLine) {
+				const lines = content.split('\n');
+				const start = Math.max(1, startLine || 1) - 1;
+				const end = endLine ? Math.min(endLine, lines.length) : lines.length;
+				const selectedLines = lines.slice(start, end);
+
+				// Add line numbers
+				content = selectedLines
+					.map((line, idx) => `${String(start + idx + 1).padStart(4, ' ')} | ${line}`)
+					.join('\n');
+
+				return `File: ${filePath} (lines ${start + 1}-${end} of ${lines.length})\n\`\`\`\n${content}\n\`\`\``;
+			}
+
+			// For full file, add line numbers if reasonable size
+			const lines = content.split('\n');
+			if (lines.length <= 500) {
+				content = lines.map((line, idx) => `${String(idx + 1).padStart(4, ' ')} | ${line}`).join('\n');
+			}
+
+			return `File: ${filePath} (${lines.length} lines)\n\`\`\`\n${content}\n\`\`\``;
 		} catch (error) {
 			console.error('Read file tool error:', error);
 			return `Error reading file "${filePath}": ${error instanceof Error ? error.message : String(error)}`;
@@ -102,24 +304,24 @@ export const readFileTool = tool({
 // Write File Tool
 export const writeFileTool = tool({
 	description:
-		'Write or update a file in the sandbox. IMPORTANT: You MUST provide the complete file content in the "content" parameter.',
+		'Create or overwrite a file in the sandbox with the provided content. Use this to create new files or completely replace existing file contents. For partial edits, read the file first, modify the content, then write.',
 	inputSchema: z.object({
-		sandboxId: z
-			.string()
-			.describe('The ID of the sandbox where the file should be written (required)'),
+		sandboxId: z.string().describe('The ID of the sandbox where the file should be written'),
 		sandboxType: z.string().optional().describe('The type of sandbox (e.g., "daytona")'),
 		filePath: z
 			.string()
-			.describe(
-				'The path to the file relative to the sandbox root (required, e.g., "app/page.tsx")'
-			),
+			.describe('The path to the file relative to the sandbox root (e.g., "src/app/page.tsx")'),
 		content: z
 			.string()
 			.describe(
-				'The COMPLETE content of the file as a string (required). This should be the full file content you want to write.'
-			)
+				'The COMPLETE content of the file as a string. This should be the full file content you want to write.'
+			),
+		createDirectories: z
+			.boolean()
+			.optional()
+			.describe('Create parent directories if they do not exist (default: true)')
 	}),
-	execute: async ({ sandboxId, sandboxType, filePath, content }) => {
+	execute: async ({ sandboxId, sandboxType, filePath, content, createDirectories = true }) => {
 		if (!sandboxId) return JSON.stringify({ success: false, error: 'Missing sandboxId' });
 		if (!filePath) return JSON.stringify({ success: false, error: 'Missing filePath' });
 		if (content === undefined || content === null)
@@ -127,56 +329,218 @@ export const writeFileTool = tool({
 
 		try {
 			const provider = sandboxType as any;
-			// Note: userId/projectId configuration is handled by the caller or context if needed,
-			// but here we just pass the args. If we need context in tools, we might need a richer setup,
-			// but for now we follow the existing pattern which didn't seem to pass user/project ID consistently
-			// other than via "config" which isn't standard in basic tool execution without binding.
-			// The original tool tried to read from `config.configurable`, which AI SDK tools don't receive directly.
-			// We will assume basic write works for now.
+
+			// Create parent directories if needed
+			if (createDirectories) {
+				const dirPath = filePath.substring(0, filePath.lastIndexOf('/'));
+				if (dirPath) {
+					await sandboxManager.executeCommand(sandboxId, `mkdir -p "${dirPath}"`, { provider });
+				}
+			}
 
 			const success = await sandboxManager.writeFile(sandboxId, filePath, content, {
 				provider
 			});
+
+			const lineCount = content.split('\n').length;
+
 			return JSON.stringify({
 				success,
 				message: success
-					? `File "${filePath}" written successfully.`
-					: `Failed to write file "${filePath}".`
+					? `✅ File "${filePath}" written successfully (${lineCount} lines).`
+					: `❌ Failed to write file "${filePath}".`,
+				filePath,
+				lineCount
 			});
 		} catch (error) {
 			console.error('Write file tool error:', error);
 			return JSON.stringify({
 				success: false,
 				error: error instanceof Error ? error.message : String(error),
-				message: `Error writing file "${filePath}": ${error instanceof Error ? error.message : String(error)}`
+				message: `❌ Error writing file "${filePath}": ${error instanceof Error ? error.message : String(error)}`
 			});
 		}
 	}
 });
 
-// Execute Code Tool
-export const executeCodeTool = tool({
-	description: 'Execute code or a command in the sandbox and return the output.',
+// Edit File Tool (for targeted edits)
+export const editFileTool = tool({
+	description:
+		'Make targeted edits to a file by replacing specific text. Use this for small, precise changes instead of rewriting the entire file. You must provide the exact text to find and replace.',
 	inputSchema: z.object({
 		sandboxId: z.string().describe('The ID of the sandbox'),
 		sandboxType: z.string().optional().describe('The type of sandbox (e.g., "daytona")'),
-		command: z.string().describe('The command to execute in the sandbox')
+		filePath: z.string().describe('The path to the file to edit'),
+		edits: z
+			.array(
+				z.object({
+					oldText: z.string().describe('The exact text to find (must match exactly)'),
+					newText: z.string().describe('The text to replace it with')
+				})
+			)
+			.describe('Array of edits to apply to the file')
 	}),
-	execute: async ({ sandboxId, sandboxType, command }) => {
+	execute: async ({ sandboxId, sandboxType, filePath, edits }) => {
 		try {
 			const provider = sandboxType as any;
-			const result = await sandboxManager.executeCommand(sandboxId, command, { provider });
+
+			// Read the current file
+			const file = await sandboxManager.readFile(sandboxId, filePath, { provider });
+			if (!file?.content) {
+				return JSON.stringify({
+					success: false,
+					error: `File "${filePath}" not found or is empty.`
+				});
+			}
+
+			let content = file.content;
+			const appliedEdits: string[] = [];
+			const failedEdits: string[] = [];
+
+			// Apply each edit
+			for (const edit of edits) {
+				if (content.includes(edit.oldText)) {
+					content = content.replace(edit.oldText, edit.newText);
+					appliedEdits.push(`Replaced "${edit.oldText.substring(0, 50)}..."`);
+				} else {
+					failedEdits.push(`Could not find "${edit.oldText.substring(0, 50)}..."`);
+				}
+			}
+
+			if (appliedEdits.length === 0) {
+				return JSON.stringify({
+					success: false,
+					error: 'No edits could be applied - text patterns not found.',
+					failedEdits
+				});
+			}
+
+			// Write the modified content
+			const success = await sandboxManager.writeFile(sandboxId, filePath, content, { provider });
+
+			return JSON.stringify({
+				success,
+				message: success
+					? `✅ Applied ${appliedEdits.length} edit(s) to "${filePath}".`
+					: `❌ Failed to save edits to "${filePath}".`,
+				appliedEdits,
+				failedEdits: failedEdits.length > 0 ? failedEdits : undefined
+			});
+		} catch (error) {
+			console.error('Edit file tool error:', error);
+			return JSON.stringify({
+				success: false,
+				error: error instanceof Error ? error.message : String(error)
+			});
+		}
+	}
+});
+
+// Delete File Tool
+export const deleteFileTool = tool({
+	description: 'Delete a file or directory from the sandbox. Use with caution.',
+	inputSchema: z.object({
+		sandboxId: z.string().describe('The ID of the sandbox'),
+		sandboxType: z.string().optional().describe('The type of sandbox (e.g., "daytona")'),
+		path: z.string().describe('The path to the file or directory to delete'),
+		recursive: z
+			.boolean()
+			.optional()
+			.describe('If true, recursively delete directories (required for non-empty directories)')
+	}),
+	execute: async ({ sandboxId, sandboxType, path, recursive = false }) => {
+		try {
+			const provider = sandboxType as any;
+
+			const command = recursive ? `rm -rf "${path}"` : `rm "${path}"`;
+			await sandboxManager.executeCommand(sandboxId, command, { provider });
+
+			return JSON.stringify({
+				success: true,
+				message: `✅ Deleted "${path}" successfully.`
+			});
+		} catch (error) {
+			console.error('Delete file tool error:', error);
+			return JSON.stringify({
+				success: false,
+				error: error instanceof Error ? error.message : String(error),
+				message: `❌ Error deleting "${path}": ${error instanceof Error ? error.message : String(error)}`
+			});
+		}
+	}
+});
+
+// Execute Command Tool
+export const executeCommandTool = tool({
+	description:
+		'Execute a shell command in the sandbox terminal. Use this to run build commands, install packages, run tests, start servers, or any other terminal operation.',
+	inputSchema: z.object({
+		sandboxId: z.string().describe('The ID of the sandbox'),
+		sandboxType: z.string().optional().describe('The type of sandbox (e.g., "daytona")'),
+		command: z.string().describe('The shell command to execute'),
+		workingDir: z
+			.string()
+			.optional()
+			.describe('Working directory for the command (defaults to /home/daytona)'),
+		timeout: z
+			.number()
+			.optional()
+			.describe('Timeout in milliseconds (default: 60000, max: 300000)')
+	}),
+	execute: async ({ sandboxId, sandboxType, command, workingDir, timeout = 60000 }) => {
+		try {
+			const provider = sandboxType as any;
+
+			// Prepend cd if working directory specified
+			let fullCommand = command;
+			if (workingDir) {
+				fullCommand = `cd "${workingDir}" && ${command}`;
+			}
+
+			const result = await sandboxManager.executeCommand(sandboxId, fullCommand, {
+				provider,
+				timeout: Math.min(timeout, 300000)
+			});
 
 			if (typeof result === 'string') {
-				return result || 'Command executed successfully with no output.';
+				// Truncate very long output
+				const output = result.length > 10000 ? result.substring(0, 10000) + '\n... (output truncated)' : result;
+				return `\`\`\`\n$ ${command}\n${output || '(no output)'}\n\`\`\``;
 			}
 
 			return JSON.stringify(result, null, 2);
 		} catch (error) {
-			console.error('Execute code tool error:', error);
+			console.error('Execute command tool error:', error);
 			return JSON.stringify({
 				success: false,
-				output: '',
+				command,
+				error: error instanceof Error ? error.message : String(error)
+			});
+		}
+	}
+});
+
+// Create Directory Tool
+export const createDirectoryTool = tool({
+	description: 'Create a new directory in the sandbox. Parent directories are created automatically.',
+	inputSchema: z.object({
+		sandboxId: z.string().describe('The ID of the sandbox'),
+		sandboxType: z.string().optional().describe('The type of sandbox (e.g., "daytona")'),
+		path: z.string().describe('The path of the directory to create')
+	}),
+	execute: async ({ sandboxId, sandboxType, path }) => {
+		try {
+			const provider = sandboxType as any;
+			await sandboxManager.executeCommand(sandboxId, `mkdir -p "${path}"`, { provider });
+
+			return JSON.stringify({
+				success: true,
+				message: `✅ Directory "${path}" created successfully.`
+			});
+		} catch (error) {
+			console.error('Create directory tool error:', error);
+			return JSON.stringify({
+				success: false,
 				error: error instanceof Error ? error.message : String(error)
 			});
 		}
@@ -187,7 +551,15 @@ export const executeCodeTool = tool({
 export const aiSdkTools = {
 	web_search: webSearchTool,
 	search_codebase: codeSearchTool,
+	list_files: listFilesTool,
+	grep: grepTool,
 	read_file: readFileTool,
 	write_file: writeFileTool,
-	execute_code: executeCodeTool
+	edit_file: editFileTool,
+	delete_file: deleteFileTool,
+	execute_command: executeCommandTool,
+	create_directory: createDirectoryTool
 };
+
+// Aliases for backwards compatibility
+export const executeCodeTool = executeCommandTool;
