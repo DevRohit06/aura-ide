@@ -1,16 +1,23 @@
 /**
- * Agent Streaming API using AI SDK v6
- * Returns UI Message Stream format for proper agent loop handling
- * Supports tool calling with multi-step execution and project context
+ * Agent Streaming API - Enhanced Coding Agent
+ *
+ * This is the main agent endpoint that powers Aura's AI coding assistant.
+ * It uses AI SDK v6 with multi-step tool execution for complex coding tasks.
  */
 
 import { aiSdkTools } from '$lib/agent/ai-tools';
+import { buildCodingAgentPrompt, type AgentContext } from '$lib/agent/system-prompts';
 import { DatabaseService } from '$lib/services/database.service';
 import { logger } from '$lib/utils/logger';
 import { anthropic } from '@ai-sdk/anthropic';
 import { openai } from '@ai-sdk/openai';
 import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from 'ai';
 import type { RequestHandler } from './$types';
+
+// Constants
+const MAX_AGENT_STEPS = 25; // Allow more steps for complex tasks
+const MAX_HISTORY_MESSAGES = 30; // Context window for conversation history
+const FILE_TREE_MAX_DEPTH = 3;
 
 // Helper to create message doc
 function createMessageDoc(
@@ -67,7 +74,7 @@ async function createNewThread(userId: string, projectId?: string): Promise<stri
 			isPublic: false,
 			allowGuestMessages: false,
 			enableMarkdownRendering: true,
-			contextWindowSize: 20
+			contextWindowSize: MAX_HISTORY_MESSAGES
 		},
 		statistics: {
 			messageCount: 0,
@@ -87,45 +94,76 @@ async function createNewThread(userId: string, projectId?: string): Promise<stri
 // Resolve AI SDK Model
 function resolveModel(modelName?: string) {
 	if (modelName) {
+		// Anthropic models
 		if (modelName.includes('claude') || modelName.includes('anthropic')) {
 			return anthropic(modelName);
 		}
-		if (modelName.includes('gpt') || modelName.includes('openai')) {
+		// OpenAI models
+		if (
+			modelName.includes('gpt') ||
+			modelName.includes('openai') ||
+			modelName.includes('o1') ||
+			modelName.includes('o3')
+		) {
 			return openai(modelName);
 		}
 	}
-	// Default
+	// Default to GPT-4o for best tool use performance
 	return openai('gpt-4o');
 }
 
-// Fetch project file tree for context
-async function getProjectFileTree(projectId: string): Promise<string> {
+// Fetch project details
+async function getProjectDetails(
+	projectId: string
+): Promise<{ project: any; fileTree: string; framework?: string }> {
 	try {
 		const project = await DatabaseService.findProjectById(projectId);
 		if (!project?.sandboxId) {
-			return '';
+			return { project, fileTree: '' };
 		}
 
 		const { DaytonaService } = await import('$lib/services/sandbox/daytona.service.js');
 		const daytonaService = DaytonaService.getInstance();
-		
+
 		const files = await daytonaService.listFiles(project.sandboxId, '/home/daytona');
 		if (!files || !Array.isArray(files)) {
-			return '';
+			return { project, fileTree: '' };
 		}
 
-		// Build simple tree string (top 2 levels)
-		const tree = buildSimpleTree(files, 2);
-		return tree ? `\n\nProject File Structure:\n\`\`\`\n${tree}\`\`\`\n` : '';
+		// Build a comprehensive tree
+		const tree = buildFileTree(files, FILE_TREE_MAX_DEPTH);
+
+		// Detect framework from package.json or other markers
+		let framework: string | undefined;
+		try {
+			const packageJson = await daytonaService.readFile(
+				project.sandboxId,
+				'/home/daytona/package.json'
+			);
+			if (packageJson) {
+				const pkg = JSON.parse(packageJson);
+				const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+				if (deps['next']) framework = 'Next.js';
+				else if (deps['@sveltejs/kit']) framework = 'SvelteKit';
+				else if (deps['vue']) framework = 'Vue';
+				else if (deps['react']) framework = 'React';
+				else if (deps['express']) framework = 'Express';
+				else if (deps['fastify']) framework = 'Fastify';
+			}
+		} catch {
+			// Ignore framework detection errors
+		}
+
+		return { project, fileTree: tree, framework };
 	} catch (error) {
-		logger.warn('Failed to fetch project file tree for context:', error);
-		return '';
+		logger.warn('Failed to fetch project details:', error);
+		return { project: null, fileTree: '' };
 	}
 }
 
-function buildSimpleTree(files: any[], maxDepth: number, depth: number = 0, prefix: string = ''): string {
+function buildFileTree(files: any[], maxDepth: number, depth: number = 0, prefix: string = ''): string {
 	if (depth >= maxDepth) return '';
-	
+
 	let result = '';
 	const sorted = [...files].sort((a, b) => {
 		if (a.type === 'directory' && b.type !== 'directory') return -1;
@@ -133,22 +171,40 @@ function buildSimpleTree(files: any[], maxDepth: number, depth: number = 0, pref
 		return (a.name || '').localeCompare(b.name || '');
 	});
 
-	for (let i = 0; i < sorted.length && i < 30; i++) { // Limit to 30 items
-		const file = sorted[i];
+	// Filter out noise
+	const filtered = sorted.filter((file) => {
 		const name = file.name || file.path?.split('/').pop() || '';
-		
-		// Skip hidden and common ignore patterns
-		if (name.startsWith('.') || name === 'node_modules' || name === '__pycache__' || name === 'dist' || name === 'build') {
-			continue;
-		}
+		return (
+			!name.startsWith('.') &&
+			name !== 'node_modules' &&
+			name !== '__pycache__' &&
+			name !== 'dist' &&
+			name !== 'build' &&
+			name !== '.next' &&
+			name !== 'coverage'
+		);
+	});
 
-		const isLast = i === Math.min(sorted.length, 30) - 1;
+	for (let i = 0; i < filtered.length && i < 50; i++) {
+		const file = filtered[i];
+		const name = file.name || file.path?.split('/').pop() || '';
+		const isLast = i === Math.min(filtered.length, 50) - 1;
 		const icon = file.type === 'directory' ? '📁' : '📄';
+
 		result += `${prefix}${isLast ? '└── ' : '├── '}${icon} ${name}\n`;
 
 		if (file.type === 'directory' && file.children && depth < maxDepth - 1) {
-			result += buildSimpleTree(file.children, maxDepth, depth + 1, prefix + (isLast ? '    ' : '│   '));
+			result += buildFileTree(
+				file.children,
+				maxDepth,
+				depth + 1,
+				prefix + (isLast ? '    ' : '│   ')
+			);
 		}
+	}
+
+	if (filtered.length > 50) {
+		result += `${prefix}... and ${filtered.length - 50} more items\n`;
 	}
 
 	return result;
@@ -172,8 +228,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		await DatabaseService.createChatMessage(userMessageDoc);
 
 		// Load conversation history
-		const previousMessages = await DatabaseService.findChatMessagesByThreadId(actualThreadId, 20);
-		
+		const previousMessages = await DatabaseService.findChatMessagesByThreadId(
+			actualThreadId,
+			MAX_HISTORY_MESSAGES
+		);
+
 		// Convert to UIMessage format for AI SDK v6
 		const uiMessages: UIMessage[] = previousMessages.map((msg) => ({
 			id: msg.id,
@@ -181,7 +240,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			parts: [{ type: 'text' as const, text: msg.content }],
 			createdAt: new Date(msg.timestamp)
 		}));
-		
+
 		// Add current message
 		uiMessages.push({
 			id: crypto.randomUUID(),
@@ -190,61 +249,82 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			createdAt: new Date()
 		});
 
-		// Get project file tree context
-		const fileTreeContext = projectId ? await getProjectFileTree(projectId) : '';
+		// Get project context
+		let fileTree = '';
+		let framework: string | undefined;
+		let projectName: string | undefined;
+
+		if (projectId) {
+			const projectDetails = await getProjectDetails(projectId);
+			fileTree = projectDetails.fileTree;
+			framework = projectDetails.framework;
+			projectName = projectDetails.project?.name;
+		}
+
+		// Build agent context
+		const agentContext: AgentContext = {
+			sandboxId,
+			sandboxType: sandboxType || 'daytona',
+			projectId,
+			currentFile,
+			fileTree,
+			projectName,
+			framework
+		};
+
+		// Build the system prompt
+		const systemPrompt = buildCodingAgentPrompt(agentContext);
 
 		// Resolve model
 		const model = resolveModel(modelName);
 
-		// Build system prompt with project context
-		const systemPrompt = `You are an expert coding assistant with full access to development tools and sandboxes.
-
-Current Context:
-- Current file: ${currentFile || 'None'}
-- Sandbox ID: ${sandboxId || 'None'}
-- Sandbox Type: ${sandboxType || 'unknown'}
-- Project ID: ${projectId || 'None'}
-${fileTreeContext}
-
-Available Tools:
-- web_search: Search the web for documentation and solutions
-- search_codebase: Semantic search through the project codebase
-- read_file: Read file contents from the sandbox
-- write_file: Write or update files in the sandbox (requires sandboxId, filePath, content)
-- execute_code: Execute commands in the sandbox
-
-IMPORTANT INSTRUCTIONS:
-1. When using write_file, ALWAYS provide the COMPLETE file content in the 'content' parameter
-2. Use the file tree above to understand the project structure
-3. Be specific about file paths when reading or writing files
-4. For code changes, read the existing file first to understand context
-5. After using tools, always provide a clear summary of what you did and the results
-6. If a tool fails, explain the error and suggest alternatives
-
-You are an agentic coding assistant. You should:
-- Read and understand code files before making changes
-- Write and modify code carefully
-- Execute commands to test changes when appropriate
-- Search for documentation and solutions when needed
-- Always explain what you're doing and why`;
-
 		// Convert UIMessages to ModelMessages for streamText
 		const modelMessages = await convertToModelMessages(uiMessages);
 
-		// Use streamText with stopWhen for proper multi-step agent loop
+		// Track step information for metadata
+		let totalSteps = 0;
+		let allToolCalls: any[] = [];
+		let allToolResults: any[] = [];
+
+		// Use streamText with enhanced agent loop
 		const result = streamText({
 			model,
 			system: systemPrompt,
 			messages: modelMessages,
 			tools: aiSdkTools,
-			stopWhen: stepCountIs(15), // Allow up to 15 steps for complex tasks
-			onStepFinish: async ({ toolCalls, toolResults }) => {
+			maxSteps: MAX_AGENT_STEPS,
+			stopWhen: stepCountIs(MAX_AGENT_STEPS),
+			onStepFinish: async ({ stepType, toolCalls, toolResults }) => {
+				totalSteps++;
+
+				if (toolCalls && toolCalls.length > 0) {
+					allToolCalls.push(
+						...toolCalls.map((tc: any) => ({
+							id: tc.toolCallId,
+							name: tc.toolName,
+							arguments: tc.args
+						}))
+					);
+				}
+
+				if (toolResults && toolResults.length > 0) {
+					allToolResults.push(
+						...toolResults.map((tr: any) => ({
+							toolCallId: tr.toolCallId,
+							toolName: tr.toolName,
+							result: typeof tr.result === 'string' ? tr.result.substring(0, 500) : tr.result
+						}))
+					);
+				}
+
 				logger.info('[CodingAgent] Step finished:', {
+					step: totalSteps,
+					stepType,
 					toolCallCount: toolCalls?.length || 0,
 					hasResults: !!toolResults
 				});
 			},
-			onFinish: async ({ text, toolCalls, toolResults }) => {
+			onFinish: async ({ text, usage }) => {
 				// Save assistant response to database
 				if (text) {
 					const assistantMessageDoc = createMessageDoc(
@@ -256,28 +336,30 @@ You are an agentic coding assistant. You should:
 							projectId,
 							metadata: {
 								model: modelName || 'gpt-4o',
-								hasToolCalls: toolCalls && toolCalls.length > 0,
-								toolCallCount: toolCalls?.length || 0,
-								toolCalls: toolCalls?.map((tc: any) => ({
-									id: tc.toolCallId,
-									name: tc.toolName,
-									arguments: tc.args
-								})),
-								toolResults: toolResults?.map((tr: any) => ({
-									tool_call_id: tr.toolCallId,
-									success: !tr.result?.toString().toLowerCase().includes('error'),
-									output: tr.result
-								}))
+								hasToolCalls: allToolCalls.length > 0,
+								toolCallCount: allToolCalls.length,
+								totalSteps,
+								toolCalls: allToolCalls.slice(0, 20), // Limit stored tool calls
+								toolResults: allToolResults.slice(0, 20),
+								usage: usage
+									? {
+											promptTokens: usage.promptTokens,
+											completionTokens: usage.completionTokens,
+											totalTokens: usage.totalTokens
+										}
+									: undefined
 							}
 						}
 					);
 					await DatabaseService.createChatMessage(assistantMessageDoc);
 				}
-				
-				logger.info('Agent stream completed', {
+
+				logger.info('[CodingAgent] Stream completed', {
 					threadId: actualThreadId,
 					textLength: text?.length || 0,
-					toolCallCount: toolCalls?.length || 0
+					totalSteps,
+					toolCallCount: allToolCalls.length,
+					usage
 				});
 			}
 		});
@@ -289,13 +371,10 @@ You are an agentic coding assistant. You should:
 			}
 		});
 	} catch (error: any) {
-		logger.error('Agent stream error', error);
-		return new Response(
-			JSON.stringify({ error: error.message || 'Agent stream failed' }),
-			{
-				status: 500,
-				headers: { 'Content-Type': 'application/json' }
-			}
-		);
+		logger.error('[CodingAgent] Stream error', error);
+		return new Response(JSON.stringify({ error: error.message || 'Agent stream failed' }), {
+			status: 500,
+			headers: { 'Content-Type': 'application/json' }
+		});
 	}
 };
