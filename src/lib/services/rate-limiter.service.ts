@@ -1,5 +1,4 @@
 import { env } from '$env/dynamic/private';
-import Redis from 'ioredis';
 
 export interface RateLimitResult {
 	allowed: boolean;
@@ -69,61 +68,14 @@ class InMemoryRateLimiter implements IRateLimiter {
 }
 
 /**
- * Redis-based fixed-window limiter as an alternative (returns remaining and retry info)
- */
-class RedisRateLimiterWrapper implements IRateLimiter {
-	private client: any;
-	private windowMs: number;
-	private max: number;
-
-	constructor(redisUrl?: string, windowMs = 60_000, max = 60) {
-		this.client = new Redis(redisUrl || env.REDIS_URL || 'redis://localhost:6379');
-		this.windowMs = windowMs;
-		this.max = max;
-	}
-
-	async allowRequest(userId: string): Promise<RateLimitResult> {
-		const redisKey = `rate:${userId}:${Math.floor(Date.now() / this.windowMs)}`;
-		const ttlSeconds = Math.ceil(this.windowMs / 1000);
-
-		const current = await this.client.incr(redisKey);
-		if (current === 1) {
-			await this.client.expire(redisKey, ttlSeconds);
-		}
-
-		const allowed = current <= this.max;
-		let remaining = Math.max(0, this.max - current);
-		let retryAfter: number | null = null;
-		if (!allowed) {
-			const ttl = await this.client.ttl(redisKey);
-			retryAfter = ttl > 0 ? ttl : ttlSeconds;
-			remaining = 0;
-		}
-		return { allowed, remaining, retryAfter };
-	}
-
-	async close() {
-		try {
-			await this.client.quit();
-		} catch (err) {
-			// ignore
-		}
-	}
-}
-
-/**
- * Facade for rate limiting. Uses Redis if REDIS_URL is present, otherwise in-memory.
+ * Rate limiter using in-memory token bucket algorithm.
  */
 export class RateLimiter implements IRateLimiter {
 	private static instance: RateLimiter | null = null;
 	private impl: IRateLimiter;
 
 	private constructor() {
-		if (env.REDIS_URL) {
-			this.impl = new RedisRateLimiterWrapper(env.REDIS_URL);
-		} else {
-			this.impl = new InMemoryRateLimiter();
-		}
+		this.impl = new InMemoryRateLimiter();
 	}
 
 	static getInstance() {
@@ -142,37 +94,13 @@ export class RateLimiter implements IRateLimiter {
 
 export const rateLimiter = RateLimiter.getInstance();
 
-// Facade for the vector indexing route which expects a redis-like limiter API
+// In-memory fixed window rate limiter for document/API rate limiting
 export const redisRateLimiter = (function () {
 	// In-memory fixed window map: key -> { count, windowStart }
 	const windowMap: Map<string, { count: number; windowStart: number }> = new Map();
 
 	async function allow(userId: string, tokens: number, windowMs: number, max: number) {
-		// If Redis is configured, use INCRBY for atomic increments
-		if (env.REDIS_URL) {
-			try {
-				const client = new Redis(env.REDIS_URL);
-				const windowKey = `docrate:${userId}:${Math.floor(Date.now() / windowMs)}`;
-				const ttlSeconds = Math.ceil(windowMs / 1000);
-				const current = await client.incrby(windowKey, tokens);
-				if (current === tokens) {
-					await client.expire(windowKey, ttlSeconds);
-				}
-				const allowed = current <= max;
-				let retryAfterSeconds: number | null = null;
-				if (!allowed) {
-					const ttl = await client.ttl(windowKey);
-					retryAfterSeconds = ttl > 0 ? ttl : ttlSeconds;
-				}
-				const remaining = Math.max(0, max - current);
-				await client.quit();
-				return { allowed, remaining, retryAfterSeconds };
-			} catch (err) {
-				console.warn('Redis doc rate limiter failed, falling back to in-memory:', err);
-			}
-		}
-
-		// In-memory fixed window fallback
+		// In-memory fixed window
 		const key = `${userId}:${Math.floor(Date.now() / windowMs)}`;
 		const nowWindowStart = Math.floor(Date.now() / windowMs) * windowMs;
 		const entry = windowMap.get(key) || { count: 0, windowStart: nowWindowStart };

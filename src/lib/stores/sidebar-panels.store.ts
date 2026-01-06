@@ -6,8 +6,7 @@ export type SidebarView =
 	| 'search'
 	| 'source-control'
 	| 'debug'
-	| 'extensions'
-	| 'vector-indexing';
+	| 'extensions';
 
 // Default sidebar panel state
 const defaultSidebarPanels: SidebarPanelState = {
@@ -17,7 +16,6 @@ const defaultSidebarPanels: SidebarPanelState = {
 	'source-control': false,
 	debug: false,
 	extensions: false,
-	'vector-indexing': false,
 
 	// Panel visibility
 	leftSidebarVisible: true,

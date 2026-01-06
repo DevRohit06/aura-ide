@@ -45,22 +45,8 @@ services:
     networks:
       - aura-dev-network
 
-  # Redis for development
-  redis-dev:
-    image: redis:7.2-alpine
-    container_name: aura-redis-dev
-    ports:
-      - '6379:6379'
-    command: redis-server --requirepass dev
-    volumes:
-      - redis_dev_data:/data
-    networks:
-      - aura-dev-network
-
 volumes:
   mongodb_dev_data:
-    driver: local
-  redis_dev_data:
     driver: local
 
 networks:

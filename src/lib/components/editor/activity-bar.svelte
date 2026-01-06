@@ -8,7 +8,6 @@
 		type SidebarView
 	} from '$lib/stores/sidebar-panels.store';
 	import BugIcon from '@lucide/svelte/icons/bug';
-	import DatabaseIcon from '@lucide/svelte/icons/database';
 	import FilesIcon from '@lucide/svelte/icons/folder-tree';
 	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
 	import ExtensionIcon from '@lucide/svelte/icons/package';
@@ -41,8 +40,7 @@
 		{ id: 'search', name: 'Search', icon: 'search' },
 		{ id: 'source-control', name: 'Source Control', icon: 'git-branch' },
 		{ id: 'debug', name: 'Run and Debug', icon: 'bug' },
-		{ id: 'extensions', name: 'Extensions', icon: 'package' },
-		{ id: 'vector-indexing', name: 'Vector Indexing', icon: 'database' }
+		{ id: 'extensions', name: 'Extensions', icon: 'package' }
 	];
 
 	// Handle view toggle
@@ -66,8 +64,6 @@
 				return BugIcon;
 			case 'package':
 				return ExtensionIcon;
-			case 'database':
-				return DatabaseIcon;
 			default:
 				return FilesIcon;
 		}

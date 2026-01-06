@@ -23,9 +23,7 @@
 		"db:init": "node scripts/database.js init",
 		"db:reset": "node scripts/database.js reset",
 		"db:stats": "node scripts/database.js stats",
-		"db:health": "node scripts/database.js health",
-		"start-worker": "node -r ts-node/register ./src/bin/indexing-worker.ts",
-		"index-codebase": "node -r ts-node/register ./scripts/index-codebase.ts"
+		"db:health": "node scripts/database.js health"
 	},
 	"devDependencies": {
 		"@eslint/compat": "^1.4.1",
@@ -109,7 +107,6 @@
 		"@mcptools/mcp-tavily": "^1.0.0",
 		"@modelcontextprotocol/sdk": "^1.25.1",
 		"@octokit/rest": "^22.0.1",
-		"@qdrant/js-client-rest": "^1.16.2",
 		"@replit/codemirror-lang-svelte": "^6.0.0",
 		"@tavily/core": "^0.5.14",
 		"@types/joi": "^17.2.3",
@@ -123,7 +120,6 @@
 		"@xterm/xterm": "^5.5.0",
 		"ai": "^6.0.3",
 		"better-auth": "^1.4.9",
-		"bullmq": "^5.66.4",
 		"diff": "^5.2.0",
 		"diff-match-patch": "^1.0.5",
 		"dompurify": "^3.3.1",
@@ -131,7 +127,6 @@
 		"groq-sdk": "^0.33.0",
 		"helicone": "^1.0.7",
 		"http-proxy": "^1.18.1",
-		"ioredis": "^5.8.2",
 		"joi": "^18.0.2",
 		"js-beautify": "^1.15.4",
 		"jschardet": "^3.1.4",

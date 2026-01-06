@@ -49,7 +49,6 @@ export interface SidebarPanelState {
 	'source-control': boolean;
 	debug: boolean;
 	extensions: boolean;
-	'vector-indexing': boolean;
 
 	// Panel visibility
 	leftSidebarVisible: boolean;

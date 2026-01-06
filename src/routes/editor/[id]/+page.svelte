@@ -30,7 +30,6 @@
 	import { sidebarPanelActions, sidebarPanelsStore } from '$lib/stores/sidebar-panels.store';
 // Utils and Services
 	import { terminalBridge } from '$lib/services/terminal-bridge.client';
-	import { indexAllFilesFromStore } from '$lib/services/vector-indexer.client';
 	import { createBreadcrumbs } from '$lib/utils/file-tree';
 // Icons
 	import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';

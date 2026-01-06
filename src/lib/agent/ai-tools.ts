@@ -1,6 +1,5 @@
 import { env } from '$env/dynamic/private';
 import { sandboxManager } from '$lib/services/sandbox/sandbox-manager';
-import { vectorDbService } from '$lib/services/vector-db.service';
 import { logger } from '$lib/utils/logger.js';
 import { tavily } from '@tavily/core';
 import { tool } from 'ai';
@@ -41,43 +40,6 @@ export const webSearchTool = tool({
 			console.error('Web search tool error:', error);
 			return (
 				'Error performing web search: ' + (error instanceof Error ? error.message : String(error))
-			);
-		}
-	}
-});
-
-// Semantic Code Search Tool
-export const codeSearchTool = tool({
-	description:
-		'Search the codebase using semantic similarity to find relevant code snippets, functions, and files. Use this to understand code patterns, find implementations, or locate where specific functionality exists.',
-	inputSchema: z.object({
-		query: z
-			.string()
-			.describe(
-				'Natural language description of the code you are looking for (e.g., "user authentication logic", "API endpoint for creating posts")'
-			),
-		topK: z.number().optional().describe('Number of results to return (default: 5, max: 20)')
-	}),
-	execute: async ({ query, topK = 5 }) => {
-		try {
-			const results = await vectorDbService.searchSimilarCode(query, 'global', {
-				limit: Math.min(topK, 20)
-			});
-			const formattedResults = (results || []).map((r) => ({
-				filePath: r.document.filePath,
-				relevance: r.score,
-				snippet: r.document.content.substring(0, 800)
-			}));
-
-			if (formattedResults.length === 0) {
-				return 'No relevant code snippets found for the query.';
-			}
-
-			return JSON.stringify(formattedResults, null, 2);
-		} catch (error) {
-			console.error('Code search tool error:', error);
-			return (
-				'Error searching codebase: ' + (error instanceof Error ? error.message : String(error))
 			);
 		}
 	}
@@ -550,7 +512,6 @@ export const createDirectoryTool = tool({
 // Map of all tools
 export const aiSdkTools = {
 	web_search: webSearchTool,
-	search_codebase: codeSearchTool,
 	list_files: listFilesTool,
 	grep: grepTool,
 	read_file: readFileTool,

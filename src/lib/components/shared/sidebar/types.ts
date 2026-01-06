@@ -10,5 +10,4 @@ export type SidebarViewId =
 	| 'search'
 	| 'source-control'
 	| 'debug'
-	| 'extensions'
-	| 'vector-indexing';
+	| 'extensions';

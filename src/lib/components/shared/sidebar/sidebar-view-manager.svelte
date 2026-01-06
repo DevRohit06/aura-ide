@@ -1,5 +1,4 @@
 <script lang="ts">
-	import VectorDbStatus from '$lib/components/editor/vector-db-status.svelte';
 	import type { SidebarView } from '$lib/stores/sidebar-panels.store';
 	import FileExplorer from './file-explorer.svelte';
 
@@ -24,17 +23,6 @@
 			</div>
 			<div class="flex-1 p-4">
 				<p class="text-sm text-muted-foreground">Global search functionality would go here</p>
-			</div>
-		</div>
-	{:else if currentView === 'vector-indexing'}
-		<div class="flex h-full flex-col">
-			<div class="border-b border-border p-3">
-				<h2 class="text-sm font-semibold tracking-wide text-sidebar-foreground uppercase">
-					Vector Indexing
-				</h2>
-			</div>
-			<div class="flex-1 p-4">
-				<VectorDbStatus {project} />
 			</div>
 		</div>
 	{:else if currentView === 'source-control'}
