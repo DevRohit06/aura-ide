@@ -11,6 +11,7 @@ export interface AgentContext {
 	fileTree?: string;
 	projectName?: string;
 	framework?: string;
+	initialPrompt?: string; // What the user wants to build
 }
 
 /**
@@ -24,7 +25,8 @@ export function buildCodingAgentPrompt(context: AgentContext): string {
 		currentFile,
 		fileTree,
 		projectName,
-		framework
+		framework,
+		initialPrompt
 	} = context;
 
 	return `You are an expert coding agent with full access to a sandboxed development environment. You help users write, debug, and improve code by directly reading and modifying files in their project.
@@ -49,6 +51,19 @@ ${framework ? `**Framework**: ${framework}` : ''}
 ${currentFile ? `**Current File**: ${currentFile}` : ''}
 
 ${fileTree ? `## Project Structure\n\`\`\`\n${fileTree}\`\`\`\n` : ''}
+
+${initialPrompt ? `## User's Goal
+
+**The user wants to build:** ${initialPrompt}
+
+This is the primary objective for this project. When the user says "let's start", "begin", "go ahead", or similar:
+1. Don't ask what they want to do - they already told you above
+2. Immediately start implementing the first logical step
+3. Create the necessary files and structure to achieve their goal
+4. Explain what you're building as you go
+
+Start by analyzing what components/features are needed, then begin creating them.
+` : ''}
 
 ## How to Work
 

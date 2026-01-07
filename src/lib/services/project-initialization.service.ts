@@ -18,6 +18,7 @@ export interface ProjectInitializationOptions {
 	framework: string;
 	userId: string;
 	description?: string;
+	initialPrompt?: string; // What the user wants to build - passed to the agent
 	sandboxProvider: 'daytona';
 	customRepo?: {
 		owner: string;
@@ -245,7 +246,8 @@ export class ProjectInitializationService {
 			updatedAt: new Date(),
 			metadata: {
 				templateId: options.templateId,
-				initializationStarted: new Date().toISOString()
+				initializationStarted: new Date().toISOString(),
+				initialPrompt: options.initialPrompt?.trim()
 			}
 		};
 

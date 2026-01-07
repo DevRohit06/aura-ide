@@ -109,6 +109,13 @@ const customRepoSchema = z
 	})
 	.optional();
 
+// Initial prompt validation (what the user wants to build)
+const initialPromptSchema = z
+	.string()
+	.max(1000, 'Initial prompt must be less than 1000 characters')
+	.optional()
+	.transform((val) => val?.trim() || undefined);
+
 // Main project setup schema
 export const projectSetupSchema = z.object({
 	name: projectNameSchema,
@@ -116,6 +123,7 @@ export const projectSetupSchema = z.object({
 	framework: frameworkSchema,
 	sandboxProvider: sandboxProviderSchema,
 	customRepo: customRepoSchema,
+	initialPrompt: initialPromptSchema,
 	configuration: configurationSchema
 });
 
