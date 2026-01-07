@@ -25,7 +25,7 @@
 	import { Progress } from '$lib/components/ui/progress/index.js';
 	import * as Resizable from '$lib/components/ui/resizable/index.js';
 	import { projectActions } from '$lib/stores/current-project.store.js';
-	import { activeFileId, fileActions, filesStore } from '$lib/stores/editor.js';
+	import { activeFileId, fileActions, filesStore, tabActions } from '$lib/stores/editor.js';
 	import { previewURLActions } from '$lib/stores/preview-url.store';
 	import { sidebarPanelActions, sidebarPanelsStore } from '$lib/stores/sidebar-panels.store';
 // Utils and Services
@@ -336,6 +336,10 @@
 	}
 
 	onMount(() => {
+		// Reset stores first to ensure clean state for new project
+		fileActions.clear();
+		tabActions.reset();
+
 		// If project is initializing, start polling
 		if (isProjectInitializing) {
 			pollInitStatus();
