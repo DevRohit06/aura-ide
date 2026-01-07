@@ -115,7 +115,7 @@ function resolveModel(modelName?: string) {
 // Fetch project details
 async function getProjectDetails(
 	projectId: string
-): Promise<{ project: any; fileTree: string; framework?: string }> {
+): Promise<{ project: any; fileTree: string; framework?: string; initialPrompt?: string }> {
 	try {
 		const project = await DatabaseService.findProjectById(projectId);
 		if (!project?.sandboxId) {
@@ -154,7 +154,7 @@ async function getProjectDetails(
 			// Ignore framework detection errors
 		}
 
-		return { project, fileTree: tree, framework };
+		return { project, fileTree: tree, framework, initialPrompt: project?.metadata?.initialPrompt };
 	} catch (error) {
 		logger.warn('Failed to fetch project details:', error);
 		return { project: null, fileTree: '' };
@@ -253,12 +253,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		let fileTree = '';
 		let framework: string | undefined;
 		let projectName: string | undefined;
+		let initialPrompt: string | undefined;
 
 		if (projectId) {
 			const projectDetails = await getProjectDetails(projectId);
 			fileTree = projectDetails.fileTree;
 			framework = projectDetails.framework;
 			projectName = projectDetails.project?.name;
+			initialPrompt = projectDetails.initialPrompt;
 		}
 
 		// Build agent context
@@ -269,7 +271,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			currentFile,
 			fileTree,
 			projectName,
-			framework
+			framework,
+			initialPrompt
 		};
 
 		// Build the system prompt

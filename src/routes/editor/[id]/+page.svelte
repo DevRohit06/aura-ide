@@ -388,20 +388,6 @@
 				window.addEventListener('keydown', handleKeydownMerged);
 			}
 
-			// Kick off background indexing (non-blocking). Use actual project id when possible.
-			(async () => {
-				try {
-					const indexingProjectId = project?.id || pageData?.project?.id || 'default';
-					console.log(`🔍 Triggering background indexing for project: ${indexingProjectId}`);
-					const result = await indexAllFilesFromStore({
-						projectId: indexingProjectId,
-						async: true
-					});
-					console.log('✅ Background indexing result:', result);
-				} catch (err) {
-					console.error('❌ Failed to trigger workspace indexing on mount:', err);
-				}
-			})();
 		} catch (err) {
 			console.error('Editor page mount error:', err);
 		}

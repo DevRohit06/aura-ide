@@ -29,7 +29,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			return json({ error: 'Unauthorized' }, { status: 401 });
 		}
 
-		const { name, framework, templateId, description, configuration, sandboxProvider, customRepo } =
+		const { name, framework, templateId, description, configuration, sandboxProvider, customRepo, initialPrompt } =
 			await request.json();
 
 		// Debug logging
@@ -117,6 +117,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			framework,
 			userId: locals.user.id,
 			description: description?.trim() || `${framework} project`,
+			initialPrompt: initialPrompt?.trim() || undefined,
 			sandboxProvider,
 			customRepo: customRepo || undefined,
 			configuration: {
